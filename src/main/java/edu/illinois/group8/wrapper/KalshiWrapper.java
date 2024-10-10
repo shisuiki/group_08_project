@@ -12,4 +12,7 @@ public class KalshiWrapper {
         this.baseUrl = useDemo ? "https://demo-api.kalshi.com" : "https://trading-api.kalshi.com";
     }
 
+    public String getBaseUrl() {
+        return baseUrl;
+    }
 }
