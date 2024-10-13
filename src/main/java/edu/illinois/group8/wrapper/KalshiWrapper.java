@@ -8,7 +8,11 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.util.HashMap;
 import java.util.Map;
 
+import java.security.PrivateKey;
+
 import edu.illinois.group8.wrapper.RequestParameters;
+import edu.illinois.group8.utils.PrivateKeyLoader;
+import edu.illinois.group8.utils.RSAMessageSigner;
 
 public class KalshiWrapper {
 
@@ -20,6 +24,9 @@ public class KalshiWrapper {
     private final String EVENTS_URL = "/trade-api/v2/events";
     private final String MARKETS_URL = "/trade-api/v2/markets";
     private final String SERIES_URL = "/trade-api/v2/series";
+    private final String LOGIN_URL = "/trade-api/v2/login";
+
+    private PrivateKey privateKey = null;
 
     public KalshiWrapper() {
         this(false);
@@ -30,16 +37,40 @@ public class KalshiWrapper {
         this.httpClient = HttpClient.newHttpClient();
     }
 
-    private String sendGet(String path, String paramsString) {
-        long currentTimeMilli = System.currentTimeMillis();
-        String timestamp = String.valueOf(currentTimeMilli);
+    public void loadPrivateKey(String filepath) {
+        try {
+            this.privateKey = PrivateKeyLoader.loadPrivateKeyFromFile(filepath);
+        } catch (Exception e) {
+            System.err.println("Loading private key from filepath " + filepath + " threw exception with message: " + e.getMessage());
+        }
+    }
 
+    private String sendGetRequest(HttpRequest request) {
+        HttpResponse<String> response;
+        
+        try {
+            response = httpClient.send(request, BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                System.err.println("HTTP request to failed with status code " + response.statusCode() + " (Error message: " + response.body() + ")");
+                return null;
+            }
+        } catch (Exception e) {
+            System.err.println("HTTP request to threw exception with message " + e.getMessage());
+            return null;
+        }
+
+        return response.body();
+    }
+
+    private String sendGet(String path, String paramsString) {
         if (paramsString != null && !paramsString.isEmpty()) {
             if (paramsString.charAt(0) != '?') {
                 path += "?";
             }
             path += paramsString;
         }
+
         String url = baseUrl + path;
 
         StringBuilder urlBuilder = new StringBuilder(url);
@@ -51,24 +82,54 @@ public class KalshiWrapper {
             .setHeader("accept", "application/json")
             .build();
 
-        HttpResponse<String> response;
-        try {
-            response = httpClient.send(request, BodyHandlers.ofString());
-
-            if (response.statusCode() != 200) {
-                System.err.println("HTTP request to " + urlBuilder.toString() + " failed with status code " + response.statusCode() + " (Error message: " + response.body() + ")");
-                return null;
-            }
-        } catch (Exception e) {
-            System.err.println("HTTP request to " + urlBuilder.toString() + " threw exception with message " + e.getMessage());
-            return null;
-        }
-
-        return response.body();
+        return sendGetRequest(request);
     }
 
     private String sendGet(String path) {
         return sendGet(path, "");
+    }
+
+    private String sendAuthorizedGet(String path, String token, String paramsString) {
+        long currentTimeMilli = System.currentTimeMillis();
+        String timestamp = String.valueOf(currentTimeMilli);
+        
+        if (paramsString != null && !paramsString.isEmpty()) {
+            if (paramsString.charAt(0) != '?') {
+                path += "?";
+            }
+            path += paramsString;
+        }
+
+        String message = timestamp + "GET" + path;
+        
+        String sig;
+        try {
+            sig = RSAMessageSigner.signPssText(privateKey, message);
+        } catch (Exception e) {
+            System.err.println("caught exception during signing: " + e.getMessage());
+            return null;
+        }
+
+        String url = baseUrl + path;
+
+        StringBuilder urlBuilder = new StringBuilder(url);
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(urlBuilder.toString()))
+            .GET()
+            .setHeader("content-type", "application/json")
+            .setHeader("accept", "application/json")
+            .setHeader("KALSHI-ACCESS-KEY", "7d80a2f5-487d-4bdf-bb36-4339673593c4")
+            .setHeader("KALSHI-ACCESS-SIGNATURE", sig)
+            .setHeader("KALSHI-ACCESS-TIMESTAMP", timestamp)
+            .setHeader("Authorization", "Bearer " + token)
+            .build();
+
+        return sendGetRequest(request);
+    }
+
+    private String sendAuthorizedGet(String path, String token) {
+        return sendAuthorizedGet(path, token, "");
     }
 
     public String getExchangeSchedule() {
@@ -118,7 +179,7 @@ public class KalshiWrapper {
     }
 
     // WIP: need authorization for getMarkets API call
-    public String getMarkets(RequestParameters params) {
+    public String getMarkets(String token, RequestParameters params) {
         String paramsString = "";
         for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
             String key = entry.getKey();
@@ -131,11 +192,11 @@ public class KalshiWrapper {
                 paramsString += key + "=" + ((String) val).replace(" ", "");
             }
         }
-        return sendGet(MARKETS_URL, paramsString);
+        return sendAuthorizedGet(MARKETS_URL, token, paramsString);
     }
 
-    public String getMarkets() {
-        return sendGet(MARKETS_URL);
+    public String getMarkets(String token) {
+        return sendAuthorizedGet(MARKETS_URL, token);
     }
 
     public String getTrades(RequestParameters params) {
@@ -161,7 +222,7 @@ public class KalshiWrapper {
     }
 
     // WIP: need authorization for getMarketOrderbook API call
-    public String getMarketOrderbook(String ticker, RequestParameters params) {
+    public String getMarketOrderbook(String token, String ticker, RequestParameters params) {
         String paramsString = "";
         for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
             String key = entry.getKey();
@@ -170,11 +231,11 @@ public class KalshiWrapper {
                 paramsString += key + "=" + String.valueOf(val) + "&";
             }
         }
-        return sendGet(MARKETS_URL + "/" + ticker + "/orderbook");
+        return sendAuthorizedGet(MARKETS_URL + "/" + ticker + "/orderbook", token, paramsString);
     }
 
-    public String getMarketOrderbook(String ticker) {
-        return sendGet(MARKETS_URL + "/" + ticker + "/orderbook");
+    public String getMarketOrderbook(String token, String ticker) {
+        return sendAuthorizedGet(MARKETS_URL + "/" + ticker + "/orderbook", token);
     }
 
     public String getSeries(String series_ticker) {
@@ -182,10 +243,42 @@ public class KalshiWrapper {
     }
 
     // WIP: need authorization for getMarketCandlesticks API call
-    public String getMarketCandlesticks(String ticker, String series_ticker, Integer start_ts, Integer end_ts, Integer period_interval) {
+    public String getMarketCandlesticks(String token, String ticker, String series_ticker, Integer start_ts, Integer end_ts, Integer period_interval) {
         String paramsString = "start_ts=" + start_ts + "&end_ts=" + end_ts + "&period_interval=" + period_interval;
-        return sendGet(SERIES_URL + "/" + series_ticker + "/markets/" + ticker + "/candlesticks", paramsString);
+        return sendAuthorizedGet(SERIES_URL + "/" + series_ticker + "/markets/" + ticker + "/candlesticks", token, paramsString);
     }
+
+    public String login(String email, String password) {
+        String url = baseUrl + LOGIN_URL;
+
+        StringBuilder urlBuilder = new StringBuilder(url);
+
+        HttpRequest.BodyPublisher body = HttpRequest.BodyPublishers.ofString("{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}");
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(urlBuilder.toString()))
+            .POST(body)
+            .setHeader("content-type", "application/json")
+            .setHeader("accept", "application/json")
+            .build();
+
+        
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(request, BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                System.err.println("HTTP request to " + urlBuilder.toString() + " failed with status code " + response.statusCode() + " (Error message: " + response.body() + ")");
+                return null;
+            }
+        } catch (Exception e) {
+            System.err.println("HTTP request to " + urlBuilder.toString() + " threw exception with message " + e.getMessage());
+            return null;
+        }
+
+        return response.body();
+    }
+
     public String getBaseUrl() {
         return baseUrl;
     }
