@@ -186,4 +186,7 @@ public class KalshiWrapper {
         String paramsString = "start_ts=" + start_ts + "&end_ts=" + end_ts + "&period_interval=" + period_interval;
         return sendGet(SERIES_URL + "/" + series_ticker + "/markets/" + ticker + "/candlesticks", paramsString);
     }
+    public String getBaseUrl() {
+        return baseUrl;
+    }
 }
