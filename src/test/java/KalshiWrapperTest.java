@@ -14,7 +14,7 @@ public class KalshiWrapperTest {
 
     @BeforeAll
     static void login() {
-        wrapper.loadPrivateKey("https://github.com/brianeide/kalshi-project/blob/main/keys/private_key.txt");
+        wrapper.loadPrivateKey("https://github.com/brianeide/kalshi-project/blob/main/keys/private_pem.txt");
         String output = wrapper.login("juby107@gmail.com", "testPassword109!");
         JSONObject jsonObject = new JSONObject(output);
         token = jsonObject.getString("token");
