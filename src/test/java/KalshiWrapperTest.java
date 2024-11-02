@@ -2,7 +2,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
-import org.json.JSONObject;
 
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import edu.illinois.group8.wrapper.RequestParameters;
@@ -10,14 +9,10 @@ import edu.illinois.group8.wrapper.RequestParameters;
 public class KalshiWrapperTest {
 
     private static KalshiWrapper wrapper = new KalshiWrapper();
-    private static String token;
 
     @BeforeAll
     static void login() {
-        wrapper.loadPrivateKey("https://github.com/brianeide/kalshi-project/blob/main/keys/private_pem.txt");
-        String output = wrapper.login("juby107@gmail.com", "testPassword109!");
-        JSONObject jsonObject = new JSONObject(output);
-        token = jsonObject.getString("token");
+        wrapper.loadPrivateKey("", "");
     }
 
     @Test
@@ -53,20 +48,20 @@ public class KalshiWrapperTest {
         assertNotNull(wrapper.getEvent(ticker, params));
 
         String invalid_ticker = "invalid_ticker";
-        assertNull(wrapper.getEvent(invalid_ticker));
+        assertNull(wrapper.getEvent(invalid_ticker)); // Returns 404, which it is supposed to
     }
 
     // WIP: need authorization for getMarkets API call
     @Test
     public void testGetMarkets() {
-        System.out.println("calling getMarkets with token: " + token);
-        String output = wrapper.getMarkets(token);
+        System.out.println("calling getMarkets");
+        String output = wrapper.getMarkets();
         System.out.println(output);
         assertNotNull(output);
 
         RequestParameters params = new RequestParameters();
         params.addParam("tickers", "JOBLESS-21AUG28, EUCLIMATE");
-        assertNotNull(wrapper.getMarkets(token, params));
+        assertNotNull(wrapper.getMarkets(params));
     }
     
     @Test
@@ -87,20 +82,19 @@ public class KalshiWrapperTest {
         assertNull(wrapper.getMarket(invalid_market_ticker));
     }
 
-    // WIP: need authorization for getMarketOrderbook API call
-    // @Test
-    // public void testGetMarketOrderbook() {
-    //     String ticker = "JOBLESS-21AUG28";
-    //     assertNotNull(wrapper.getMarketOrderbook(token, ticker));
+     @Test
+     public void testGetMarketOrderbook() {
+         String ticker = "JOBLESS-21AUG28";
+         assertNotNull(wrapper.getMarketOrderbook(ticker));
 
-    //     RequestParameters params =  new RequestParameters();
-    //     params.addParam("depth", 32);
-    //     params.addParam("invalid_param", 2);
-    //     assertNotNull(wrapper.getMarketOrderbook(token, ticker, params));
+         RequestParameters params =  new RequestParameters();
+         params.addParam("depth", 32);
+         params.addParam("invalid_param", 2);
+         assertNull(wrapper.getMarketOrderbook(ticker, params));
 
-    //     String invalid_ticker = "invalid_ticker";
-    //     assertNull(wrapper.getMarketOrderbook(token, invalid_ticker));
-    // }
+         String invalid_ticker = "invalid_ticker";
+         assertNull(wrapper.getMarketOrderbook(invalid_ticker));
+     }
 
     @Test
     public void testGetSeries() {
@@ -111,13 +105,12 @@ public class KalshiWrapperTest {
         assertNull(wrapper.getSeries(invalid_ticker));
     }
 
-    // WIP: need authorization for getMarketCandlesticks API call
-    // @Test
-    // public void testGetMarketCandlesticks() {
-    //     String market_ticker = "JOBLESS-21AUG28-C350";
-    //     String series_ticker = "JOBLESS";
-    //     assertNotNull(wrapper.getMarketCandlesticks(token, market_ticker, series_ticker, 200, 2000, 60));
+     @Test
+     public void testGetMarketCandlesticks() {
+         String market_ticker = "JOBLESS-21AUG28-C350";
+         String series_ticker = "JOBLESS";
+         assertNotNull(wrapper.getMarketCandlesticks(market_ticker, series_ticker, 200, 2000, 60));
 
-    //     assertNull(wrapper.getMarketCandlesticks(token, market_ticker, series_ticker, 200, 2000, 20));
-    // }
+         assertNull(wrapper.getMarketCandlesticks(market_ticker, series_ticker, 200, 2000, 20));
+     }
 }

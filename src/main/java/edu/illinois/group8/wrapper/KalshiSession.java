@@ -14,12 +14,18 @@ public class KalshiSession {
 
     public KalshiSession(String keyId, String path) {
         this.wrapper = new KalshiWrapper();
-        this.wsClient = new KalshiWSClient(this.wrapper);
+        // TODO: Uncomment when WS client is solved
+//        this.wsClient = new KalshiWSClient(this.wrapper);
         registerListeners();
+        this.wrapper.loadPrivateKey(keyId, path);
     }
 
     private void registerListeners() {
         EventManager eventManager = KalshiSystem.getEventManager();
         eventManager.register(new OrderBookListener());
+    }
+
+    public KalshiWrapper getWrapper() {
+        return wrapper;
     }
 }
