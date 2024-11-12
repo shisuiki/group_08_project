@@ -8,6 +8,7 @@ public abstract class Event {
 
     protected String type;
     protected long commandId, subscriptionId, sequenceNum;
+    protected String marketTicker;
 
     @SuppressWarnings("unchecked")
     protected Event(JSONObject data) {
@@ -16,6 +17,12 @@ public abstract class Event {
         this.commandId = (long) data.getOrDefault("id", 0L);
         this.subscriptionId = (long) data.getOrDefault("sid", 0L);
         this.sequenceNum = (long) data.getOrDefault("seq", 0L);
+        JSONObject msg = (JSONObject) data.get("msg");
+        this.marketTicker = (String) (msg.get("market_ticker"));
+    }
+
+    public String getMarketTicker() {
+        return marketTicker;
     }
 
 }

@@ -16,7 +16,7 @@ public abstract class WebSocketClient {
     private BufferedReader reader;
     private Thread listenerThread;
 
-    public WebSocketClient(String url, String path, Map<String, String> headers) {
+    public WebSocketClient(String url) {
         try {
             URI uri = new URI(url);
             SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
@@ -24,25 +24,19 @@ public abstract class WebSocketClient {
             this.writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
             this.outputStream = socket.getOutputStream();
             this.reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-            connect(path, headers);
         } catch (Exception e) {
             onError(e);
         }
     }
 
     private String generateSecWebSocketKey() {
-        // Create a 16-byte random array
         byte[] keyBytes = new byte[16];
         SecureRandom random = new SecureRandom();
         random.nextBytes(keyBytes);
-
-        // Encode to Base64
         return Base64.getEncoder().encodeToString(keyBytes);
     }
 
-    // Method to initiate WebSocket handshake with headers
-    private void connect(String path, Map<String, String> headers) {
+    protected void connect(String path, Map<String, String> headers) {
         try {
             writer.write("GET " + path + " HTTP/1.1\r\n");
             writer.write("Host: " + socket.getInetAddress().getHostName() + "\r\n");
@@ -51,7 +45,6 @@ public abstract class WebSocketClient {
             writer.write("Sec-Websocket-Key:" + generateSecWebSocketKey() + "\r\n");
             writer.write("Sec-WebSocket-Version: 13\r\n");
 
-            // Add custom headers
             for (Map.Entry<String, String> entry : headers.entrySet()) {
                 String header = entry.getKey() + ": " + entry.getValue() + "\r\n";
                 writer.write(header);
@@ -60,7 +53,6 @@ public abstract class WebSocketClient {
             writer.write("\r\n");
             writer.flush();
 
-            // Read response to confirm connection
             String line;
             while (!(line = reader.readLine()).isEmpty()) {
                 if (line.contains("101 Switching Protocols")) {
@@ -68,7 +60,6 @@ public abstract class WebSocketClient {
                 }
             }
 
-            // Start listening for messages
             startListening();
         } catch (IOException e) {
             onError(e);
@@ -162,7 +153,6 @@ public abstract class WebSocketClient {
         listenerThread.start();
     }
 
-    // Method to send a message to the WebSocket server
     public void sendMessage(String message) {
         try {
             System.out.println("Sending " + message);
@@ -206,8 +196,6 @@ public abstract class WebSocketClient {
         }
     }
 
-
-    // Method to close the WebSocket connection
     public void close() {
         try {
             socket.close();
@@ -218,7 +206,6 @@ public abstract class WebSocketClient {
         }
     }
 
-    // Abstract methods for event listeners
     public abstract void onOpen();
     public abstract void onMessage(String message);
     public abstract void onError(Exception e);

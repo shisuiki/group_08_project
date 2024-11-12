@@ -9,23 +9,29 @@ import java.util.Map;
 
 public class KalshiSession {
     private KalshiWrapper wrapper;
-    private KalshiWSClient wsClient;
+    private KalshiWebSocketClient wsClient;
     private Map<String, OrderBook> orderBooks = new HashMap<>();
 
-    public KalshiSession(String keyId, String path) {
-        this.wrapper = new KalshiWrapper();
-        // TODO: Uncomment when WS client is solved
-//        this.wsClient = new KalshiWSClient(this.wrapper);
+    public KalshiSession(String baseUrl, String keyId, String path) {
+        this.wrapper = new KalshiWrapper(baseUrl, keyId, path);
+        this.wsClient = new KalshiWebSocketClient(this.wrapper);
         registerListeners();
-        this.wrapper.loadPrivateKey(keyId, path);
     }
 
     private void registerListeners() {
         EventManager eventManager = KalshiSystem.getEventManager();
-        eventManager.register(new OrderBookListener());
+        eventManager.register(new OrderBookListener(this));
     }
 
     public KalshiWrapper getWrapper() {
         return wrapper;
+    }
+
+    public KalshiWebSocketClient getWsClient() {
+        return wsClient;
+    }
+
+    public Map<String, OrderBook> getOrderBooks() {
+        return orderBooks;
     }
 }

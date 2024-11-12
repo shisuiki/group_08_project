@@ -1,5 +1,6 @@
 package edu.illinois.group8.wrapper;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -23,21 +24,14 @@ public class KalshiWrapper {
     private PrivateKey privateKey = null;
     private String keyId;
 
-    public KalshiWrapper() {
-        this(false);
-    }
-
-    public KalshiWrapper(boolean useDemo) {
-        this.baseUrl = useDemo ? "https://demo-api.kalshi.com" : "https://trading-api.kalshi.com";
+    public KalshiWrapper(String baseUrl, String keyId, String keyPath) {
+        this.baseUrl = baseUrl;
+        this.keyId = keyId;
         this.httpClient = HttpClient.newHttpClient();
-    }
-
-    public void loadPrivateKey(String keyId, String filepath) {
         try {
-            this.keyId = keyId;
-            this.privateKey = Cryptography.loadPrivateKey(filepath);
+            this.privateKey = Cryptography.loadPrivateKey(keyPath);
         } catch (Exception e) {
-            System.err.println("Loading private key from filepath " + filepath + " threw exception with message: " + e.getMessage());
+            System.err.println("Loading private key from filepath " + keyPath + " threw exception with message: " + e.getMessage());
         }
     }
 
@@ -89,24 +83,24 @@ public class KalshiWrapper {
         long currentTimeMilli = System.currentTimeMillis();
         String timestamp = String.valueOf(currentTimeMilli);
 
+        String url = baseUrl + path;
+
         if (paramsString != null && !paramsString.isEmpty()) {
             if (paramsString.charAt(0) != '?') {
-                path += "?";
+                url += "?";
             }
-            path += paramsString;
+            url += paramsString;
         }
 
         String message = timestamp + "GET" + path;
 
         String sig;
         try {
-            sig = Cryptography.signMessage(message, this.privateKey);
+            sig = this.signMessage(message);
         } catch (Exception e) {
             System.err.println("caught exception during signing: " + e.getMessage());
             return null;
         }
-
-        String url = baseUrl + path;
 
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -188,7 +182,6 @@ public class KalshiWrapper {
     }
 
     public String getMarkets() {
-        System.out.println(keyId);
         return sendAuthorizedGet(MARKETS_URL);
     }
 
@@ -242,4 +235,13 @@ public class KalshiWrapper {
     public String getBaseUrl() {
         return baseUrl;
     }
+
+    public String getKeyId() {
+        return keyId;
+    }
+
+    public String signMessage(String message) throws Exception {
+        return Cryptography.signMessage(message, this.privateKey);
+    }
+
 }

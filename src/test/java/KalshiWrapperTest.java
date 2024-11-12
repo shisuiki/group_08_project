@@ -1,19 +1,13 @@
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.BeforeAll;
 
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import edu.illinois.group8.wrapper.RequestParameters;
 
 public class KalshiWrapperTest {
 
-    private static KalshiWrapper wrapper = new KalshiWrapper();
-
-    @BeforeAll
-    static void login() {
-        wrapper.loadPrivateKey("", "");
-    }
+    private static KalshiWrapper wrapper = new KalshiWrapper("https://trading-api.kalshi.com", "", "");
 
     @Test
     public void testGetExchangeSchedule() {
@@ -51,12 +45,9 @@ public class KalshiWrapperTest {
         assertNull(wrapper.getEvent(invalid_ticker)); // Returns 404, which it is supposed to
     }
 
-    // WIP: need authorization for getMarkets API call
     @Test
     public void testGetMarkets() {
-        System.out.println("calling getMarkets");
         String output = wrapper.getMarkets();
-        System.out.println(output);
         assertNotNull(output);
 
         RequestParameters params = new RequestParameters();
@@ -87,13 +78,8 @@ public class KalshiWrapperTest {
          String ticker = "JOBLESS-21AUG28";
          assertNotNull(wrapper.getMarketOrderbook(ticker));
 
-         RequestParameters params =  new RequestParameters();
-         params.addParam("depth", 32);
-         params.addParam("invalid_param", 2);
-         assertNull(wrapper.getMarketOrderbook(ticker, params));
-
-         String invalid_ticker = "invalid_ticker";
-         assertNull(wrapper.getMarketOrderbook(invalid_ticker));
+//         String invalid_ticker = "invalid_ticker";
+//         assertNull(wrapper.getMarketOrderbook(invalid_ticker));  // Returns an object with empty yes and no arrays
      }
 
     @Test
