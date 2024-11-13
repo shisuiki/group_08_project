@@ -80,6 +80,14 @@
             <version>1.46.7</version> <!-- Latest version as of October 25, 2024 -->
         </dependency>
 
+        <!-- Agrona Dependency -->
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+            <version>1.16.0</version>
+        </dependency>
+
+        <!-- Yaml Dependency -->
         <dependency>
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
