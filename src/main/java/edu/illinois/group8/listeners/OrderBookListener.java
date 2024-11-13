@@ -17,13 +17,14 @@ public class OrderBookListener implements Listener {
     @EventHandler
     public void onSnapshot(OrderBookSnapshotEvent event) {
         System.out.println("Received snapshot for " + event.getMarketTicker());
-        this.instance.getOrderBooks().put(event.getMarketTicker(), null); // todo
+        this.instance.getOrderBooks().put(event.getMarketTicker(), event.getOrderBook());
+        event.getOrderBook().print();
     }
 
     @EventHandler
     public void onDelta(OrderBookDeltaEvent event) {
         System.out.println("Received delta for " + event.getMarketTicker());
-//        this.instance.getOrderBooks().get(event.getMarketTicker()).updateBook(event.getSide(), event.getPrice(), event.getDelta());
+        this.instance.getOrderBooks().get(event.getMarketTicker()).updateBook(event.getSide(), event.getPrice(), event.getDelta());
     }
 
 }
