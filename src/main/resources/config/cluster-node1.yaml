@@ -1,0 +1,14 @@
+cluster:
+  aeron:
+    channel: "aeron:udp?endpoint=0.0.0.0:40123"
+    term-length: 65536
+    mtu: 1408
+  cluster-id: 1
+  service-id: 1001
+  log-dir: "logs/aeron-cluster/node1"
+  snapshot-dir: "snapshots/aeron-cluster/node1"
+  archive-dir: "archive/aeron-cluster/node1"
+  member-ids: [1, 2, 3]
+  replication-factor: 2
+  election-timeout: 1000
+  leadership-loss-timeout: 3000

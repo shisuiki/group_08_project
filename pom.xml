@@ -66,6 +66,27 @@
             <version>4.1.114.Final</version>
         </dependency>
 
+        <!-- Core Aeron library -->
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-all</artifactId>
+            <version>1.46.7</version> <!-- Latest version as of October 25, 2024 -->
+        </dependency>
+
+        <!-- Aeron Cluster library -->
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-cluster</artifactId>
+            <version>1.46.7</version> <!-- Latest version as of October 25, 2024 -->
+        </dependency>
+
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>1.29</version>
+        </dependency>
+
+
     </dependencies>
 
 </project>

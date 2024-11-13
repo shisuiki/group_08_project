@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  cluster-node1:
+    build: .
+    container_name: cluster-node1
+    volumes:
+      - ./src/main/resources/config/cluster-node1.yaml:/app/config/cluster.yaml
+      - aerondir_node1:/app/logs/aeron-cluster/node1
+      - snapshots_node1:/app/snapshots/aeron-cluster/node1
+      - archive_node1:/app/archive/aeron-cluster/node1
+    ports:
+      - "40123:40123"
+    environment:
+      - CONFIG_FILE=cluster-node1.yaml
+    command: ["cluster-node1.yaml"]
+
+  cluster-node2:
+    build: .
+    container_name: cluster-node2
+    volumes:
+      - ./src/main/resources/config/cluster-node2.yaml:/app/config/cluster.yaml
+      - aerondir_node2:/app/logs/aeron-cluster/node2
+      - snapshots_node2:/app/snapshots/aeron-cluster/node2
+      - archive_node2:/app/archive/aeron-cluster/node2
+    ports:
+      - "40124:40124"
+    environment:
+      - CONFIG_FILE=cluster-node2.yaml
+    command: ["cluster-node2.yaml"]
+
+  cluster-node3:
+    build: .
+    container_name: cluster-node3
+    volumes:
+      - ./src/main/resources/config/cluster-node3.yaml:/app/config/cluster.yaml
+      - aerondir_node3:/app/logs/aeron-cluster/node3
+      - snapshots_node3:/app/snapshots/aeron-cluster/node3
+      - archive_node3:/app/archive/aeron-cluster/node3
+    ports:
+      - "40125:40125"
+    environment:
+      - CONFIG_FILE=cluster-node3.yaml
+    command: ["cluster-node3.yaml"]
+
+volumes:
+  aerondir_node1:
+  snapshots_node1:
+  archive_node1:
+  aerondir_node2:
+  snapshots_node2:
+  archive_node2:
+  aerondir_node3:
+  snapshots_node3:
+  archive_node3:
