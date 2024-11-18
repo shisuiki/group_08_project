@@ -26,6 +26,16 @@ public class OrderBookSnapshotMessage extends Message {
                 '}';
     }
 
+    @Override
+    public String getFormattedMessage() {
+        return "{\n" + //
+                "  \"type\": 'S',\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"yes\": " + getMsg().getYes() + ",\n" + //
+                "  \"no\": " + getMsg().getNo() + ",\n" + //
+                "}";
+    }
+
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;

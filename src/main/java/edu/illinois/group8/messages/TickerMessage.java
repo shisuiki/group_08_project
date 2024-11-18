@@ -18,14 +18,27 @@ public class TickerMessage extends Message {
                 '}';
     }
 
+    @Override
+    public String getFormattedMessage() {
+        return "{\n" + //
+                "  \"type\": 'K',\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"price\": " + getMsg().getPrice() + ",\n" + //
+                "  \"bid\": " + getMsg().getYesBid() + ",\n" + //
+                "  \"ask\": " + getMsg().getYesAsk() + ",\n" + //
+                "  \"active_contracts\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
+                "}";
+    }
+
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;
-        private double price;
+        private int price;
         @JsonProperty("yes_bid")
-        private double yesBid;
+        private int yesBid;
         @JsonProperty("yes_ask")
-        private double yesAsk;
+        private int yesAsk;
         private long volume;
         @JsonProperty("open_interest")
         private long openInterest;
@@ -39,15 +52,15 @@ public class TickerMessage extends Message {
             return marketTicker;
         }
 
-        public double getPrice() {
+        public int getPrice() {
             return price;
         }
 
-        public double getYesBid() {
+        public int getYesBid() {
             return yesBid;
         }
 
-        public double getYesAsk() {
+        public int getYesAsk() {
             return yesAsk;
         }
 

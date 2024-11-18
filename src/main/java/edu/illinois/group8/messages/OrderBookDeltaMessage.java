@@ -24,22 +24,33 @@ public class OrderBookDeltaMessage extends Message {
                 '}';
     }
 
+    @Override
+    public String getFormattedMessage() {
+        return "{\n" + //
+                "  \"type\": 'D',\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"price\": " + getMsg().getPrice() + ",\n" + //
+                "  \"delta\": " + getMsg().getDelta() + ",\n" + //
+                "  \"side\": " + getMsg().getSide() + ",\n" + //
+                "}";
+    }
+
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;
-        private double price;
-        private double delta;
+        private int price;
+        private int delta;
         private String side;
 
         public String getMarketTicker() {
             return marketTicker;
         }
 
-        public double getPrice() {
+        public int getPrice() {
             return price;
         }
 
-        public double getDelta() {
+        public int getDelta() {
             return delta;
         }
 

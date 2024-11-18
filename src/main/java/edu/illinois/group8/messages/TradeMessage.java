@@ -18,13 +18,25 @@ public class TradeMessage extends Message {
                 '}';
     }
 
+    @Override
+    public String getFormattedMessage() {
+        return "{\n" + //
+                "  \"type\": 'T',\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"price\": " + getMsg().getYesPrice() + ",\n" + //
+                "  \"quantity\": " + getMsg().getCount() + ",\n" + //
+                "  \"side\": \"" + (getMsg().getTakerSide().equals("no") ? "sell" : "buy") + "\",\n" + //
+                "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
+                "}";
+    }
+
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;
         @JsonProperty("yes_price")
-        private double yesPrice;
+        private int yesPrice;
         @JsonProperty("no_price")
-        private double noPrice;
+        private int noPrice;
         private int count;
         @JsonProperty("taker_side")
         private String takerSide;
@@ -34,11 +46,11 @@ public class TradeMessage extends Message {
             return marketTicker;
         }
 
-        public double getYesPrice() {
+        public int getYesPrice() {
             return yesPrice;
         }
 
-        public double getNoPrice() {
+        public int getNoPrice() {
             return noPrice;
         }
 

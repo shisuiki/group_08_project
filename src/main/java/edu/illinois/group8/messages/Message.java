@@ -19,5 +19,7 @@ public abstract class Message {
                 ", sid=" + sid +
                 '}';
     }
+
+    public abstract String getFormattedMessage();
 }
 
