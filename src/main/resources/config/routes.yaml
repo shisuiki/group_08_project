@@ -1,5 +1,0 @@
-routes:
-  - messageType: OrderCreated
-    destination: OrderService
-  - messageType: SecondThing
-    destination: SecondThing
