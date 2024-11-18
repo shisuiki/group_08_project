@@ -17,27 +17,27 @@ import org.agrona.DirectBuffer;
 import org.yaml.snakeyaml.Yaml;
 
 import io.aeron.logbuffer.Header;
+import org.json.*;
+import com.google.gson.Gson;
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
-    private Map<String, String> routingRules;
+    private Role currentRole = Role.FOLLOWER;
 
-    private void loadRoutingRules() {
-        routingRules = new HashMap<>();
-        Yaml yaml = new Yaml();
-
-        InputStream inputStream = ESBClusteredService.class.getResourceAsStream("../../../../resources/config/routes.yaml");
-        List<Map<String, String>> routes = yaml.load(inputStream);
-
-        for (Map<String, String> route : routes) {
-            routingRules.put(route.get("messageType"), route.get("destination"));
-        }
+    private String extractMessageType(String message) {
+        JSONObject obj = new JSONObject(message);
+        return obj.getString("type");
     }
     
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
-        loadRoutingRules();
+        // if (snapshotImage != null) {
+        //     // TODO: write snapshot loader
+        //     // will write snapshot loader later, based on what we need for data analysis like orderbook etc
+        //     // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
+        //     // however if we want to do inmemory tables we will need a snapshot system
+        // }
     }
 
     @Override
@@ -60,6 +60,20 @@ public class ESBClusteredService implements ClusteredService {
         int length,
         Header header) {
         // Process incoming messages from clients
+        if (currentRole != Role.LEADER) {
+            return;
+        }
+
+        String message = buffer.getStringUtf8(offset, length);
+        String messageType = extractMessageType(message);
+        Gson gson = new Gson();
+        
+        // switch (messageType) {
+        //     case "orderbook_snapshot":
+        //         OrderBookSnapshot book = gson.fromJson(message, OrderBookSnapshot.class);
+        //         // write function to process data and write to aeron channel
+        //         break;
+        // }
     }
 
     @Override
@@ -75,6 +89,7 @@ public class ESBClusteredService implements ClusteredService {
     @Override
     public void onRoleChange(Role newRole) {
         // React to role changes (LEADER, FOLLOWER, etc.)
+        this.currentRole = newRole;
     }
 
     @Override
