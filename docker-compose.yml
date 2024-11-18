@@ -1,55 +1,88 @@
 version: '3.8'
-
+name: 'aeron'
 services:
-  cluster-node1:
-    build: .
-    container_name: cluster-node1
-    volumes:
-      - ./src/main/resources/config/cluster-node1.yaml:/app/config/cluster.yaml
-      - aerondir_node1:/app/logs/aeron-cluster/node1
-      - snapshots_node1:/app/snapshots/aeron-cluster/node1
-      - archive_node1:/app/archive/aeron-cluster/node1
-    ports:
-      - "40123:40123"
+  node0:
+    build:
+      context: ../cluster
+    hostname: cluster0
+    shm_size: '1gb'
+    networks:
+      internal_bus:
+        ipv4_address: 172.16.202.2
     environment:
-      - CONFIG_FILE=cluster-node1.yaml
-    command: ["cluster-node1.yaml"]
+      - CLUSTER_ADDRESSES=172.16.202.2,172.16.202.3,172.16.202.4
+      - BASE_DIR=/home/aeron/jar/aeron-cluster
+      - CLUSTER_NODE=0
+      - CLUSTER_PORT_BASE=9000
+    ports:
+      - "9000:9000" # Adjust based on your Aeron cluster’s port usage
+    volumes:
+      - node0-data:/home/aeron/jar/aeron-cluster
+    deploy:
+      resources:
+        limits:
+          memory: '1g'
+          cpus: '1.0'
 
-  cluster-node2:
-    build: .
-    container_name: cluster-node2
-    volumes:
-      - ./src/main/resources/config/cluster-node2.yaml:/app/config/cluster.yaml
-      - aerondir_node2:/app/logs/aeron-cluster/node2
-      - snapshots_node2:/app/snapshots/aeron-cluster/node2
-      - archive_node2:/app/archive/aeron-cluster/node2
-    ports:
-      - "40124:40124"
+  node1:
+    build:
+      context: ../cluster
+    hostname: cluster1
+    shm_size: '1gb'
+    networks:
+      internal_bus:
+        ipv4_address: 172.16.202.3
     environment:
-      - CONFIG_FILE=cluster-node2.yaml
-    command: ["cluster-node2.yaml"]
+      - CLUSTER_ADDRESSES=172.16.202.2,172.16.202.3,172.16.202.4
+      - CLUSTER_NODE=1
+      - BASE_DIR=/home/aeron/jar/aeron-cluster
+      - CLUSTER_PORT_BASE=9000
+    ports:
+      - "9001:9000" # TODO: change ports. each cluster should have ~100 ports
+    volumes:
+      - node1-data:/home/aeron/jar/aeron-cluster
+    deploy:
+      resources:
+        limits:
+          memory: '1g'
+          cpus: '1.0'
 
-  cluster-node3:
-    build: .
-    container_name: cluster-node3
-    volumes:
-      - ./src/main/resources/config/cluster-node3.yaml:/app/config/cluster.yaml
-      - aerondir_node3:/app/logs/aeron-cluster/node3
-      - snapshots_node3:/app/snapshots/aeron-cluster/node3
-      - archive_node3:/app/archive/aeron-cluster/node3
-    ports:
-      - "40125:40125"
+  node2:
+    build:
+      context: ../cluster
+    hostname: cluster2
+    shm_size: '1gb'
+    networks:
+      internal_bus:
+        ipv4_address: 172.16.202.4
     environment:
-      - CONFIG_FILE=cluster-node3.yaml
-    command: ["cluster-node3.yaml"]
+      - CLUSTER_ADDRESSES=172.16.202.2,172.16.202.3,172.16.202.4
+      - CLUSTER_NODE=2
+      - BASE_DIR=/home/aeron/jar/aeron-cluster
+      - CLUSTER_PORT_BASE=9000
+    ports:
+      - "9002:9000"
+    volumes:
+      - node2-data:/home/aeron/jar/aeron-cluster
+    deploy:
+      resources:
+        limits:
+          memory: '1g'
+          cpus: '1.0'
 
 volumes:
-  aerondir_node1:
-  snapshots_node1:
-  archive_node1:
-  aerondir_node2:
-  snapshots_node2:
-  archive_node2:
-  aerondir_node3:
-  snapshots_node3:
-  archive_node3:
+  node0-data:
+  node1-data:
+  node2-data:
+
+networks:
+  internal_bus:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: 'true'
+      # Removed MTU setting for default
+      com.docker.network.enable_ipv6: 'false'
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.16.202.0/24"
