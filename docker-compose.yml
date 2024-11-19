@@ -1,88 +1,48 @@
 version: '3.8'
-name: 'aeron'
+
 services:
   node0:
-    build:
-      context: ../cluster
-    hostname: cluster0
-    shm_size: '1gb'
-    networks:
-      internal_bus:
-        ipv4_address: 172.16.202.2
+    build: .
     environment:
-      - CLUSTER_ADDRESSES=172.16.202.2,172.16.202.3,172.16.202.4
-      - BASE_DIR=/home/aeron/jar/aeron-cluster
-      - CLUSTER_NODE=0
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - NODE_ID=0
       - CLUSTER_PORT_BASE=9000
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.2
     ports:
-      - "9000:9000" # Adjust based on your Aeron cluster’s port usage
-    volumes:
-      - node0-data:/home/aeron/jar/aeron-cluster
-    deploy:
-      resources:
-        limits:
-          memory: '1g'
-          cpus: '1.0'
+      - "9001-9006:9001-9006"
 
   node1:
-    build:
-      context: ../cluster
-    hostname: cluster1
-    shm_size: '1gb'
-    networks:
-      internal_bus:
-        ipv4_address: 172.16.202.3
+    build: .
     environment:
-      - CLUSTER_ADDRESSES=172.16.202.2,172.16.202.3,172.16.202.4
-      - CLUSTER_NODE=1
-      - BASE_DIR=/home/aeron/jar/aeron-cluster
-      - CLUSTER_PORT_BASE=9000
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - NODE_ID=1
+      - CLUSTER_PORT_BASE=9100
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.3
     ports:
-      - "9001:9000" # TODO: change ports. each cluster should have ~100 ports
-    volumes:
-      - node1-data:/home/aeron/jar/aeron-cluster
-    deploy:
-      resources:
-        limits:
-          memory: '1g'
-          cpus: '1.0'
+      - "9101-9106:9101-9106"
 
   node2:
-    build:
-      context: ../cluster
-    hostname: cluster2
-    shm_size: '1gb'
-    networks:
-      internal_bus:
-        ipv4_address: 172.16.202.4
+    build: .
     environment:
-      - CLUSTER_ADDRESSES=172.16.202.2,172.16.202.3,172.16.202.4
-      - CLUSTER_NODE=2
-      - BASE_DIR=/home/aeron/jar/aeron-cluster
-      - CLUSTER_PORT_BASE=9000
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - NODE_ID=2
+      - CLUSTER_PORT_BASE=9200
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.4
     ports:
-      - "9002:9000"
-    volumes:
-      - node2-data:/home/aeron/jar/aeron-cluster
-    deploy:
-      resources:
-        limits:
-          memory: '1g'
-          cpus: '1.0'
-
-volumes:
-  node0-data:
-  node1-data:
-  node2-data:
+      - "9201-9206:9201-9206"
 
 networks:
-  internal_bus:
+  cluster_net:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.enable_icc: 'true'
-      # Removed MTU setting for default
-      com.docker.network.enable_ipv6: 'false'
     ipam:
-      driver: default
       config:
-        - subnet: "172.16.202.0/24"
+        - subnet: 172.20.0.0/16

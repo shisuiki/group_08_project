@@ -1,28 +1,33 @@
-# Use an official OpenJDK runtime as a parent image
-FROM openjdk:17-jdk-slim
+# Stage 1: Build the application using Maven
+FROM maven:3.8.6-eclipse-temurin-17 AS build
 
-# Set environment variables
-ENV APP_HOME=/app
-ENV CONFIG_DIR=/app/config
+# Set the working directory
+WORKDIR /app
 
-# Create app directory
-WORKDIR $APP_HOME
-
-# Install dependencies and build the project
+# Copy the pom.xml and download dependencies
 COPY pom.xml .
+RUN mvn dependency:go-offline
+
+# Copy the source code
 COPY src ./src
 
-# Install Maven (if not using a pre-built image with Maven)
-RUN apt-get update && \
-    apt-get install -y maven && \
-    mvn clean package -DskipTests && \
-    rm -rf ~/.m2
+# Build the application
+RUN mvn package
 
-# Copy the built JAR into the container
-COPY target/aeron-cluster-demo-1.0-SNAPSHOT.jar $APP_HOME/app.jar
+# Stage 2: Create a lightweight image for running the app
+FROM eclipse-temurin:17-jdk-jammy
 
-# Expose necessary ports (modify as needed)
-EXPOSE 40123 40124 40125
+# Set the working directory
+WORKDIR /app
 
-# Define the entry point
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Copy the built jar from the previous stage
+COPY --from=build /app/target/kalshi-project-1.0-SNAPSHOT.jar /app/app.jar
+
+# Set environment variables (to be overridden in docker-compose)
+ENV CLUSTER_ADDRESSES=""
+ENV BASE_DIR="/app"
+ENV NODE_ID=""
+ENV CLUSTER_PORT_BASE=""
+
+# Define the command to run the application
+CMD ["java", "-cp", "/app/app.jar", "edu.illinois.group8.cluster.ClusterMain"]
