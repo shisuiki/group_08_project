@@ -1,20 +1,44 @@
 package edu.illinois.group8.cluster;
 
+// import java.io.File;
+// import java.util.Arrays;
+// import java.util.List;
+
+// import org.agrona.concurrent.NoOpLock;
+// import org.agrona.concurrent.ShutdownSignalBarrier;
+
+// import io.aeron.ChannelUriStringBuilder;
+// import io.aeron.CommonContext;
+// import io.aeron.archive.Archive;
+// import io.aeron.archive.ArchiveThreadingMode;
+// import io.aeron.archive.client.AeronArchive;
+// import io.aeron.cluster.ClusteredMediaDriver;
+// import io.aeron.cluster.ConsensusModule;
+// import io.aeron.cluster.service.ClusteredServiceContainer;
+// import io.aeron.driver.MediaDriver;
+// import io.aeron.driver.MinMulticastFlowControlSupplier;
+// import io.aeron.driver.ThreadingMode;
+
+import io.aeron.ChannelUriStringBuilder;
+import io.aeron.CommonContext;
+import io.aeron.archive.Archive;
+import io.aeron.archive.ArchiveThreadingMode;
+import io.aeron.archive.client.AeronArchive;
+import io.aeron.cluster.ClusteredMediaDriver;
+import io.aeron.cluster.ConsensusModule;
+import io.aeron.cluster.service.ClusteredServiceContainer;
+import io.aeron.driver.MediaDriver;
+import io.aeron.driver.MinMulticastFlowControlSupplier;
+import io.aeron.driver.ThreadingMode;
+// import org.agrona.ErrorHandler;
+import org.agrona.concurrent.NoOpLock;
+import org.agrona.concurrent.ShutdownSignalBarrier;
+
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 
-import org.agrona.concurrent.NoOpLock;
-import org.agrona.concurrent.ShutdownSignalBarrier;
-
-import io.aeron.ChannelUriStringBuilder;
-import io.aeron.archive.Archive;
-import io.aeron.archive.ArchiveThreadingMode;
-import io.aeron.archive.client.AeronArchive;
-import io.aeron.cluster.service.ClusteredService;
-import io.aeron.driver.MediaDriver;
-import io.aeron.driver.MinMulticastFlowControlSupplier;
-import io.aeron.driver.ThreadingMode;
+// import static java.lang.Integer.parseInt;
 
 public class ClusterMain {
     // private static generate
@@ -39,41 +63,71 @@ public class ClusterMain {
             .build();
     }
 
+    private static String logReplicationChannel(final String hostname) {
+        return new ChannelUriStringBuilder()
+            .media("udp")
+            .endpoint(hostname + ":0")
+            .build();
+    }
+
+    private static String createClusterMembers(final List<String> hostnames) {
+        final StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < hostnames.size(); i++)
+        {
+            sb.append(i);
+            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, CLIENT_FACING_PORT_OFFSET));
+            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, MEMBER_FACING_PORT_OFFSET));
+            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, LOG_PORT_OFFSET));
+            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, TRANSFER_PORT_OFFSET));
+            sb.append(',').append(hostnames.get(i)).append(':')
+                .append(calculatePort(i, ARCHIVE_CONTROL_PORT_OFFSET));
+            sb.append('|');
+        }
+        return sb.toString();
+    }
+
     public static void main(String[] args) {
-        String clusterAddressesEnv = System.getenv("CLUSTER_ADDRESSES");
-        String clusterNodeEnv = System.getenv("CLUSTER_NODE");
-        String baseDirEnv = System.getenv("BASE_DIR");
-        String clusterPortBaseEnv = System.getenv("CLUSTER_PORT_BASE");
+        String clusterAddressesEnv = System.getenv("CLUSTER_ADDRESSES"); // gets IPs
+        String clusterNodeEnv = System.getenv("NODE_ID"); // gets node id
+        String baseDirEnv = System.getenv("BASE_DIR"); // gets base directory
+        String clusterPortBaseEnv = System.getenv("CLUSTER_PORT_BASE"); // gets port base
         
         if (clusterAddressesEnv == null || clusterNodeEnv == null || baseDirEnv == null || clusterPortBaseEnv == null) {
             System.err.println("Missing required environment variables. Please set CLUSTER_ADDRESSES, CLUSTER_NODE, BASE_DIR, and CLUSTER_PORT_BASE.");
             System.exit(1);
         }
 
-        List<String> clusterAddresses = Arrays.asList(clusterAddressesEnv.split(","));
+        List<String> clusterAddresses = Arrays.asList(clusterAddressesEnv.split(",")); // e.g. [127.0.0.2, 127.0.0.3, ...]
+        
         int nodeID = Integer.parseInt(clusterNodeEnv);
+        final String hostname = clusterAddresses.get(nodeID);
         String baseDir = baseDirEnv;
-        int CLUSTER_PORT_BASE = Integer.parseInt(clusterPortBaseEnv);
-
-        ClusteredService clusteredService = new ESBClusteredService();
+        int node_port_base = Integer.parseInt(clusterPortBaseEnv);
         
         final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
-        final String aeronDirName = baseDir + "/aeron-" + nodeID;
+        final String aeronDirName = CommonContext.getAeronDirectoryName() + "-" + nodeID + "-driver";
 
         MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
             .aeronDirectoryName(aeronDirName)
             .threadingMode(ThreadingMode.SHARED)
-            .dirDeleteOnStart(true)
-            .terminationHook(barrier::signal);
+            .termBufferSparseFile(true)
+            .multicastFlowControlSupplier(new MinMulticastFlowControlSupplier())
+            .terminationHook(barrier::signal)
+            .dirDeleteOnStart(true);
 
-        String archiveDirName = baseDir + "/archive-" + nodeID;
+        final AeronArchive.Context replicationArchiveContext = new AeronArchive.Context()
+            .controlResponseChannel("aeron:udp?endpoint=" + hostname + ":0");
+
         Archive.Context archiveContext = new Archive.Context()
             .aeronDirectoryName(aeronDirName)
-            .archiveDir(new File(archiveDirName))
-            .controlChannel(createUDPChannel(CLUSTER_PORT_BASE, "localhost", ARCHIVE_CONTROL_PORT_OFFSET)) // TODO: change this hostname to one in clusterAddresses
+            .archiveDir(new File(baseDir, "archive"))
+            .controlChannel(createUDPChannel(node_port_base, hostname, ARCHIVE_CONTROL_PORT_OFFSET))
+            .archiveClientContext(replicationArchiveContext)
+            .localControlChannel("aeron:ipc?term-length=64k")
+            .recordingEventsEnabled(false)
             .threadingMode(ArchiveThreadingMode.SHARED)
-            .deleteArchiveOnStart(true);
+            .replicationChannel("aeron:udp?endpoint=" + hostname + ":0");
 
         AeronArchive.Context aeronArchiveContext = new AeronArchive.Context()
             .lock(NoOpLock.INSTANCE)
@@ -81,10 +135,30 @@ public class ClusterMain {
             .controlRequestChannel(archiveContext.localControlChannel())
             .controlResponseChannel(archiveContext.localControlChannel());
 
-        // String clusterMembers = buildClusterMembers(clusterAddresses, clusterPortBase);
+        final ConsensusModule.Context consensusModuleContext = new ConsensusModule.Context()
+            .clusterMemberId(nodeID)
+            .clusterDir(new File(baseDir, "cluster"))
+            .ingressChannel("aeron:udp?term-length=64k")
+            .replicationChannel(logReplicationChannel(hostname))
+            .clusterMembers(createClusterMembers(clusterAddresses))
+            .archiveContext(aeronArchiveContext.clone());
 
-        // TODO: add consensus module
-        // TODO: add clustered service module
+        final ClusteredServiceContainer.Context clusteredServiceContext = new ClusteredServiceContainer.Context()
+            .aeronDirectoryName(aeronDirName)
+            .archiveContext(aeronArchiveContext.clone())
+            .clusterDir(new File(baseDir, "cluster"))
+            .clusteredService(new ESBClusteredService());
         
+        try (
+            ClusteredMediaDriver clusteredMediaDriver = ClusteredMediaDriver.launch(
+                mediaDriverContext, archiveContext, consensusModuleContext);
+            ClusteredServiceContainer container = ClusteredServiceContainer.launch(
+                clusteredServiceContext))                   
+        {
+            System.out.println("[" + nodeID + "] Started Cluster Node on " + hostname + "...");
+            barrier.await();
+            System.out.println("[" + nodeID + "] Exiting");
+        }
+
     }
 }
