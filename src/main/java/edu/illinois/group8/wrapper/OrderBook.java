@@ -29,7 +29,7 @@ public class OrderBook {
     }
 
     public Map.Entry<Integer, Long> getBestAsk() {
-        return this.asks.isEmpty() ? new AbstractMap.SimpleEntry<>(100, 0L) : this.asks.lastEntry();
+        return this.asks.isEmpty() ? new AbstractMap.SimpleEntry<>(100, 0L) : this.asks.firstEntry();
     }
 
     public long getBidSize(int price) {
