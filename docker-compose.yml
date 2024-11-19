@@ -13,6 +13,9 @@ services:
         ipv4_address: 172.20.0.2
     ports:
       - "9001-9006:9001-9006"
+    volumes:
+      - ./logs/node0:/app/cluster
+    shm_size: '2gb'
 
   node1:
     build: .
@@ -26,6 +29,9 @@ services:
         ipv4_address: 172.20.0.3
     ports:
       - "9101-9106:9101-9106"
+    volumes:
+      - ./logs/node1:/app/cluster
+    shm_size: '2gb'
 
   node2:
     build: .
@@ -39,6 +45,9 @@ services:
         ipv4_address: 172.20.0.4
     ports:
       - "9201-9206:9201-9206"
+    volumes:
+      - ./logs/node2:/app/cluster
+    shm_size: '2gb'
 
 networks:
   cluster_net:
