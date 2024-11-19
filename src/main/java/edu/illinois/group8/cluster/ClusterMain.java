@@ -1,24 +1,5 @@
 package edu.illinois.group8.cluster;
 
-// import java.io.File;
-// import java.util.Arrays;
-// import java.util.List;
-
-// import org.agrona.concurrent.NoOpLock;
-// import org.agrona.concurrent.ShutdownSignalBarrier;
-
-// import io.aeron.ChannelUriStringBuilder;
-// import io.aeron.CommonContext;
-// import io.aeron.archive.Archive;
-// import io.aeron.archive.ArchiveThreadingMode;
-// import io.aeron.archive.client.AeronArchive;
-// import io.aeron.cluster.ClusteredMediaDriver;
-// import io.aeron.cluster.ConsensusModule;
-// import io.aeron.cluster.service.ClusteredServiceContainer;
-// import io.aeron.driver.MediaDriver;
-// import io.aeron.driver.MinMulticastFlowControlSupplier;
-// import io.aeron.driver.ThreadingMode;
-
 import io.aeron.ChannelUriStringBuilder;
 import io.aeron.CommonContext;
 import io.aeron.archive.Archive;
@@ -30,6 +11,8 @@ import io.aeron.cluster.service.ClusteredServiceContainer;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.MinMulticastFlowControlSupplier;
 import io.aeron.driver.ThreadingMode;
+
+import org.agrona.ErrorHandler;
 // import org.agrona.ErrorHandler;
 import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
@@ -86,6 +69,16 @@ public class ClusterMain {
         return sb.toString();
     }
 
+    private static ErrorHandler errorHandler(final String context)
+    {
+        return
+            (Throwable throwable) ->
+            {
+                System.err.println(context);
+                throwable.printStackTrace(System.err);
+            };
+    }
+
     public static void main(String[] args) {
         String clusterAddressesEnv = System.getenv("CLUSTER_ADDRESSES"); // gets IPs
         String clusterNodeEnv = System.getenv("NODE_ID"); // gets node id
@@ -114,7 +107,8 @@ public class ClusterMain {
             .termBufferSparseFile(true)
             .multicastFlowControlSupplier(new MinMulticastFlowControlSupplier())
             .terminationHook(barrier::signal)
-            .dirDeleteOnStart(true);
+            .dirDeleteOnStart(true)
+            .errorHandler(ClusterMain.errorHandler("Media Driver"));
 
         final AeronArchive.Context replicationArchiveContext = new AeronArchive.Context()
             .controlResponseChannel("aeron:udp?endpoint=" + hostname + ":0");
@@ -141,13 +135,15 @@ public class ClusterMain {
             .ingressChannel("aeron:udp?term-length=64k")
             .replicationChannel(logReplicationChannel(hostname))
             .clusterMembers(createClusterMembers(clusterAddresses))
-            .archiveContext(aeronArchiveContext.clone());
+            .archiveContext(aeronArchiveContext.clone())
+            .errorHandler(errorHandler("Consensus Module"));
 
         final ClusteredServiceContainer.Context clusteredServiceContext = new ClusteredServiceContainer.Context()
             .aeronDirectoryName(aeronDirName)
             .archiveContext(aeronArchiveContext.clone())
             .clusterDir(new File(baseDir, "cluster"))
-            .clusteredService(new ESBClusteredService());
+            .clusteredService(new ESBClusteredService())
+            .errorHandler(errorHandler("Clustered Service"));;
         
         try (
             ClusteredMediaDriver clusteredMediaDriver = ClusteredMediaDriver.launch(
