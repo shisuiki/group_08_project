@@ -46,11 +46,8 @@ public class ClusterMain {
             .build();
     }
 
-    private static String logReplicationChannel(final String hostname) {
-        return new ChannelUriStringBuilder()
-            .media("udp")
-            .endpoint(hostname + ":0")
-            .build();
+    private static String logReplicationChannel(final int nodePortBase, final String hostname) {
+        return createUDPChannel(nodePortBase, hostname, LOG_PORT_OFFSET);
     }
 
     private static String createClusterMembers(final List<String> hostnames) {
@@ -133,7 +130,7 @@ public class ClusterMain {
             .clusterMemberId(nodeID)
             .clusterDir(new File(baseDir, "cluster"))
             .ingressChannel("aeron:udp?term-length=64k")
-            .replicationChannel(logReplicationChannel(hostname))
+            .replicationChannel(logReplicationChannel(node_port_base, hostname))
             .clusterMembers(createClusterMembers(clusterAddresses))
             .archiveContext(aeronArchiveContext.clone())
             .errorHandler(errorHandler("Consensus Module"));
