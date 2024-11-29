@@ -19,7 +19,9 @@ import org.agrona.concurrent.ShutdownSignalBarrier;
 
 import java.io.File;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 // import static java.lang.Integer.parseInt;
 
@@ -139,14 +141,14 @@ public class ClusterMain {
             .aeronDirectoryName(aeronDirName)
             .archiveContext(aeronArchiveContext.clone())
             .clusterDir(new File(baseDir, "cluster"))
-            .clusteredService(new ESBClusteredService())
+            .clusteredService(new ESBClusteredService(aeronDirName, hostname))
             .errorHandler(errorHandler("Clustered Service"));;
         
         try (
             ClusteredMediaDriver clusteredMediaDriver = ClusteredMediaDriver.launch(
                 mediaDriverContext, archiveContext, consensusModuleContext);
             ClusteredServiceContainer container = ClusteredServiceContainer.launch(
-                clusteredServiceContext))                   
+                clusteredServiceContext))                 
         {
             System.out.println("[" + nodeID + "] Started Cluster Node on " + hostname + "...");
             barrier.await();
