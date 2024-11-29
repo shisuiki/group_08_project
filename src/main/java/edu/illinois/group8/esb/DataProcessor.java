@@ -15,14 +15,14 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.BufferUtil;
 
 public class DataProcessor {
-    private Aeron aeron;
-    private Publication internalDataChannel;
+    private final Aeron aeron;
+    private final Publication internalDataChannel;
     private final UnsafeBuffer buffer;
     private final ObjectMapper objectMapper;
     
-    public DataProcessor(String internalChannel) {
+    public DataProcessor(String internalChannel, int streamId) {
         aeron = Aeron.connect(new Aeron.Context());
-        internalDataChannel = aeron.addPublication(internalChannel, 1);
+        internalDataChannel = aeron.addPublication(internalChannel, streamId);
         
         this.buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(512, 64));
         this.objectMapper = new ObjectMapper();
