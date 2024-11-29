@@ -96,13 +96,6 @@
             <version>0.8.4</version>
         </dependency>
 
-        <!-- Dependency for gRPC -->
-        <!-- <dependency>
-            <groupId>io.grpc</groupId>
-            <artifactId>grpc-netty</artifactId>
-            <version>1.45.1</version>
-        </dependency> -->
-
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
@@ -150,35 +143,5 @@
             </plugin>
         </plugins>
     </build>
-
-    <!-- <build>
-    <plugins>
-        <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>3.2.1</version>
-        <executions>
-            <execution>
-            <phase>package</phase>
-            <goals>
-                <goal>shade</goal>
-            </goals>
-            <configuration>
-                <filters>
-                <filter>
-                    <artifact>*:*</artifact>
-                    <excludes>
-                    <exclude>META-INF/*.SF</exclude>
-                    <exclude>META-INF/*.DSA</exclude>
-                    <exclude>META-INF/*.RSA</exclude>
-                    </excludes>
-                </filter>
-                </filters>
-            </configuration>
-            </execution>
-        </executions>
-        </plugin>
-    </plugins>
-    </build> -->
 
 </project>
