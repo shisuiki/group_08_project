@@ -1,6 +1,7 @@
 package edu.illinois.group8.messages;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -31,8 +32,11 @@ public class OrderBookSnapshotMessage extends Message {
         return "{\n" + //
                 "  \"type\": 'S',\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"yes\": " + getMsg().getYes() + ",\n" + //
-                "  \"no\": " + getMsg().getNo() + ",\n" + //
+                "  \"bid\": " + getMsg().getYes() + ",\n" + //
+                "  \"ask\": " + getMsg().getNo().stream()
+                                    .map(innerList -> innerList.stream().map(i -> 100 - i)
+                                        .collect(Collectors.toList()))
+                                    .collect(Collectors.toList()) + "\n" + //
                 "}";
     }
 

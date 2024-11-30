@@ -26,13 +26,23 @@ public class OrderBookDeltaMessage extends Message {
 
     @Override
     public String getFormattedMessage() {
-        return "{\n" + //
+        if (getMsg().getSide() == "yes") {
+            return "{\n" + //
                 "  \"type\": 'D',\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getPrice() + ",\n" + //
                 "  \"delta\": " + getMsg().getDelta() + ",\n" + //
-                "  \"side\": " + getMsg().getSide() + ",\n" + //
+                "  \"side\": \"bid\"\n" + //
                 "}";
+        } else {
+            return "{\n" + //
+                "  \"type\": 'D',\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"price\": " + (100 - getMsg().getPrice()) + ",\n" + //
+                "  \"delta\": " + (-1 * getMsg().getDelta()) + ",\n" + //
+                "  \"side\": \"ask\"\n" + //
+                "}";
+        }
     }
 
     public static class Msg {

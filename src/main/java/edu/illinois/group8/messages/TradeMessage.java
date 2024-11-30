@@ -25,7 +25,7 @@ public class TradeMessage extends Message {
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getYesPrice() + ",\n" + //
                 "  \"quantity\": " + getMsg().getCount() + ",\n" + //
-                "  \"side\": \"" + (getMsg().getTakerSide().equals("no") ? "sell" : "buy") + "\",\n" + //
+                "  \"side\": \"" + (getMsg().getTakerSide().equals("no") ? "ask" : "bid") + "\",\n" + //
                 "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
                 "}";
     }
