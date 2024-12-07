@@ -72,7 +72,7 @@ public class TPAeronServer implements Runnable {
 
     private void createChannelsForLeader(String ipString) {
         if (!ipString.isEmpty()) {
-            TODO: make publications multicast with interface to leader node
+            // TODO: make publications multicast with interface to leader node
             externalChannels.put(ipString, new ArrayList<>(List.of(
                 aeron.addPublication("aeron:udp?endpoint=" + ipString, 10),
                 aeron.addPublication("aeron:udp?endpoint=" + ipString, 11),
