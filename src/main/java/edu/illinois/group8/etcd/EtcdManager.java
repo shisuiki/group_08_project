@@ -27,6 +27,10 @@ public class EtcdManager {
         // kvClient.put(io.etcd.jetcd.ByteSequence.from(nodeID.getBytes()), io.etcd.jetcd.ByteSequence.from(ip.getBytes())).get();
     }
 
+    public Client getClient() {
+        return this.client;
+    }
+
     public void watchForLeaderChanges() {
         final String key = "leader";
         ByteSequence keyBytes = ByteSequence.from(key.getBytes(StandardCharsets.UTF_8));
