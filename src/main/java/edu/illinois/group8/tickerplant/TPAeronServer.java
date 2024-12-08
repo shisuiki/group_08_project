@@ -5,12 +5,6 @@ import io.aeron.ConcurrentPublication;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
-import edu.illinois.group8.etcd.EtcdManager;
-
-import io.etcd.jetcd.ByteSequence;
-import io.etcd.jetcd.Client;
-import io.etcd.jetcd.Watch;
-import io.etcd.jetcd.options.WatchOption;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.WatchEvent;
@@ -32,7 +26,7 @@ public class TPAeronServer implements Runnable {
 
     public TPAeronServer() {
         aeron = Aeron.connect(new Aeron.Context());
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator();
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator("");
     }
 
     @Override
