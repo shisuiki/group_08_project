@@ -13,9 +13,17 @@ public class ESBClusterCommunicationOrchestrator {
     private int currentNodeId = 0;
     private final Aeron aeron;
 
-    public ESBClusterCommunicationOrchestrator() {
+    // used by services
+    public ESBClusterCommunicationOrchestrator(String aeronDirName) {
         String ip = ClusterNodes[currentNodeId];
-        aeron = Aeron.connect(new Aeron.Context());
+        aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(aeronDirName));
+        addInternalChannelPublications(ip);
+        addInternalChannelSubscriptions(ip);
+    }
+
+    // used by the cluster nodes
+    public ESBClusterCommunicationOrchestrator(String aeronDirName, String ip) {
+        aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(aeronDirName));
         addInternalChannelPublications(ip);
         addInternalChannelSubscriptions(ip);
     }
