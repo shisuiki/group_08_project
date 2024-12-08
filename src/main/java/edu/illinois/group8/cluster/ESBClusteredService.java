@@ -22,33 +22,21 @@ import org.agrona.concurrent.UnsafeBuffer;
 import io.aeron.logbuffer.Header;
 import org.json.*;
 
-import edu.illinois.group8.etcd.EtcdManager;
+import edu.illinois.group8.esb.DataProcessor;
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
     private IdleStrategy idleStrategy;
     private Role currentRole = Role.FOLLOWER;
     private Aeron aeron;
-    private EtcdManager etcd;
     private String hostname;
-    private String[] etcdNodes = {"http://172.20.0.5:2379", "http://172.20.0.6:2379", "http://172.20.0.7:2379"};
-    // private static final Map<String, 
-    // private static final Map<String, String> streamIDMap = Map.of(
-    //     "topOfBookPublication", "aeron:udp?endpoint=<insert>|control-mode=dynamic"
-    // );
-    // private Map<String, Publication> publicationMap = new HashMap<>();;
     private String aeronDirName;
+    private ESBClusterCommunicationOrchestrator communicationOrchestrator;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
         this.hostname = hostname;
     }
-    // private int SNAPSHOT_MESSAGE_LENGTH = 0;s
-
-    // private String extractMessageType(String message) {
-    //     JSONObject obj = new JSONObject(message);
-    //     return obj.getString("type");
-    // }
     
     private void loadSnapshot(final Cluster cluster, final Image snapshotImage) {
 
@@ -85,26 +73,11 @@ public class ESBClusteredService implements ClusteredService {
         Aeron.Context ctx = new Aeron.Context().aeronDirectoryName(aeronDirName);
         aeron = Aeron.connect(ctx);
 
-        // System.out.println("--------creating etcd manager----------");
-        EtcdManager etcd = new EtcdManager(etcdNodes);
-        // System.out.println("--------created etcd manager----------");
-        this.etcd = etcd;
-
-        try {
-            this.etcd.setNodeIP(Integer.toString(cluster.memberId()), hostname);
-            if (currentRole == Role.LEADER) {
-                System.out.println("adding host as leader");
-                System.out.println(hostname);
-                this.etcd.setLeader(hostname);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        //     // TODO: write snapshot loader
-        //     // will write snapshot loader later, based on what we need for data analysis like orderbook etc
-        //     // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
-        //     // however if we want to do inmemory tables we will need a snapshot system
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.aeronDirName, this.hostname);
+        // TODO: write snapshot loader
+        // will write snapshot loader later, based on what we need for data analysis like orderbook etc
+        // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
+        // however if we want to do inmemory tables we will need a snapshot system
         loadSnapshot(cluster, snapshotImage);
     }
 
@@ -132,6 +105,13 @@ public class ESBClusteredService implements ClusteredService {
         if (currentRole != Role.LEADER) {
             return;
         }
+        
+        byte[] messageBytes = new byte[length];
+        buffer.getBytes(offset, messageBytes);
+        String payload = new String(messageBytes, StandardCharsets.UTF_8);
+
+        DataProcessor processor = new DataProcessor(communicationOrchestrator);
+        processor.processMessage(payload);
     }
 
     @Override
@@ -166,18 +146,6 @@ public class ESBClusteredService implements ClusteredService {
     public void onRoleChange(Role newRole) {
         // React to role changes (LEADER, FOLLOWER, etc.)
         this.currentRole = newRole;
-        if (newRole == Role.LEADER) {
-            try {
-                this.etcd.setNodeIP(Integer.toString(cluster.memberId()), hostname);
-                if (currentRole == Role.LEADER) {
-                    System.out.println("setting host as leader");
-                    System.out.println(hostname);
-                    this.etcd.setLeader(hostname);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
         
         // if (newRole == Role.LEADER) {
         //     // streamIDMap.forEach((key, streamID) -> {
