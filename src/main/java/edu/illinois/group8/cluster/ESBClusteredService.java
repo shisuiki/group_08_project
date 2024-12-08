@@ -36,7 +36,6 @@ public class ESBClusteredService implements ClusteredService {
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
         this.hostname = hostname;
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator();
     }
     
     private void loadSnapshot(final Cluster cluster, final Image snapshotImage) {
@@ -74,6 +73,7 @@ public class ESBClusteredService implements ClusteredService {
         Aeron.Context ctx = new Aeron.Context().aeronDirectoryName(aeronDirName);
         aeron = Aeron.connect(ctx);
 
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.aeronDirName, this.hostname);
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
         // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
