@@ -26,16 +26,22 @@ public class TPAeronServer implements Runnable {
 
     public TPAeronServer() {
         aeron = Aeron.connect(new Aeron.Context());
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator("");
+        String ip = System.getenv("IP_ADDRESS");
+        if (ip == "") {
+            System.out.println("Unable to get system IP");
+            System.exit(1);
+        }
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(ip);
     }
 
     @Override
     public void run() {
-        ConcurrentPublication a = communicationOrchestrator.getBookEventsPublication();
-        ConcurrentPublication b = communicationOrchestrator.getTopOfBookPublication();
-        ConcurrentPublication c = communicationOrchestrator.getTradesPublication();
+        Subscription a = communicationOrchestrator.getBookEventsSubscription();
+        Subscription b = communicationOrchestrator.getTopOfBookSubscription();
+        Subscription c = communicationOrchestrator.getTradesSubscription();
 
         // TODO: write 3 different threads to listen and then offer processed data to external channels
+        
         while (true) {
             // String currentLeaderIp = leaderIp.get();
             // if (!currentLeaderIp.isEmpty()) {
