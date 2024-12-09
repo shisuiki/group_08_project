@@ -73,7 +73,7 @@ public class ESBClusteredService implements ClusteredService {
         Aeron.Context ctx = new Aeron.Context().aeronDirectoryName(aeronDirName);
         aeron = Aeron.connect(ctx);
 
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.aeronDirName, this.hostname);
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname);
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
         // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
@@ -92,6 +92,10 @@ public class ESBClusteredService implements ClusteredService {
         // Handle client session closure
     }
 
+    /**
+     * Function triggered when a message is sent to the ESB cluster. Only triggered by the leader node.
+     * Message is read then processed, and finally published to the corresponding channels.
+     */
     @Override
     public void onSessionMessage(
         ClientSession session,
