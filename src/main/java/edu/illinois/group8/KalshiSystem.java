@@ -1,28 +1,23 @@
 package edu.illinois.group8;
 
-import edu.illinois.group8.event.EventManager;
 import edu.illinois.group8.wrapper.KalshiSession;
 import edu.illinois.group8.wrapper.KalshiWebSocketClient;
 import edu.illinois.group8.wrapper.KalshiWrapper;
-import org.json.JSONObject;
+
+import java.util.logging.Logger;
 
 public class KalshiSystem {
 
     private static String KEY_ID = "";
     private static String KEY_PATH = "";
 
-    private static EventManager eventManager = new EventManager();
-    private static KalshiSession instance = new KalshiSession("https://trading-api.kalshi.com", KEY_ID, KEY_PATH);
+    private static KalshiSession instance = new KalshiSession("https://api.elections.kalshi.com", KEY_ID, KEY_PATH);
 
     public static void main(String[] args) {
-        KalshiWrapper wrapper = instance.getWrapper();
-        System.out.println(wrapper.getMarkets());
+//        KalshiWrapper wrapper = instance.getWrapper();
+//        System.out.println(wrapper.getMarkets());
         KalshiWebSocketClient wsClient = instance.getWsClient();
-        wsClient.sendMessage("{\"id\": 1,\"cmd\": \"subscribe\",\"params\": {\"channels\": [\"orderbook_delta\"], \"market_tickers\": [\"RATECUTCOUNT-24DEC31-T4\"]}}");
-    }
-
-    public static EventManager getEventManager() {
-        return eventManager;
+        wsClient.subscribe(new String[]{"orderbook_delta"}, new String[]{"RATECUTCOUNT-24DEC31-T3", "RATECUTCOUNT-24DEC31-T4", "RATECUTCOUNT-24DEC31-T5"});
     }
 
     public static KalshiSession getInstance() {
