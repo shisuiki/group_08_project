@@ -35,6 +35,10 @@ public class ClusterMain {
     private static final int TRANSFER_PORT_OFFSET = 5;
     private static final int LOG_CONTROL_PORT_OFFSET = 6;
 
+    public static int getClientFacingPortOffset() {
+        return CLIENT_FACING_PORT_OFFSET;
+    }
+    
     public static int calculatePort(int nodePortBase, int portOffset) {
         return nodePortBase + portOffset;
     }
