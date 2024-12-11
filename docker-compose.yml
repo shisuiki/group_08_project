@@ -1,0 +1,72 @@
+services:
+  node0:
+    build: .
+    environment:
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - NODE_ID=0
+      - CLUSTER_PORT_BASE=9000
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.2
+    ports:
+      - "9001-9006:9001-9006"
+    volumes:
+      - ./logs/node0:/app/cluster
+    shm_size: '2gb'
+
+  node1:
+    build: .
+    environment:
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - NODE_ID=1
+      - CLUSTER_PORT_BASE=9100
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.3
+    ports:
+      - "9101-9106:9101-9106"
+    volumes:
+      - ./logs/node1:/app/cluster
+    shm_size: '2gb'
+
+  node2:
+    build: .
+    environment:
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - NODE_ID=2
+      - CLUSTER_PORT_BASE=9200
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.4
+    ports:
+      - "9201-9206:9201-9206"
+    volumes:
+      - ./logs/node2:/app/cluster
+    shm_size: '2gb'
+
+  # test deployment for publisher
+  # publisher:
+  #   build: .
+  #   environment:
+  #     - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+  #     - BASE_DIR=/app
+  #     - NODE_ID=3 # Not a cluster node
+  #     - CLUSTER_PORT_BASE=9300
+  #   networks:
+  #     cluster_net:
+  #       ipv4_address: 172.20.0.5
+  #   volumes:
+  #     - ./logs/publisher:/app/cluster
+  #   shm_size: '2gb'
+  #   command: >
+  #     sh -c "java -cp /app/app.jar edu.illinois.group8.tests.TestPublisher 'Hello Cluster!'"
+             
+networks:
+  cluster_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

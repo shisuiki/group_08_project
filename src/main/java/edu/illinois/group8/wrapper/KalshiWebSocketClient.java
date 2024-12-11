@@ -176,4 +176,3 @@ public class KalshiWebSocketClient extends WebSocketClient {
     }
 
 }
-

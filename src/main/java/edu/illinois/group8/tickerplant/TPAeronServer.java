@@ -1,81 +1,71 @@
 package edu.illinois.group8.tickerplant;
 
 import io.aeron.Aeron;
+import io.aeron.ConcurrentPublication;
 import io.aeron.Publication;
+import io.aeron.Subscription;
+import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import org.agrona.concurrent.UnsafeBuffer;
-import org.agrona.BufferUtil;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.WatchEvent;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TPAeronServer implements Runnable {
-    private final String channel;
+    private final Aeron aeron;
+    private ESBClusterCommunicationOrchestrator communicationOrchestrator;
+    // private final int messageTypeOffset = 17;
 
-    private Aeron aeron;
-    private Publication topOfBookPublication;
-    private Publication tradePublication;
-    private Publication bookEventsPublication;
-    private final BlockingQueue<String> messageQueue;
-    private final UnsafeBuffer buffer;
+    private static final Logger logger = LoggerFactory.getLogger(TPAeronServer.class);
 
-    private boolean running = true;
-
-    public TPAeronServer(String channel, BlockingQueue<String> queue) {
-        this.channel = channel;
-
+    public TPAeronServer() {
         aeron = Aeron.connect(new Aeron.Context());
-        topOfBookPublication = aeron.addPublication(channel, 10);
-        tradePublication = aeron.addPublication(channel, 11);
-        bookEventsPublication = aeron.addPublication(channel, 12);
-
-        this.messageQueue = queue;
-        this.buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(256, 64));
+        String ip = System.getenv("IP_ADDRESS");
+        if (ip == "") {
+            System.out.println("Unable to get system IP");
+            System.exit(1);
+        }
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(ip);
     }
 
     @Override
     public void run() {
-        while (running) {
-            try {
-                String message = messageQueue.take();
-                sendMessageToClients(message);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-                running = false;
-            }
+        Subscription a = communicationOrchestrator.getBookEventsSubscription();
+        Subscription b = communicationOrchestrator.getTopOfBookSubscription();
+        Subscription c = communicationOrchestrator.getTradesSubscription();
+
+        // TODO: write 3 different threads to listen and then offer processed data to external channels
+        
+        while (true) {
+            // String currentLeaderIp = leaderIp.get();
+            // if (!currentLeaderIp.isEmpty()) {
+            //     internalChannels.get(currentLeaderIp).poll((buffer, offset, length, header) -> {
+            //             char messageType = (char) buffer.getByte(messageTypeOffset);
+        
+            //             switch (messageType) {
+            //                 case 'T':
+            //                     externalChannels.get(currentLeaderIp).get(tradeIdx).offer(buffer, offset, length);
+            //                     break;
+            //                 case 'K':
+            //                     externalChannels.get(currentLeaderIp).get(topOfBookIdx).offer(buffer, offset, length);
+            //                     break;
+            //                 case 'D':
+            //                     externalChannels.get(currentLeaderIp).get(bookEventsIdx).offer(buffer, offset, length);
+            //                     break;
+            //                 case 'S':
+            //                     externalChannels.get(currentLeaderIp).get(bookEventsIdx).offer(buffer, offset, length);
+            //                     break;
+            //                 default:
+            //                     logger.warn("Unknown message type: " + messageType);
+            //             }
+            //         }, 1);
+            // }
         }
-    }
-
-    private void sendMessageToClients(String message) {
-        Publication stream = selectStream(message);
-
-        if (stream != null) {
-            final int length = buffer.putStringWithoutLengthAscii(0, message);
-            final long position = stream.offer(buffer, 0, length);
-            
-            if (position > 0) {
-                System.out.println("Message sent: " + message);
-            } else {
-                System.out.println("Message could not be sent: " + message);
-            }
-        } else {
-            System.out.println("Publication stream not detected for message: " + message);
-        }
-    }
-
-    private Publication selectStream(String message) {
-        switch (message.charAt(0)) { // replace with message type determiner once format is finalized
-            case 'B':
-                return topOfBookPublication;
-            case 'T':
-                return tradePublication;
-            case 'E':
-                return bookEventsPublication;
-            default:
-                return null;
-        }
-    }
-
-    public void stop() {
-        running = false;
     }
 }
