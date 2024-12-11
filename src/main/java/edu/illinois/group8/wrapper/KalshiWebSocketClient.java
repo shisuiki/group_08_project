@@ -1,5 +1,6 @@
 package edu.illinois.group8.wrapper;
 
+import edu.illinois.group8.cluster.ClientClusterOrchestrator;
 import edu.illinois.group8.utils.WebSocketClient;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -7,20 +8,38 @@ import org.json.simple.parser.JSONParser;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class KalshiWebSocketClient extends WebSocketClient {
 
     private final KalshiWrapper wrapper;
     private static final String PATH = "/trade-api/ws/v2";
-
+    private final ClientClusterOrchestrator cluster;
+    
     private long nonce = 1;
 
     private long currentSequenceNum = 0;
 
+    public ClientClusterOrchestrator initClusterConn() {
+        String clusterAddressesEnv = System.getenv("CLUSTER_ADDRESSES");
+        String ip = System.getenv("IP");
+        if (clusterAddressesEnv == "" || ip == "") {
+            System.err.println("Missing required environment variables. Please set CLUSTER_ADDRESSES, and IP.");
+            System.exit(1);
+        }
+
+        List<String> clusterAddresses = Arrays.asList(clusterAddressesEnv.split(","));
+
+        
+        return new ClientClusterOrchestrator(clusterAddresses, ip);
+    }
     public KalshiWebSocketClient(KalshiWrapper wrapper) {
+        // Clus
         super(wrapper.getBaseUrl().replace("https://", "wss://") + PATH);
         this.wrapper = wrapper;
+        
+        cluster = initClusterConn();
 
         try {
             String timestamp = String.valueOf(System.currentTimeMillis());
@@ -59,7 +78,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
                 case "orderbook_snapshot":
                     // todo: send to data processor
                     if (checkSequence(data)) {
-
+                        cluster.writeToCluster(message);
                     } else {
                         System.out.println("Out of sequence!"); // todo: handle out of sequence error
                     }
@@ -67,16 +86,18 @@ public class KalshiWebSocketClient extends WebSocketClient {
                 case "orderbook_delta":
                     // todo: send to data processor
                     if (checkSequence(data)) {
-
+                        cluster.writeToCluster(message);
                     } else {
                         System.out.println("Out of sequence!"); // todo: handle out of sequence error
                     }
                     break;
                 case "ticker":
                     // todo: send to data processor
+                    cluster.writeToCluster(message);
                     break;
                 case "trade":
                     // todo: send to data processor
+                    cluster.writeToCluster(message);
                     break;
             }
         } catch (Exception e) {
