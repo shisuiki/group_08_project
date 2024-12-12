@@ -28,7 +28,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
             Map<String, String> headers = new HashMap<>();
             headers.put("KALSHI-ACCESS-KEY", wrapper.getKeyId());
             headers.put("KALSHI-ACCESS-SIGNATURE", wrapper.signMessage(msg));
-            headers.put("KALSHI-ACCESS-TIMESTAMP", timestamp);
+            headers.put( "KALSHI-ACCESS-TIMESTAMP", timestamp);
             headers.put("accept", "application/json");
 
             this.connect(PATH, headers);
