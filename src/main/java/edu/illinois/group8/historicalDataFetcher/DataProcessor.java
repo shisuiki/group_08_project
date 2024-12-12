@@ -1,3 +1,5 @@
+package edu.illinois.group8.fetcher;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 

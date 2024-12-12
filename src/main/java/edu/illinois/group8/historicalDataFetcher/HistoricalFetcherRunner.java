@@ -1,11 +1,12 @@
 package edu.illinois.group8.fetcher;
 
 import edu.illinois.group8.fetcher.HistoricalDataFetcher;
-import edu.illinois.group8.processor.DataProcessor;
+import edu.illinois.group8.fetcher.DataProcessor;
 import edu.illinois.group8.fetcher.ThrottlingManager;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import io.github.cdimascio.dotenv.Dotenv;
 
 public class HistoricalFetcherRunner {
 
@@ -48,7 +49,7 @@ public class HistoricalFetcherRunner {
                 }
 
                 // Determine if more data is available
-                moreData = (cursor != null);
+                moreData = (cursor != null && responseObject.has("data") && responseObject.getJSONArray("data").length() > 0);
 
             } catch (Exception e) {
                 System.err.println("Error in fetchTradesRunner: " + e.getMessage());
@@ -60,17 +61,19 @@ public class HistoricalFetcherRunner {
     }
 
     public static void main(String[] args) {
+        Dotenv dotenv = Dotenv.load();
         // Initialize the Kalshi API wrapper
-        KalshiWrapper wrapper = new KalshiWrapper("https://api.kalshi.com", "your-key-id", "path/to/privateKey.pem");
+        KalshiWrapper wrapper = new KalshiWrapper("https://api.kalshi.com", dotenv.get("KALSHI_KEY_ID"), dotenv.get("KALSHI_KEY_PATH"));
 
         // Set up the data fetcher, processor, and throttler
         HistoricalDataFetcher fetcher = new HistoricalDataFetcher(wrapper);
-        DataProcessor processor = new DataProcessor("your-redshift-url", "your-username", "your-password");
+        String redshift_url = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
+        DataProcessor processor = new DataProcessor(redshift_url, dotenv.get("DB_USER"), dotenv.get("DB_PASSWORD"));
         ThrottlingManager throttler = new ThrottlingManager(100, 60000); // 100 requests per minute
 
         // Configure fetch parameters
-        long startTime = 1609459200; // Example: Jan 1, 2021, 00:00:00 UTC
-        long endTime = 1640995200;   // Example: Jan 1, 2022, 00:00:00 UTC
+        long startTime = 1640995200; // Example: Jan 1, 2022, 00:00:00 UTC
+        long endTime = 1641081600;   // Example: Jan 2, 2022, 00:00:00 UTC
         String tableName = "Trades";
 
         // Run the fetch and store process
