@@ -69,7 +69,7 @@ public class HistoricalFetcherRunner {
         HistoricalDataFetcher fetcher = new HistoricalDataFetcher(wrapper);
         String redshift_url = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
         DataProcessor processor = new DataProcessor(redshift_url, dotenv.get("DB_USER"), dotenv.get("DB_PASSWORD"));
-        ThrottlingManager throttler = new ThrottlingManager(100, 60000); // 100 requests per minute
+        ThrottlingManager throttler = new ThrottlingManager(10, 1000); // 100 requests per minute
 
         // Configure fetch parameters
         long startTime = 1640995200; // Example: Jan 1, 2022, 00:00:00 UTC
