@@ -1,4 +1,4 @@
-package edu.illinois.group8.fetcher;
+package edu.illinois.group8.historicalDataFetcher;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -26,7 +26,7 @@ public class DataProcessor {
 
             // Connect to Redshift
             try (Connection connection = DriverManager.getConnection(redshiftUrl, username, password)) {
-                String insertQuery;
+                System.out.println("connecting to redshift");
                 try (PreparedStatement statement = getPreparedStatement(connection, tableName, dataArray)) {
                     if (statement != null) {
                         statement.executeBatch();

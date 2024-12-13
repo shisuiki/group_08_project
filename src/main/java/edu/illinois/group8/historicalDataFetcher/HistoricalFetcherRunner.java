@@ -1,8 +1,8 @@
-package edu.illinois.group8.fetcher;
+package edu.illinois.group8.historicalDataFetcher;
 
-import edu.illinois.group8.fetcher.HistoricalDataFetcher;
-import edu.illinois.group8.fetcher.DataProcessor;
-import edu.illinois.group8.fetcher.ThrottlingManager;
+import edu.illinois.group8.historicalDataFetcher.HistoricalDataFetcher;
+import edu.illinois.group8.historicalDataFetcher.DataProcessor;
+import edu.illinois.group8.historicalDataFetcher.ThrottlingManager;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -29,8 +29,9 @@ public class HistoricalFetcherRunner {
                 throttler.throttleIfNecessary(); // Ensure API rate limits are respected
 
                 // Fetch trade data with the current cursor
+                System.out.println("trying to fetch trades");
                 String jsonData = fetcher.fetchTradeData(startTime, endTime, cursor);
-
+                System.out.println("successfully fetched trade data");
                 if (jsonData == null || jsonData.isEmpty()) {
                     System.out.println("No more data to fetch or an error occurred.");
                     break;
@@ -43,8 +44,9 @@ public class HistoricalFetcherRunner {
                 cursor = responseObject.optString("cursor", null);
 
                 // Process and store data if available
-                if (responseObject.has("data")) {
-                    JSONArray tradesData = responseObject.getJSONArray("data");
+                if (responseObject.has("trades")) {
+                    JSONArray tradesData = responseObject.getJSONArray("trades");
+                    System.out.println("going to process data");
                     processor.processAndStoreData(tradesData.toString(), tableName);
                 }
 
@@ -63,7 +65,7 @@ public class HistoricalFetcherRunner {
     public static void main(String[] args) {
         Dotenv dotenv = Dotenv.load();
         // Initialize the Kalshi API wrapper
-        KalshiWrapper wrapper = new KalshiWrapper("https://api.kalshi.com", dotenv.get("KALSHI_KEY_ID"), dotenv.get("KALSHI_KEY_PATH"));
+        KalshiWrapper wrapper = new KalshiWrapper("https://api.elections.kalshi.com", dotenv.get("KALSHI_KEY_ID"), "keys/anushree.txt");
 
         // Set up the data fetcher, processor, and throttler
         HistoricalDataFetcher fetcher = new HistoricalDataFetcher(wrapper);

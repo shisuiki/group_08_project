@@ -1,4 +1,4 @@
-package edu.illinois.group8.fetcher;
+package edu.illinois.group8.historicalDataFetcher;
 
 public class ThrottlingManager {
 

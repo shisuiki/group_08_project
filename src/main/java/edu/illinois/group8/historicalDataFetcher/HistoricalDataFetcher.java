@@ -1,4 +1,4 @@
-package edu.illinois.group8.fetcher;
+package edu.illinois.group8.historicalDataFetcher;
 
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import edu.illinois.group8.wrapper.RequestParameters;
@@ -19,7 +19,13 @@ public class HistoricalDataFetcher {
             if (cursor != null && !cursor.isEmpty()) {
                 params.addParam("cursor", cursor);
             }
-            return kalshiWrapper.getTrades(params);
+            System.out.println("start time: " + startTime);
+            System.out.println("end time: " + endTime);
+            System.out.println("cursor: " + cursor);
+            String output = kalshiWrapper.getTrades(params);
+            System.out.println("request output: ");
+            System.out.println(output);
+            return output;
         } catch (Exception e) {
             System.err.println("Error fetching trade data: " + e.getMessage());
             return null;
