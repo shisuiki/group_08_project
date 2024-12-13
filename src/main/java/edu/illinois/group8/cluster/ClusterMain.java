@@ -35,6 +35,10 @@ public class ClusterMain {
     private static final int TRANSFER_PORT_OFFSET = 5;
     private static final int LOG_CONTROL_PORT_OFFSET = 6;
 
+    public static int getClientFacingPortOffset() {
+        return CLIENT_FACING_PORT_OFFSET;
+    }
+
     public static int calculatePort(int nodePortBase, int portOffset) {
         return nodePortBase + portOffset;
     }
@@ -52,21 +56,35 @@ public class ClusterMain {
         return createUDPChannel(nodePortBase, hostname, LOG_PORT_OFFSET);
     }
 
-    private static String createClusterMembers(final List<String> hostnames) {
+    // private static String createClusterMembers(final List<String> hostnames, int nodePortBase) {
+    //     final StringBuilder sb = new StringBuilder();
+    //     for (int i = 0; i < hostnames.size(); i++)
+    //     {
+    //         sb.append(i);
+    //         sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, CLIENT_FACING_PORT_OFFSET));
+    //         sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, MEMBER_FACING_PORT_OFFSET));
+    //         sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, LOG_PORT_OFFSET));
+    //         sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, TRANSFER_PORT_OFFSET));
+    //         sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, ARCHIVE_CONTROL_PORT_OFFSET));
+    //         sb.append('|');
+    //     }
+    //     return sb.toString();
+    // }
+
+    private static String createClusterMembers(final List<String> hostnames, int nodePortBase) {
         final StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < hostnames.size(); i++)
-        {
+        for (int i = 0; i < hostnames.size(); i++) {
             sb.append(i);
-            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, CLIENT_FACING_PORT_OFFSET));
-            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, MEMBER_FACING_PORT_OFFSET));
-            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, LOG_PORT_OFFSET));
-            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(i, TRANSFER_PORT_OFFSET));
-            sb.append(',').append(hostnames.get(i)).append(':')
-                .append(calculatePort(i, ARCHIVE_CONTROL_PORT_OFFSET));
-            sb.append('|');
+            sb.append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, CLIENT_FACING_PORT_OFFSET))
+              .append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, MEMBER_FACING_PORT_OFFSET))
+              .append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, LOG_PORT_OFFSET))
+              .append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, TRANSFER_PORT_OFFSET))
+              .append(',').append(hostnames.get(i)).append(':').append(calculatePort(nodePortBase, ARCHIVE_CONTROL_PORT_OFFSET))
+              .append('|');
         }
         return sb.toString();
     }
+    
 
     private static ErrorHandler errorHandler(final String context)
     {
@@ -131,9 +149,9 @@ public class ClusterMain {
         final ConsensusModule.Context consensusModuleContext = new ConsensusModule.Context()
             .clusterMemberId(nodeID)
             .clusterDir(new File(baseDir, "cluster"))
-            .ingressChannel("aeron:udp?term-length=64k")
+            .ingressChannel("aeron:udp?endpoint="+hostname+":"+(node_port_base+CLIENT_FACING_PORT_OFFSET)+"|term_length=64k")
             .replicationChannel(logReplicationChannel(node_port_base, hostname))
-            .clusterMembers(createClusterMembers(clusterAddresses))
+            .clusterMembers(createClusterMembers(clusterAddresses, node_port_base))
             .archiveContext(aeronArchiveContext.clone())
             .errorHandler(errorHandler("Consensus Module"));
 

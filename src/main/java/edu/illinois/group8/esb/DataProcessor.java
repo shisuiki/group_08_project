@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.BufferUtil;
+import org.agrona.ExpandableArrayBuffer;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -23,14 +24,15 @@ import java.util.List;
 import java.util.Map;
 
 public class DataProcessor {
-    private final UnsafeBuffer buffer;
+    private final ExpandableArrayBuffer buffer;
     private final ObjectMapper objectMapper;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
 
     private Map<String, OrderBook> orderBooks;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
-        this.buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(512, 64));
+        // this.buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(512, 64));
+        this.buffer = new ExpandableArrayBuffer();
         this.objectMapper = new ObjectMapper();
         this.communicationOrchestrator = communicationOrchestrator;
         this.orderBooks = new HashMap<>();
