@@ -1,6 +1,7 @@
 package edu.illinois.group8.cluster;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.agrona.ExpandableArrayBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -23,7 +24,7 @@ public class ClientClusterOrchestrator {
     public ClientClusterOrchestrator(List<String> hostnames, String ip) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < hostnames.size(); i++) {
-            sb.append(i).append('=').append(hostnames.get(i)).append(':').append(9000 + (i * 100) + ClusterMain.getClientFacingPortOffset()).append(',');
+            sb.append(i).append('=').append(hostnames.get(i)).append(':').append(9000 + ClusterMain.getClientFacingPortOffset()).append(',');
         }
         sb.setLength(sb.length() - 1);
         String ingressEndpoints = sb.toString();
@@ -37,11 +38,11 @@ public class ClientClusterOrchestrator {
 
         aeronCluster = AeronCluster.connect(
             new AeronCluster.Context()
+                .messageTimeoutNs(TimeUnit.SECONDS.toNanos(10))
                 .egressListener((clusterSessionId, timestamp, buffer, offset, length, header)->{})
-                .egressChannel(ip)
-                .egressChannel("aeron:udp?endpoint=localhost:0")
+                .ingressChannel("aeron:udp?endpoint="+hostnames.get(0)+":9002|term_length=64k")
                 .aeronDirectoryName(mediaDriver.aeronDirectoryName())
-                .ingressChannel("aeron:udp")
+                .egressChannel("aeron:udp?endpoint="+ip+":0|term_length=64k")
                 .ingressEndpoints(ingressEndpoints)
         );
     }
