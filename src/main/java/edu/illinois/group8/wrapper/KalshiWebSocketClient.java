@@ -68,23 +68,27 @@ public class KalshiWebSocketClient extends WebSocketClient {
             JSONObject data = (JSONObject) parser.parse(message);
             String type = (String) data.get("type");
             JSONObject msg = (JSONObject) data.get("msg");
+            // System.out.println("Received message: " + message);
             switch (type) {
                 case "error":
                     // todo: handle error
                     int code = ((Long) msg.get("code")).intValue();
                     String errorMsg = (String) msg.get("msg");
-                    System.out.println("Received error code " + code + ": " + errorMsg);
+                    // System.out.println("Received error code " + code + ": " + errorMsg);
                     break;
                 case "orderbook_snapshot":
                     // todo: send to data processor
+                    // System.out.println("Received orderbook snapshot: "+message);
                     if (checkSequence(data)) {
                         cluster.writeToCluster(message);
+                        // System.out.println("wrote message to cluster!");
                     } else {
                         System.out.println("Out of sequence!"); // todo: handle out of sequence error
                     }
                     break;
                 case "orderbook_delta":
                     // todo: send to data processor
+                    // System.out.println("Received orderbook delta: "+message);
                     if (checkSequence(data)) {
                         cluster.writeToCluster(message);
                     } else {
@@ -93,17 +97,19 @@ public class KalshiWebSocketClient extends WebSocketClient {
                     break;
                 case "ticker":
                     // todo: send to data processor
+                    // System.out.println("Received ticker: "+message);
                     cluster.writeToCluster(message);
                     break;
                 case "trade":
                     // todo: send to data processor
+                    // System.out.println("Received trade: "+message);
                     cluster.writeToCluster(message);
                     break;
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
-        System.out.println("Received message: " + message);
+        
     }
 
     @Override
@@ -114,6 +120,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
 
     @Override
     public void onClose() {
+        this.cluster.close();
         System.out.println("Connection closed.");
     }
 
