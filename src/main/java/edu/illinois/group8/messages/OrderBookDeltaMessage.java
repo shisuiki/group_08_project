@@ -26,7 +26,7 @@ public class OrderBookDeltaMessage extends Message {
 
     @Override
     public String getFormattedMessage() {
-        if (getMsg().getSide() == "yes") {
+        if (getMsg().getSide().equals("yes")) {
             return "{\n" + //
                 "  \"type\": 'D',\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
