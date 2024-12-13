@@ -15,14 +15,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.BufferUtil;
+import org.agrona.ExpandableArrayBuffer;
 
 public class DataProcessor {
-    private final UnsafeBuffer buffer;
+    private final ExpandableArrayBuffer buffer;
     private final ObjectMapper objectMapper;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
-        this.buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(512, 64));
+        // this.buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(512, 64));
+        this.buffer = new ExpandableArrayBuffer();
         this.objectMapper = new ObjectMapper();
         this.communicationOrchestrator = communicationOrchestrator;
     }
