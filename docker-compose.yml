@@ -11,6 +11,8 @@ services:
         ipv4_address: 172.20.0.2
     ports:
       - "9001-9006:9001-9006"
+      - "40456:40456"
+      - "40457:40457"
     volumes:
       - ./logs/node0:/app/cluster
     shm_size: '2gb'
@@ -21,12 +23,14 @@ services:
       - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
       - BASE_DIR=/app
       - NODE_ID=1
-      - CLUSTER_PORT_BASE=9100
+      - CLUSTER_PORT_BASE=9000
     networks:
       cluster_net:
         ipv4_address: 172.20.0.3
     ports:
-      - "9101-9106:9101-9106"
+      - "9101-9106:9001-9006"
+      - "40458:40456"
+      - "40459:40457"
     volumes:
       - ./logs/node1:/app/cluster
     shm_size: '2gb'
@@ -37,15 +41,34 @@ services:
       - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
       - BASE_DIR=/app
       - NODE_ID=2
-      - CLUSTER_PORT_BASE=9200
+      - CLUSTER_PORT_BASE=9000
     networks:
       cluster_net:
         ipv4_address: 172.20.0.4
     ports:
-      - "9201-9206:9201-9206"
+      - "9201-9206:9001-9006"
+      - "40460:40456"
+      - "40461:40457"
     volumes:
       - ./logs/node2:/app/cluster
     shm_size: '2gb'
+  
+  wsclient:
+    build: .
+    environment:
+      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
+      - BASE_DIR=/app
+      - CLUSTER_PORT_BASE=9300
+      - IP=172.20.0.6
+    networks:
+      cluster_net:
+        ipv4_address: 172.20.0.6
+    volumes:
+      - ./logs/wsclient:/app/cluster
+      - <KEYDIRHERE>:/app/key.txt # put your key directory here
+    shm_size: '2gb'
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
 
   # test deployment for publisher
   # publisher:
@@ -63,6 +86,7 @@ services:
   #   shm_size: '2gb'
   #   command: >
   #     sh -c "java -cp /app/app.jar edu.illinois.group8.tests.TestPublisher 'Hello Cluster!'"
+
              
 networks:
   cluster_net:
