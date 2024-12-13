@@ -104,7 +104,8 @@ public class ESBClusteredService implements ClusteredService {
         int offset,
         int length,
         Header header) {
-            
+        
+        
         // Process incoming messages from clients
         if (currentRole != Role.LEADER) {
             return;
@@ -113,6 +114,8 @@ public class ESBClusteredService implements ClusteredService {
         byte[] messageBytes = new byte[length];
         buffer.getBytes(offset, messageBytes);
         String payload = new String(messageBytes, StandardCharsets.UTF_8);
+
+        System.out.println("ESB: received message "+payload);
 
         DataProcessor processor = new DataProcessor(communicationOrchestrator);
         processor.processMessage(payload);
