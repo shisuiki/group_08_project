@@ -78,7 +78,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
                     break;
                 case "orderbook_snapshot":
                     // todo: send to data processor
-                    // System.out.println("Received orderbook snapshot: "+message);
+                     System.out.println("Received orderbook snapshot: "+message);
                     if (checkSequence(data)) {
                         cluster.writeToCluster(message);
                         // System.out.println("wrote message to cluster!");
@@ -88,9 +88,10 @@ public class KalshiWebSocketClient extends WebSocketClient {
                     break;
                 case "orderbook_delta":
                     // todo: send to data processor
-                    // System.out.println("Received orderbook delta: "+message);
+                     System.out.println("Received orderbook delta: "+message);
                     if (checkSequence(data)) {
                         cluster.writeToCluster(message);
+                        System.out.println("Wrote message to cluster");
                     } else {
                         System.out.println("Out of sequence!"); // todo: handle out of sequence error
                     }

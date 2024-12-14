@@ -2,14 +2,11 @@ package edu.illinois.group8;
 
 import edu.illinois.group8.wrapper.KalshiSession;
 import edu.illinois.group8.wrapper.KalshiWebSocketClient;
-import edu.illinois.group8.wrapper.KalshiWrapper;
-
-import java.util.logging.Logger;
 
 public class KalshiSystem {
 
     private static String KEY_ID = "";
-    private static String KEY_PATH = "";
+    private static String KEY_PATH = "/app/key.txt";
 
     private static KalshiSession instance = new KalshiSession("https://api.elections.kalshi.com", KEY_ID, KEY_PATH);
 
@@ -17,7 +14,7 @@ public class KalshiSystem {
 //        KalshiWrapper wrapper = instance.getWrapper();
 //        System.out.println(wrapper.getMarkets());
         KalshiWebSocketClient wsClient = instance.getWsClient();
-        wsClient.subscribe(new String[]{"orderbook_delta"}, new String[]{"RATECUTCOUNT-24DEC31-T3", "RATECUTCOUNT-24DEC31-T4", "RATECUTCOUNT-24DEC31-T5"});
+        wsClient.subscribe(new String[]{"orderbook_delta"}, new String[]{"KXBTC-24DEC1417-B100750", "KXBTC-24DEC1417-B101250", "KXBTC-24DEC1417-B101750", "KXBTC-24DEC1417-B102250"});
     }
 
     public static KalshiSession getInstance() {

@@ -32,6 +32,7 @@ public class ESBClusteredService implements ClusteredService {
     private String hostname;
     private String aeronDirName;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
+    private DataProcessor processor;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
@@ -74,6 +75,8 @@ public class ESBClusteredService implements ClusteredService {
         aeron = Aeron.connect(ctx);
 
         this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname);
+        this.processor = new DataProcessor(communicationOrchestrator);
+
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
         // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
@@ -117,7 +120,6 @@ public class ESBClusteredService implements ClusteredService {
 
         System.out.println("ESB: received message "+payload);
 
-        DataProcessor processor = new DataProcessor(communicationOrchestrator);
         processor.processMessage(payload);
     }
 
