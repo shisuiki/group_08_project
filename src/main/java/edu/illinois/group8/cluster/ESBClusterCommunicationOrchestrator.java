@@ -35,6 +35,8 @@ public class ESBClusterCommunicationOrchestrator {
         ConcurrentPublication bookEventsPublication = aeron.addPublication(endpoint, StreamIDs.BOOK_EVENTS_IDX.getValue());
         internalChannelPublications.put('D', bookEventsPublication);
         internalChannelPublications.put('S', bookEventsPublication);
+        internalChannelPublications.put('R', aeron.addPublication(endpoint, StreamIDs.TICKER_IDX.getValue()));
+        internalChannelPublications.put('O', aeron.addPublication(endpoint, StreamIDs.OPEN_INTEREST_IDX.getValue()));
     }
 
     private void addInternalChannelSubscriptions(String ip) {
@@ -44,6 +46,8 @@ public class ESBClusterCommunicationOrchestrator {
         Subscription bookEventsSubscription = aeron.addSubscription(endpoint, StreamIDs.BOOK_EVENTS_IDX.getValue());
         internalChannelSubscriptions.put('D', bookEventsSubscription);
         internalChannelSubscriptions.put('S', bookEventsSubscription);
+        internalChannelSubscriptions.put('R', aeron.addSubscription(endpoint, StreamIDs.TICKER_IDX.getValue()));
+        internalChannelSubscriptions.put('O', aeron.addSubscription(endpoint, StreamIDs.OPEN_INTEREST_IDX.getValue()));
     }
 
     /**
@@ -70,6 +74,14 @@ public class ESBClusterCommunicationOrchestrator {
         return internalChannelPublications.get('D');
     }
 
+    public ConcurrentPublication getTickerPublication() {
+        return internalChannelPublications.get('R');
+    }
+
+    public ConcurrentPublication getOpenInterestPublication() {
+        return internalChannelPublications.get('O');
+    }
+
     /**
      * Gets Subscription object for trades channel. Use .poll on the object to poll for new messages with the subscription object.
      * @return ConcurrentPublication object
@@ -93,4 +105,13 @@ public class ESBClusterCommunicationOrchestrator {
     public Subscription getBookEventsSubscription() {
         return internalChannelSubscriptions.get('D');
     }
+
+    public Subscription getTickerSubscription() {
+        return internalChannelSubscriptions.get('R');
+    }
+
+    public Subscription getOpenInterestSubscription() {
+        return internalChannelSubscriptions.get('O');
+    }
+
 }

@@ -33,7 +33,7 @@ public class OrderBookSnapshotMessage extends Message {
     @Override
     public String getFormattedMessage() {
         return "{\n" + //
-                "  \"type\": 'S',\n" + //
+                "  \"type\": \"S\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"bid\": " + getMsg().getYes() + ",\n" + //
                 "  \"ask\": " + getMsg().getNo().stream()

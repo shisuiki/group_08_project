@@ -58,7 +58,8 @@ public class DataProcessor {
                     break;
                 case "ticker":
                     msg = objectMapper.readValue(message, TickerMessage.class);
-                    publication = communicationOrchestrator.getTopOfBookPublication(); // TODO: Wrong publication; need to create a new type for ticker
+                    publication = communicationOrchestrator.getTickerPublication();
+                    this.processTicker((TickerMessage) msg);
                     break;
                 case "trade":
                     msg = objectMapper.readValue(message, TradeMessage.class);
@@ -124,10 +125,22 @@ public class DataProcessor {
     private void sendTopOfBook(String symbol, OrderBook orderBook) {
         int[] topOfBook = orderBook.getTopOfBook();
         String formattedMessage = String.format(
-                "{\"type\":'K',\"symbol\":\"%s\",\"bidPrice\":%d,\"bidSize\":%d,\"askPrice\":%d,\"askSize\":%d}",
+                "{\"type\":\"K\",\"symbol\":\"%s\",\"bidPrice\":%d,\"bidSize\":%d,\"askPrice\":%d,\"askSize\":%d}",
                 symbol, topOfBook[0], topOfBook[1], topOfBook[2], topOfBook[3]
         );
         publishMessage(formattedMessage, communicationOrchestrator.getTopOfBookPublication());
+    }
+
+    private void processTicker(TickerMessage msg) {
+        TickerMessage.Msg ticker = msg.getMsg();
+        String marketTicker = ticker.getMarketTicker();
+        long volume = ticker.getVolume();
+        long openInterest = ticker.getOpenInterest();
+        long dollarVolume = ticker.getDollarVolume();
+        long dollarOpenInterest = ticker.getDollarOpenInterest();
+        String formattedMessage = String.format("{\"type\":\"O\",\"symbol\":\"%s\",\"volume\":%d,\"open_interest\":%d,\"dollar_volume\":%d,\"dollar_open_interest\":%d}",
+                marketTicker, volume, openInterest, dollarVolume, dollarOpenInterest);
+        publishMessage(formattedMessage, communicationOrchestrator.getOpenInterestPublication());
     }
 
 }

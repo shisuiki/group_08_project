@@ -30,7 +30,7 @@ public class OrderBookDeltaMessage extends Message {
     public String getFormattedMessage() {
         if (getMsg().getSide().equals("yes")) {
             return "{\n" + //
-                "  \"type\": 'D',\n" + //
+                "  \"type\": \"D\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getPrice() + ",\n" + //
                 "  \"delta\": " + getMsg().getDelta() + ",\n" + //
@@ -38,7 +38,7 @@ public class OrderBookDeltaMessage extends Message {
                 "}";
         } else {
             return "{\n" + //
-                "  \"type\": 'D',\n" + //
+                "  \"type\": \"D\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + (100 - getMsg().getPrice()) + ",\n" + //
                 "  \"delta\": " + (-1 * getMsg().getDelta()) + ",\n" + //
