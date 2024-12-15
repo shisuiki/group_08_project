@@ -37,6 +37,8 @@ public class ESBClusterCommunicationOrchestrator {
         ConcurrentPublication bookEventsPublication = aeron.addPublication(endpoint, StreamIDs.BOOK_EVENTS_IDX.getValue());
         externalChannelPublications.put('D', bookEventsPublication);
         externalChannelPublications.put('S', bookEventsPublication);
+        externalChannelPublications.put('R', aeron.addPublication(endpoint, StreamIDs.TICKER_IDX.getValue()));
+        externalChannelPublications.put('O', aeron.addPublication(endpoint, StreamIDs.OPEN_INTEREST_IDX.getValue()));
     }
 
     public void addInternalChannelPublication(String ip) {
@@ -71,6 +73,14 @@ public class ESBClusterCommunicationOrchestrator {
      */
     public ConcurrentPublication getBookEventsPublication() {
         return externalChannelPublications.get('D');
+    }
+
+    public ConcurrentPublication getTickerPublication() {
+        return externalChannelPublications.get('R');
+    }
+
+    public ConcurrentPublication getOpenInterestPublication() {
+        return externalChannelPublications.get('O');
     }
 
     /**

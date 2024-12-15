@@ -23,12 +23,14 @@ public class TickerMessage extends Message {
     @Override
     public String getFormattedMessage() {
         return "{\n" + //
-                "  \"type\": 'K',\n" + //
+                "  \"type\": \"K\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getPrice() + ",\n" + //
                 "  \"bid\": " + getMsg().getYesBid() + ",\n" + //
                 "  \"ask\": " + getMsg().getYesAsk() + ",\n" + //
-                "  \"active_contracts\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"open_interest\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"dollar_volume\": " + getMsg().getDollarVolume() + ",\n" +
+                "  \"dollar_open_interest\": " + getMsg().getDollarOpenInterest() + ",\n" +
                 "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
                 "}";
     }
