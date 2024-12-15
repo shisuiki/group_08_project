@@ -44,6 +44,7 @@ public class DataProcessor {
                 case "orderbook_snapshot":
                     msg = objectMapper.readValue(message, OrderBookSnapshotMessage.class);
                     this.processSnapshot((OrderBookSnapshotMessage) msg);
+                    break;
                 case "orderbook_delta":
                     msg = objectMapper.readValue(message, OrderBookDeltaMessage.class);
                     this.processDelta((OrderBookDeltaMessage) msg);
