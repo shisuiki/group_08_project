@@ -3,7 +3,8 @@ package edu.illinois.group8.cluster;
 public enum StreamIDs {
     TRADE_IDX(0),
     TOP_OF_BOOK_IDX(1),
-    BOOK_EVENTS_IDX(2);
+    BOOK_EVENTS_IDX(2),
+    INTERNAL_IDX(3);
     
     private final int value;
 

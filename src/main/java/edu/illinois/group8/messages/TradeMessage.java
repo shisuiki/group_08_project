@@ -1,7 +1,9 @@
 package edu.illinois.group8.messages;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class TradeMessage extends Message {
     private Msg msg;
 
@@ -30,6 +32,7 @@ public class TradeMessage extends Message {
                 "}";
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;
