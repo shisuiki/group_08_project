@@ -9,8 +9,9 @@ import io.aeron.driver.MediaDriver;
 
 public class ESBClusterCommunicationOrchestrator {
     private final MediaDriver mediaDriver;
-    private ConcurrentHashMap<Character, ConcurrentPublication> internalChannelPublications = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Character, Subscription> internalChannelSubscriptions = new ConcurrentHashMap<>();
+    private ConcurrentPublication internalChannelPublication;
+    private Subscription internalChannelSubscription;
+    private ConcurrentHashMap<Character, ConcurrentPublication> externalChannelPublications = new ConcurrentHashMap<>();
     private String[] ClusterNodes = {"172.20.0.2","172.20.0.3","172.20.0.4"};
     private int currentNodeId = 0;
     private final Aeron aeron;
@@ -24,26 +25,28 @@ public class ESBClusterCommunicationOrchestrator {
                 .dirDeleteOnStart(true)
                 .termBufferSparseFile(true));
         aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
-        addInternalChannelPublications(ip);
-        addInternalChannelSubscriptions(ip);
+        addInternalChannelPublication(ip);
+        addInternalChannelSubscription(ip);
+        addExternalChannelPublications(ip);
     }
 
-    public void addInternalChannelPublications(String ip) {
+    public void addExternalChannelPublications(String ip) {
         String endpoint = "aeron:udp?endpoint="+ip+":40456|control=224.0.1.1:40457|control-mode=dynamic";
-        internalChannelPublications.put('T', aeron.addPublication(endpoint, StreamIDs.TRADE_IDX.getValue()));
-        internalChannelPublications.put('K', aeron.addPublication(endpoint, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
+        externalChannelPublications.put('T', aeron.addPublication(endpoint, StreamIDs.TRADE_IDX.getValue()));
+        externalChannelPublications.put('K', aeron.addPublication(endpoint, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
         ConcurrentPublication bookEventsPublication = aeron.addPublication(endpoint, StreamIDs.BOOK_EVENTS_IDX.getValue());
-        internalChannelPublications.put('D', bookEventsPublication);
-        internalChannelPublications.put('S', bookEventsPublication);
+        externalChannelPublications.put('D', bookEventsPublication);
+        externalChannelPublications.put('S', bookEventsPublication);
     }
 
-    private void addInternalChannelSubscriptions(String ip) {
+    public void addInternalChannelPublication(String ip) {
         String endpoint = "aeron:udp?endpoint="+ip+":40456|control=224.0.1.1:40457|control-mode=dynamic";
-        internalChannelSubscriptions.put('T', aeron.addSubscription(endpoint, StreamIDs.TRADE_IDX.getValue()));
-        internalChannelSubscriptions.put('K', aeron.addSubscription(endpoint, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
-        Subscription bookEventsSubscription = aeron.addSubscription(endpoint, StreamIDs.BOOK_EVENTS_IDX.getValue());
-        internalChannelSubscriptions.put('D', bookEventsSubscription);
-        internalChannelSubscriptions.put('S', bookEventsSubscription);
+        internalChannelPublication = aeron.addPublication(endpoint, StreamIDs.INTERNAL_IDX.getValue());
+    }
+
+    private void addInternalChannelSubscription(String ip) {
+        String endpoint = "aeron:udp?endpoint="+ip+":40456|control=224.0.1.1:40457|control-mode=dynamic";
+        internalChannelSubscription = aeron.addSubscription(endpoint, StreamIDs.INTERNAL_IDX.getValue());
     }
 
     /**
@@ -51,7 +54,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getTradesPublication() {
-        return internalChannelPublications.get('T');
+        return externalChannelPublications.get('T');
     }
 
     /**
@@ -59,7 +62,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getTopOfBookPublication() {
-        return internalChannelPublications.get('K');
+        return externalChannelPublications.get('K');
     }
 
     /**
@@ -67,30 +70,22 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getBookEventsPublication() {
-        return internalChannelPublications.get('D');
+        return externalChannelPublications.get('D');
     }
 
     /**
-     * Gets Subscription object for trades channel. Use .poll on the object to poll for new messages with the subscription object.
-     * @return ConcurrentPublication object
+     * Gets Subscription object for internal data channel channel. Use .poll on the object to poll for new messages with the subscription object.
+     * @return Subscription object
      */
-    public Subscription getTradesSubscription() {
-        return internalChannelSubscriptions.get('T');
+    public Subscription getInternalSubscription() {
+        return internalChannelSubscription;
     }
 
     /**
-     * Gets Subscription object for top of book channel. Use .poll on the object to poll for new messages with the subscription object.
+     * Gets ConcurrentPublication object for internal data channel.
      * @return ConcurrentPublication object
      */
-    public Subscription getTopOfBookSubscription() {
-        return internalChannelSubscriptions.get('K');
-    }
-
-    /**
-     * Gets Subscription object for book events channel. Use .poll on the object to poll for new messages with the subscription object.
-     * @return ConcurrentPublication object
-     */
-    public Subscription getBookEventsSubscription() {
-        return internalChannelSubscriptions.get('D');
+    public ConcurrentPublication getInternalPublication() {
+        return internalChannelPublication;
     }
 }

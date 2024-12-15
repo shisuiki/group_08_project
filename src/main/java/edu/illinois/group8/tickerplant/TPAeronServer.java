@@ -20,7 +20,11 @@ import org.slf4j.LoggerFactory;
 public class TPAeronServer implements Runnable {
     private final Aeron aeron;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
-    // private final int messageTypeOffset = 17;
+    private final int messageTypeOffset = 17;
+    private final Publication topOfBookPublication;
+    private final Publication tradePublication;
+    private final Publication bookEventsPublication;
+    private final Subscription internalSubscription;
 
     private static final Logger logger = LoggerFactory.getLogger(TPAeronServer.class);
 
@@ -32,40 +36,39 @@ public class TPAeronServer implements Runnable {
             System.exit(1);
         }
         this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(ip);
+        internalSubscription = communicationOrchestrator.getInternalSubscription();
+        topOfBookPublication = communicationOrchestrator.getTopOfBookPublication();
+        tradePublication = communicationOrchestrator.getTradesPublication();
+        bookEventsPublication = communicationOrchestrator.getBookEventsPublication();
     }
 
     @Override
     public void run() {
-        Subscription a = communicationOrchestrator.getBookEventsSubscription();
-        Subscription b = communicationOrchestrator.getTopOfBookSubscription();
-        Subscription c = communicationOrchestrator.getTradesSubscription();
-
-        // TODO: write 3 different threads to listen and then offer processed data to external channels
-        
         while (true) {
-            // String currentLeaderIp = leaderIp.get();
-            // if (!currentLeaderIp.isEmpty()) {
-            //     internalChannels.get(currentLeaderIp).poll((buffer, offset, length, header) -> {
-            //             char messageType = (char) buffer.getByte(messageTypeOffset);
-        
-            //             switch (messageType) {
-            //                 case 'T':
-            //                     externalChannels.get(currentLeaderIp).get(tradeIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 case 'K':
-            //                     externalChannels.get(currentLeaderIp).get(topOfBookIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 case 'D':
-            //                     externalChannels.get(currentLeaderIp).get(bookEventsIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 case 'S':
-            //                     externalChannels.get(currentLeaderIp).get(bookEventsIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 default:
-            //                     logger.warn("Unknown message type: " + messageType);
-            //             }
-            //         }, 1);
-            // }
+            internalSubscription.poll((buffer, offset, length, header) -> {
+                    char messageType = (char) buffer.getByte(messageTypeOffset);
+    
+                    switch (messageType) {
+                        case 'T':
+                            System.out.println("tickerplant: publishing trade message");
+                            tradePublication.offer(buffer, offset, length);
+                            break;
+                        case 'K':
+                            System.out.println("tickerplant: publishing ticker message");
+                            topOfBookPublication.offer(buffer, offset, length);
+                            break;
+                        case 'D':
+                            System.out.println("tickerplant: publishing book events message");
+                            bookEventsPublication.offer(buffer, offset, length);
+                            break;
+                        case 'S':
+                            System.out.println("tickerplant: publishing book events message");
+                            bookEventsPublication.offer(buffer, offset, length);
+                            break;
+                        default:
+                            logger.warn("Unknown message type: " + messageType);
+                    }
+                }, 1);
         }
     }
 }
