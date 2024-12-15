@@ -8,14 +8,10 @@ import edu.illinois.group8.messages.OrderBookDeltaMessage;
 import edu.illinois.group8.messages.OrderBookSnapshotMessage;
 
 import edu.illinois.group8.wrapper.OrderBook;
-import io.aeron.Aeron;
 import io.aeron.ConcurrentPublication;
-import io.aeron.Publication;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.agrona.concurrent.UnsafeBuffer;
-import org.agrona.BufferUtil;
 import org.agrona.ExpandableArrayBuffer;
 
 import java.util.Arrays;
@@ -104,8 +100,6 @@ public class DataProcessor {
             orderBook.getAsks().put(price, quantity);
         }
         orderBooks.put(marketTicker, orderBook);
-        orderBook.print();
-
         this.sendTopOfBook(marketTicker, orderBook);
     }
 
