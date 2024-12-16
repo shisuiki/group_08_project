@@ -23,7 +23,7 @@ public class TradeMessage extends Message {
     @Override
     public String getFormattedMessage() {
         return "{\n" + //
-                "  \"type\": 'T',\n" + //
+                "  \"type\": \"T\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getYesPrice() + ",\n" + //
                 "  \"quantity\": " + getMsg().getCount() + ",\n" + //
