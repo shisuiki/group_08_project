@@ -114,7 +114,7 @@ public class DataProcessor {
     private void sendTopOfBook(String symbol, OrderBook orderBook) {
         int[] topOfBook = orderBook.getTopOfBook();
         String formattedMessage =  "{\n" + //
-                                    "  \"type\": \"O\",\n" + //
+                                    "  \"type\": \"K\",\n" + //
                                     "  \"symbol\": \"" + symbol + "\",\n" + //
                                     "  \"bidPrice\": " + topOfBook[0] + ",\n" + //
                                     "  \"bidSize\": " + topOfBook[1] + ",\n" + //
