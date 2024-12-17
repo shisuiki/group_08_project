@@ -12,7 +12,7 @@ public class TestPublisher {
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
 
     public TestPublisher() {
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator("172.20.0.5");
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator("172.20.0.5", false, "dirName");
     }
 
     public void sendMessage(String message) {

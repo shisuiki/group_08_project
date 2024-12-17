@@ -16,39 +16,44 @@ public class ESBClusterCommunicationOrchestrator {
     private int currentNodeId = 0;
     private final Aeron aeron;
 
-    /**
-     * Constructor for communication orchestrator.
-     * @param ip IP of your system.
-     */
-    public ESBClusterCommunicationOrchestrator(String ip) {
+    public ESBClusterCommunicationOrchestrator(String ip, boolean isCluster, String aeronDirName) {
         mediaDriver = MediaDriver.launchEmbedded(new MediaDriver.Context()
                 .dirDeleteOnStart(true)
-                .termBufferSparseFile(true));
+                .termBufferSparseFile(true)
+                .aeronDirectoryName(aeronDirName));
+
         aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
-        addInternalChannelPublication(ip);
-        addInternalChannelSubscription(ip);
-        addExternalChannelPublications(ip);
+
+        String channel;
+        // channel = "aeron:udp?endpoint=" + ip + ":40456";
+        if (isCluster) {
+            channel = "aeron:udp?endpoint=0.0.0.0:40456";
+        } else {
+            channel = "aeron:udp?endpoint=0.0.0.0:40456";
+        }
+        
+
+        addInternalChannelPublication(channel);
+        addInternalChannelSubscription(channel);
+        addExternalChannelPublications(channel);
     }
 
-    public void addExternalChannelPublications(String ip) {
-        String endpoint = "aeron:udp?endpoint="+ip+":40456|control=224.0.1.1:40457|control-mode=dynamic";
-        externalChannelPublications.put('T', aeron.addPublication(endpoint, StreamIDs.TRADE_IDX.getValue()));
-        externalChannelPublications.put('K', aeron.addPublication(endpoint, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
-        ConcurrentPublication bookEventsPublication = aeron.addPublication(endpoint, StreamIDs.BOOK_EVENTS_IDX.getValue());
+    private void addInternalChannelPublication(String channel) {
+        internalChannelPublication = aeron.addPublication(channel, StreamIDs.INTERNAL_IDX.getValue());
+    }
+
+    private void addInternalChannelSubscription(String channel) {
+        internalChannelSubscription = aeron.addSubscription(channel, StreamIDs.INTERNAL_IDX.getValue());
+    }
+
+    private void addExternalChannelPublications(String channel) {
+        externalChannelPublications.put('T', aeron.addPublication(channel, StreamIDs.TRADE_IDX.getValue()));
+        externalChannelPublications.put('K', aeron.addPublication(channel, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
+        ConcurrentPublication bookEventsPublication = aeron.addPublication(channel, StreamIDs.BOOK_EVENTS_IDX.getValue());
         externalChannelPublications.put('D', bookEventsPublication);
         externalChannelPublications.put('S', bookEventsPublication);
-        externalChannelPublications.put('R', aeron.addPublication(endpoint, StreamIDs.TICKER_IDX.getValue()));
-        externalChannelPublications.put('O', aeron.addPublication(endpoint, StreamIDs.OPEN_INTEREST_IDX.getValue()));
-    }
-
-    public void addInternalChannelPublication(String ip) {
-        String endpoint = "aeron:udp?endpoint="+ip+":40456|control=224.0.1.1:40457|control-mode=dynamic";
-        internalChannelPublication = aeron.addPublication(endpoint, StreamIDs.INTERNAL_IDX.getValue());
-    }
-
-    private void addInternalChannelSubscription(String ip) {
-        String endpoint = "aeron:udp?endpoint="+ip+":40456|control=224.0.1.1:40457|control-mode=dynamic";
-        internalChannelSubscription = aeron.addSubscription(endpoint, StreamIDs.INTERNAL_IDX.getValue());
+        externalChannelPublications.put('R', aeron.addPublication(channel, StreamIDs.TICKER_IDX.getValue()));
+        externalChannelPublications.put('O', aeron.addPublication(channel, StreamIDs.OPEN_INTEREST_IDX.getValue()));
     }
 
     /**

@@ -71,10 +71,11 @@ public class DataProcessor {
 
     public void publishMessage(String message) {
         try {
-            System.out.println("data processor: sending " + message);
             byte[] byte_msg = objectMapper.writeValueAsBytes(message);
             buffer.putBytes(0, byte_msg);
-            communicationOrchestrator.getInternalPublication().offer(buffer, 0, byte_msg.length);
+            // System.out.println("writing message "+message+" to internal publication");
+            long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, byte_msg.length);
+            System.out.println("data processor: wrote message to internal channel. status: " + result);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -113,7 +114,7 @@ public class DataProcessor {
 
     private void sendTopOfBook(String symbol, OrderBook orderBook) {
         int[] topOfBook = orderBook.getTopOfBook();
-        String formattedMessage =  "{\n" + //
+        String formattedMessage = "{\n" + //
                                     "  \"type\": \"K\",\n" + //
                                     "  \"symbol\": \"" + symbol + "\",\n" + //
                                     "  \"bidPrice\": " + topOfBook[0] + ",\n" + //

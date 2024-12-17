@@ -6,21 +6,12 @@ import io.aeron.Publication;
 import io.aeron.Subscription;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.WatchEvent;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class TPAeronServer implements Runnable {
-    private final Aeron aeron;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
-    private final int messageTypeOffset = 17;
+    private final int messageTypeOffset = 18;
     private final Publication topOfBookPublication;
     private final Publication tradePublication;
     private final Publication bookEventsPublication;
@@ -28,33 +19,27 @@ public class TPAeronServer implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(TPAeronServer.class);
 
-    public TPAeronServer() {
-        aeron = Aeron.connect(new Aeron.Context());
-        String ip = System.getenv("IP_ADDRESS");
-        if (ip == "") {
-            System.out.println("Unable to get system IP");
-            System.exit(1);
-        }
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(ip);
-        internalSubscription = communicationOrchestrator.getInternalSubscription();
-        topOfBookPublication = communicationOrchestrator.getTopOfBookPublication();
-        tradePublication = communicationOrchestrator.getTradesPublication();
-        bookEventsPublication = communicationOrchestrator.getBookEventsPublication();
+    public TPAeronServer(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
+        this.communicationOrchestrator = communicationOrchestrator;
+        this.internalSubscription = communicationOrchestrator.getInternalSubscription();
+        this.topOfBookPublication = communicationOrchestrator.getTopOfBookPublication();
+        this.tradePublication = communicationOrchestrator.getTradesPublication();
+        this.bookEventsPublication = communicationOrchestrator.getBookEventsPublication();
     }
 
     @Override
     public void run() {
         while (true) {
             internalSubscription.poll((buffer, offset, length, header) -> {
-                    char messageType = (char) buffer.getByte(messageTypeOffset);
+                    byte msgType = buffer.getByte(offset + messageTypeOffset);
     
-                    switch (messageType) {
+                    switch (msgType) {
                         case 'T':
                             System.out.println("tickerplant: publishing trade message");
                             tradePublication.offer(buffer, offset, length);
                             break;
                         case 'K':
-                            System.out.println("tickerplant: publishing ticker message");
+                            System.out.println("tickerplant: publishing top of book message");
                             topOfBookPublication.offer(buffer, offset, length);
                             break;
                         case 'D':
@@ -66,7 +51,7 @@ public class TPAeronServer implements Runnable {
                             bookEventsPublication.offer(buffer, offset, length);
                             break;
                         default:
-                            logger.warn("Unknown message type: " + messageType);
+                            System.out.println("Unknown message type: " + msgType);
                     }
                 }, 1);
         }

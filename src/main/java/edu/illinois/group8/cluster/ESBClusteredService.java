@@ -23,6 +23,7 @@ import io.aeron.logbuffer.Header;
 import org.json.*;
 
 import edu.illinois.group8.esb.DataProcessor;
+import edu.illinois.group8.tickerplant.TPAeronServer;
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
@@ -33,6 +34,7 @@ public class ESBClusteredService implements ClusteredService {
     private String aeronDirName;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private DataProcessor processor;
+    private Thread tickerplantThread;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
@@ -74,8 +76,10 @@ public class ESBClusteredService implements ClusteredService {
         Aeron.Context ctx = new Aeron.Context().aeronDirectoryName(aeronDirName);
         aeron = Aeron.connect(ctx);
 
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname);
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname, true, aeronDirName);
         this.processor = new DataProcessor(communicationOrchestrator);
+        this.tickerplantThread = new Thread(new TPAeronServer(communicationOrchestrator));
+        this.tickerplantThread.start();
 
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
@@ -154,6 +158,7 @@ public class ESBClusteredService implements ClusteredService {
     @Override
     public void onRoleChange(Role newRole) {
         // React to role changes (LEADER, FOLLOWER, etc.)
+        System.out.println("new role: " + newRole);
         this.currentRole = newRole;
         
         // if (newRole == Role.LEADER) {
