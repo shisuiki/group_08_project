@@ -17,10 +17,10 @@ public class KalshiSystem {
     private static String KEY_ID = "";  // Put your API key ID here
     private static String KEY_PATH = "/app/key.txt";
 
-    private static KalshiSession instance = new KalshiSession("https://api.elections.kalshi.com", KEY_ID, KEY_PATH);
+    private static KalshiSession session = new KalshiSession("https://api.elections.kalshi.com", KEY_ID, KEY_PATH);
 
     public static void main(String[] args) {
-        KalshiWrapper wrapper = instance.getWrapper();
+        KalshiWrapper wrapper = session.getWrapper();
         List<String> tickers = new ArrayList<>();
         RequestParameters params = new RequestParameters();
         params.addParam("status", "open");
@@ -37,11 +37,7 @@ public class KalshiSystem {
         } catch (ParseException exc) {
             exc.printStackTrace();
         }
-        KalshiWebSocketClient wsClient = instance.getWsClient();
+        KalshiWebSocketClient wsClient = session.getWsClient();
         wsClient.subscribe(new String[]{"orderbook_delta", "trade", "ticker"}, tickers.toArray(new String[0]));
-    }
-
-    public static KalshiSession getInstance() {
-        return instance;
     }
 }

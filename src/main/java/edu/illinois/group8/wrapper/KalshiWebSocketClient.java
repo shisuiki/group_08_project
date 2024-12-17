@@ -35,7 +35,6 @@ public class KalshiWebSocketClient extends WebSocketClient {
         return new ClientClusterOrchestrator(clusterAddresses, ip);
     }
     public KalshiWebSocketClient(KalshiWrapper wrapper) {
-        // Clus
         super(wrapper.getBaseUrl().replace("https://", "wss://") + PATH);
         this.wrapper = wrapper;
         

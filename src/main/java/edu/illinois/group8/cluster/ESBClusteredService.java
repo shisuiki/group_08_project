@@ -6,15 +6,11 @@ import io.aeron.cluster.codecs.CloseReason;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster.Role;
 import io.aeron.Aeron;
-import io.aeron.CommonContext;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
-import io.aeron.Publication;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;

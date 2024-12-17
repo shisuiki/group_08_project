@@ -1,7 +1,5 @@
 package edu.illinois.group8.tickerplant;
 
-import io.aeron.Aeron;
-import io.aeron.ConcurrentPublication;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
@@ -15,6 +13,8 @@ public class TPAeronServer implements Runnable {
     private final Publication topOfBookPublication;
     private final Publication tradePublication;
     private final Publication bookEventsPublication;
+    private final Publication tickerPublication;
+    private final Publication openInterestPublication;
     private final Subscription internalSubscription;
 
     private static final Logger logger = LoggerFactory.getLogger(TPAeronServer.class);
@@ -25,6 +25,8 @@ public class TPAeronServer implements Runnable {
         this.topOfBookPublication = communicationOrchestrator.getTopOfBookPublication();
         this.tradePublication = communicationOrchestrator.getTradesPublication();
         this.bookEventsPublication = communicationOrchestrator.getBookEventsPublication();
+        this.tickerPublication = communicationOrchestrator.getTickerPublication();
+        this.openInterestPublication = communicationOrchestrator.getOpenInterestPublication();
     }
 
     @Override
@@ -43,12 +45,17 @@ public class TPAeronServer implements Runnable {
                             topOfBookPublication.offer(buffer, offset, length);
                             break;
                         case 'D':
-                            System.out.println("tickerplant: publishing book events message");
-                            bookEventsPublication.offer(buffer, offset, length);
-                            break;
                         case 'S':
                             System.out.println("tickerplant: publishing book events message");
                             bookEventsPublication.offer(buffer, offset, length);
+                            break;
+                        case 'R':
+                            System.out.println("tickerplant: publishing ticker event message");
+                            tickerPublication.offer(buffer, offset, length);
+                            break;
+                        case 'O':
+                            System.out.println("tickerplant: publishing open interest message");
+                            openInterestPublication.offer(buffer, offset, length);
                             break;
                         default:
                             System.out.println("Unknown message type: " + msgType);
