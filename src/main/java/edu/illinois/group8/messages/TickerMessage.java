@@ -35,6 +35,17 @@ public class TickerMessage extends Message {
                 "}";
     }
 
+    public String getOpenInterestMessage() {
+        return "{\n" + //
+                "  \"type\": \"O\",\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"volume\": " + getMsg().getVolume() + ",\n" + //
+                "  \"open_interest\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"dollar_volume\": " + getMsg().getDollarVolume() + ",\n" + //
+                "  \"dollar_open_interest\": " + getMsg().getDollarOpenInterest() + ",\n" + //
+                "}";
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Msg {
         @JsonProperty("market_ticker")

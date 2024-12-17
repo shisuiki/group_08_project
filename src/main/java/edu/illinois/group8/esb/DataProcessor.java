@@ -51,7 +51,7 @@ public class DataProcessor {
                     break;
                 case "ticker":
                     msg = objectMapper.readValue(message, TickerMessage.class);
-                    this.processTicker((TickerMessage) msg);
+                    publishMessage(((TickerMessage) msg).getOpenInterestMessage());
                     break;
                 case "trade":
                     msg = objectMapper.readValue(message, TradeMessage.class);
@@ -73,7 +73,6 @@ public class DataProcessor {
         try {
             byte[] byte_msg = objectMapper.writeValueAsBytes(message);
             buffer.putBytes(0, byte_msg);
-            // System.out.println("writing message "+message+" to internal publication");
             long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, byte_msg.length);
             System.out.println("data processor: wrote message to internal channel. status: " + result);
         } catch (Exception e) {
@@ -124,23 +123,4 @@ public class DataProcessor {
                                     "}";
         publishMessage(formattedMessage);
     }
-
-    private void processTicker(TickerMessage msg) {
-        TickerMessage.Msg ticker = msg.getMsg();
-        String marketTicker = ticker.getMarketTicker();
-        long volume = ticker.getVolume();
-        long openInterest = ticker.getOpenInterest();
-        long dollarVolume = ticker.getDollarVolume();
-        long dollarOpenInterest = ticker.getDollarOpenInterest();
-        String formattedMessage = "{\n" + //
-                                    "  \"type\": \"O\",\n" + //
-                                    "  \"symbol\": \"" + marketTicker + "\",\n" + //
-                                    "  \"volume\": " + volume + ",\n" + //
-                                    "  \"open_interest\": " + openInterest + ",\n" + //
-                                    "  \"dollar_volume\": " + dollarVolume + ",\n" + //
-                                    "  \"dollar_open_interest\": " + dollarOpenInterest + ",\n" + //
-                                    "}";
-        publishMessage(formattedMessage);
-    }
-
 }
