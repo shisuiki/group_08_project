@@ -23,7 +23,7 @@ public class TickerMessage extends Message {
     @Override
     public String getFormattedMessage() {
         return "{\n" + //
-                "  \"type\": \"K\",\n" + //
+                "  \"type\": \"R\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getPrice() + ",\n" + //
                 "  \"bid\": " + getMsg().getYesBid() + ",\n" + //
