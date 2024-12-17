@@ -146,7 +146,7 @@ public class DataProcessor {
                     JSONObject trade = dataArray.getJSONObject(i);
                     
                     try {
-                        // Print each trade object
+                        // Print each trade
                         // System.out.println("Processing trade: " + trade.toString());
 
                         String createdTime = trade.getString("created_time");
