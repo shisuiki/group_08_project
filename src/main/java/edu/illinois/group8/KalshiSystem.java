@@ -14,7 +14,7 @@ import java.util.List;
 
 public class KalshiSystem {
 
-    private static String KEY_ID = "3f11ef26-aaef-4319-ba11-da2d7726929a";
+    private static String KEY_ID = "";  // Put your API key ID here
     private static String KEY_PATH = "/app/key.txt";
 
     private static KalshiSession instance = new KalshiSession("https://api.elections.kalshi.com", KEY_ID, KEY_PATH);
