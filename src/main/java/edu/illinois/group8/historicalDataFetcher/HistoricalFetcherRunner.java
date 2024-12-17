@@ -51,7 +51,7 @@ public class HistoricalFetcherRunner {
                 }
 
                 // Determine if more data is available
-                moreData = (cursor != null && responseObject.has("data") && responseObject.getJSONArray("data").length() > 0);
+                moreData = (cursor != null);
 
             } catch (Exception e) {
                 System.err.println("Error in fetchTradesRunner: " + e.getMessage());

@@ -12,7 +12,7 @@ public class DatabaseConnectionTest {
     // Redshift connection details
     static Dotenv dotenv = Dotenv.load();
 
-    private static final String REDSHIFT_URL = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/dev";
+    private static final String REDSHIFT_URL = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
     private static final String DB_USER = dotenv.get("DB_USER");
     private static final String DB_PASSWORD = dotenv.get("DB_PASSWORD");
 
