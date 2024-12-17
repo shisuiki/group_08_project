@@ -71,6 +71,7 @@ public class DataProcessor {
 
     public void publishMessage(String message) {
         try {
+            System.out.println("data processor: sending " + message);
             byte[] byte_msg = objectMapper.writeValueAsBytes(message);
             buffer.putBytes(0, byte_msg);
             communicationOrchestrator.getInternalPublication().offer(buffer, 0, byte_msg.length);
@@ -112,10 +113,14 @@ public class DataProcessor {
 
     private void sendTopOfBook(String symbol, OrderBook orderBook) {
         int[] topOfBook = orderBook.getTopOfBook();
-        String formattedMessage = String.format(
-                "{\"type\":\"K\",\"symbol\":\"%s\",\"bidPrice\":%d,\"bidSize\":%d,\"askPrice\":%d,\"askSize\":%d}",
-                symbol, topOfBook[0], topOfBook[1], topOfBook[2], topOfBook[3]
-        );
+        String formattedMessage =  "{\n" + //
+                                    "  \"type\": \"K\",\n" + //
+                                    "  \"symbol\": \"" + symbol + "\",\n" + //
+                                    "  \"bidPrice\": " + topOfBook[0] + ",\n" + //
+                                    "  \"bidSize\": " + topOfBook[1] + ",\n" + //
+                                    "  \"askPrice\": " + topOfBook[2] + ",\n" + //
+                                    "  \"askSize\": " + topOfBook[3] + ",\n" + //
+                                    "}";
         publishMessage(formattedMessage);
     }
 
@@ -126,8 +131,14 @@ public class DataProcessor {
         long openInterest = ticker.getOpenInterest();
         long dollarVolume = ticker.getDollarVolume();
         long dollarOpenInterest = ticker.getDollarOpenInterest();
-        String formattedMessage = String.format("{\"type\":\"O\",\"symbol\":\"%s\",\"volume\":%d,\"open_interest\":%d,\"dollar_volume\":%d,\"dollar_open_interest\":%d}",
-                marketTicker, volume, openInterest, dollarVolume, dollarOpenInterest);
+        String formattedMessage = "{\n" + //
+                                    "  \"type\": \"O\",\n" + //
+                                    "  \"symbol\": \"" + marketTicker + "\",\n" + //
+                                    "  \"volume\": " + volume + ",\n" + //
+                                    "  \"open_interest\": " + openInterest + ",\n" + //
+                                    "  \"dollar_volume\": " + dollarVolume + ",\n" + //
+                                    "  \"dollar_open_interest\": " + dollarOpenInterest + ",\n" + //
+                                    "}";
         publishMessage(formattedMessage);
     }
 
