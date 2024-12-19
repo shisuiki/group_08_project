@@ -7,10 +7,6 @@ import io.aeron.Aeron;
 import io.aeron.Subscription;
 import io.aeron.driver.MediaDriver;
 
-import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
-import java.awt.*;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -19,7 +15,9 @@ public class MarketGridDemo implements Runnable {
     private final Subscription topOfBookSubscription;
 
     private ObjectMapper objectMapper;
-    private DefaultTableModel tableModel;
+
+    private int rowCount = 0;
+    private final String[][] tableData = new String[100][5];
 
     public MarketGridDemo(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;
@@ -29,44 +27,25 @@ public class MarketGridDemo implements Runnable {
 
     @Override
     public void run() {
-        System.out.println("market grid running...");
-        SwingUtilities.invokeLater(this::initializeGUI);
-
         while (true) {
             topOfBookSubscription.poll((buffer, offset, length, header) -> {
                 String message = buffer.getStringWithoutLengthUtf8(offset, length);
-                System.out.println("market grid received: " + message);
                 processMessage(message);
             }, 1);
         }
     }
 
-    private void initializeGUI() {
-        JFrame frame = new JFrame("Market Grid Demo");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(800, 400);
-        frame.setLayout(new BorderLayout());
-
-        String[] columnNames = {"Symbol", "Bid Price", "Bid Size", "Ask Price", "Ask Size"};
-        tableModel = new DefaultTableModel(columnNames, 0);
-        JTable table = new JTable(tableModel);
-
-        JScrollPane scrollPane = new JScrollPane(table);
-        frame.add(scrollPane, BorderLayout.CENTER);
-
-        frame.setVisible(true);
-    }
-
     private void processMessage(String message) {
         try {
             JsonNode rootNode = objectMapper.readTree(message);
-            SwingUtilities.invokeLater(() -> updateTable(
-                                                rootNode.get("symbol").asText(),
-                                                rootNode.get("bidPrice").asText(),
-                                                rootNode.get("bidSize").asText(),
-                                                rootNode.get("askPrice").asText(),
-                                                rootNode.get("askSize").asText()
-                                            ));
+            updateTable(
+                rootNode.get("symbol").asText(),
+                rootNode.get("bidPrice").asText(),
+                rootNode.get("bidSize").asText(),
+                rootNode.get("askPrice").asText(),
+                rootNode.get("askSize").asText()
+            );
+            printTable();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -74,19 +53,53 @@ public class MarketGridDemo implements Runnable {
 
     private void updateTable(String symbol, String bidPrice, String bidSize, String askPrice, String askSize) {
         boolean updated = false;
-        for (int i = 0; i < tableModel.getRowCount(); i++) {
-            if (tableModel.getValueAt(i, 0).equals(symbol)) {
-                tableModel.setValueAt(bidPrice, i, 1);
-                tableModel.setValueAt(bidSize, i, 2);
-                tableModel.setValueAt(askPrice, i, 3);
-                tableModel.setValueAt(askSize, i, 4);
+        for (int i = 0; i < rowCount; i++) {
+            if (tableData[i][0].equals(symbol)) {
+                tableData[i][1] = bidPrice;
+                tableData[i][2] = bidSize;
+                tableData[i][3] = askPrice;
+                tableData[i][4] = askSize;
                 updated = true;
                 break;
             }
         }
 
-        if (!updated) {
-            tableModel.addRow(new Object[]{symbol, bidPrice, bidSize, askPrice, askSize});
+        if (!updated && rowCount < tableData.length) {
+            tableData[rowCount][0] = symbol;
+            tableData[rowCount][1] = bidPrice;
+            tableData[rowCount][2] = bidSize;
+            tableData[rowCount][3] = askPrice;
+            tableData[rowCount][4] = askSize;
+            rowCount++;
         }
+    }
+
+    private void printTable() {
+        clearConsole();
+        printTableHeader();
+        if (rowCount == 0) System.out.println("No data.");
+        else {
+            for (int i = 0; i < rowCount; i++) {
+                System.out.printf("| %-15s | %-9s | %-7s | %-9s | %-7s |\n", 
+                        tableData[i][0], tableData[i][1], tableData[i][2], tableData[i][3], tableData[i][4]);
+            }
+        }
+        System.out.println("+-----------------+-----------+---------+-----------+---------+");
+    }
+
+    private void printTableHeader() {
+        System.out.println("+-----------------+-----------+---------+-----------+---------+");
+        System.out.printf("| %-15s | %-9s | %-7s | %-9s | %-7s |\n", "Symbol", "Bid Price", "Bid Size", "Ask Price", "Ask Size");
+        System.out.println("+-----------------+-----------+---------+-----------+---------+");
+    }
+
+    private void clearConsole() {
+        // try {
+        //     Runtime.getRuntime().exec("clear");
+        // } catch (Exception e) {
+        //     e.printStackTrace();
+        // }
+
+        System.out.printf("\n\n\n\n\n\n\n\n\n\n\n\n");
     }
 }
