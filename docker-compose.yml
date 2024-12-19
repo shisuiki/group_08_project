@@ -6,7 +6,6 @@ services:
       - BASE_DIR=/app
       - NODE_ID=0
       - CLUSTER_PORT_BASE=9000
-      - DISPLAY=:1
     networks:
       cluster_net:
         ipv4_address: 172.20.0.2
@@ -16,7 +15,6 @@ services:
       - "40457:40457"
     volumes:
       - ./logs/node0:/app/cluster
-      - /tmp/.X11-unix:/tmp/.X11-unix
     shm_size: '2gb'
 
   node1:
@@ -26,7 +24,6 @@ services:
       - BASE_DIR=/app
       - NODE_ID=1
       - CLUSTER_PORT_BASE=9000
-      - DISPLAY=:1
     networks:
       cluster_net:
         ipv4_address: 172.20.0.3
@@ -36,7 +33,6 @@ services:
       - "40459:40457"
     volumes:
       - ./logs/node1:/app/cluster
-      - /tmp/.X11-unix:/tmp/.X11-unix
     shm_size: '2gb'
 
   node2:
@@ -46,7 +42,6 @@ services:
       - BASE_DIR=/app
       - NODE_ID=2
       - CLUSTER_PORT_BASE=9000
-      - DISPLAY=:1
     networks:
       cluster_net:
         ipv4_address: 172.20.0.4
@@ -56,7 +51,6 @@ services:
       - "40461:40457"
     volumes:
       - ./logs/node2:/app/cluster
-      - /tmp/.X11-unix:/tmp/.X11-unix
     shm_size: '2gb'
   
   wsclient:
@@ -71,28 +65,10 @@ services:
         ipv4_address: 172.20.0.6
     volumes:
       - ./logs/wsclient:/app/cluster
-      - ./keys/key.txt:/app/key.txt # put your key directory here
+      - <KEYDIRHERE>:/app/key.txt # put your key directory here
     shm_size: '2gb'
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
-
-  # marketgrid:
-  #   build: .
-  #   environment:
-  #     - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
-  #     - BASE_DIR=/app
-  #     - CLUSTER_PORT_BASE=9000
-  #     - IP=172.20.0.5
-  #   ports:
-  #     - "40462:40456"
-  #   networks:
-  #     cluster_net:
-  #       ipv4_address: 172.20.0.5
-  #   volumes:
-  #     - ./logs/marketgrid:/app/cluster
-  #   shm_size: '2gb'
-  #   command: >
-  #     sh -c "xvfb-run java -cp /app/app.jar edu.illinois.group8.demo.MarketGridDemo"
 
   # test deployment for publisher
   # publisher:
@@ -111,6 +87,7 @@ services:
   #   command: >
   #     sh -c "java -cp /app/app.jar edu.illinois.group8.tests.TestPublisher 'Hello Cluster!'"
 
+             
 networks:
   cluster_net:
     driver: bridge
