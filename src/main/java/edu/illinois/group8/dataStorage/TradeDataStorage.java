@@ -1,4 +1,4 @@
-package edu.illinois.group8.dataStorage;
+package edu.illinois.group8.datastorage;
 
 import edu.illinois.group8.cluster.StreamIDs;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import io.aeron.Aeron;
 import io.aeron.Subscription;
 import io.aeron.driver.MediaDriver;
+import io.github.cdimascio.dotenv.Dotenv;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -24,8 +25,10 @@ public class TradeDataStorage implements Runnable {
     private ObjectMapper objectMapper;
 
     private final String redshiftUrl = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
-    private final String dbUser;
-    private final String dbPassword;
+    Dotenv dotenv = Dotenv.load();
+
+    private String dbUser = dotenv.get("DB_USER");
+    private String dbPassword = dotenv.get("DB_PASSWORD");
 
     public TradeDataStorage(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;

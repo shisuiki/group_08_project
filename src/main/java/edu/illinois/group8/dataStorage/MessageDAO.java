@@ -1,4 +1,4 @@
-package edu.illinois.group8.database;
+package edu.illinois.group8.datastorage;
 
 import edu.illinois.group8.messages.OrderBookDeltaMessage;
 import edu.illinois.group8.messages.OrderBookSnapshotMessage;
