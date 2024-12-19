@@ -4,12 +4,14 @@ import io.aeron.Publication;
 import io.aeron.Subscription;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 
+import java.nio.charset.StandardCharsets;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class TPAeronServer implements Runnable {
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
-    private final int messageTypeOffset = 18;
+    private final int messageTypeOffset = 8;
     private final Publication topOfBookPublication;
     private final Publication tradePublication;
     private final Publication bookEventsPublication;
@@ -33,28 +35,34 @@ public class TPAeronServer implements Runnable {
     public void run() {
         while (true) {
             internalSubscription.poll((buffer, offset, length, header) -> {
-                    byte msgType = buffer.getByte(offset + messageTypeOffset);
+
+                    byte[] data = new byte[length];
+                    buffer.getBytes(offset, data);
+                    String msg = new String(data, StandardCharsets.UTF_8);
+
+                    char msgType = extractMessageType(msg);
     
                     switch (msgType) {
                         case 'T':
-                            System.out.println("tickerplant: publishing trade message");
+                            // System.out.println("tickerplant: publishing trade message");
                             tradePublication.offer(buffer, offset, length);
                             break;
                         case 'K':
-                            System.out.println("tickerplant: publishing top of book message");
+                            // System.out.println("tickerplant: publishing top of book message");
                             topOfBookPublication.offer(buffer, offset, length);
                             break;
-                        case 'D':
                         case 'S':
-                            System.out.println("tickerplant: publishing book events message");
+                            // System.out.println("tickerplant: publishing snapshot message");
+                        case 'D':
+                            // System.out.println("tickerplant: publishing book events message");
                             bookEventsPublication.offer(buffer, offset, length);
                             break;
                         case 'R':
-                            System.out.println("tickerplant: publishing ticker event message");
+                            // System.out.println("tickerplant: publishing ticker event message");
                             tickerPublication.offer(buffer, offset, length);
                             break;
                         case 'O':
-                            System.out.println("tickerplant: publishing open interest message");
+                            // System.out.println("tickerplant: publishing open interest message");
                             openInterestPublication.offer(buffer, offset, length);
                             break;
                         default:
@@ -63,4 +71,10 @@ public class TPAeronServer implements Runnable {
                 }, 1);
         }
     }
+
+    private char extractMessageType(String json) {
+        int idx = json.indexOf("\"type\":");
+        return idx == -1 ? '?' : json.charAt(idx + messageTypeOffset);
+    }
+
 }

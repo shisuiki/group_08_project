@@ -3,6 +3,8 @@ package edu.illinois.group8.messages;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Map;
+
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class OrderBookDeltaMessage extends Message {
     private int seq;
@@ -27,23 +29,23 @@ public class OrderBookDeltaMessage extends Message {
     }
 
     @Override
-    public String getFormattedMessage() {
-        if (getMsg().getSide().equals("yes")) {
-            return "{\n" + //
-                "  \"type\": \"D\",\n" + //
-                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"price\": " + getMsg().getPrice() + ",\n" + //
-                "  \"delta\": " + getMsg().getDelta() + ",\n" + //
-                "  \"side\": \"bid\"\n" + //
-                "}";
+    public Map<String, Object> getFormattedMessage() {
+        if (msg.getSide().equals("yes")) {
+            return Map.of(
+                "type", "D",
+                "symbol", msg.getMarketTicker(),
+                "price", msg.getPrice(),
+                "delta", msg.getDelta(),
+                "side", "bid"
+            );
         } else {
-            return "{\n" + //
-                "  \"type\": \"D\",\n" + //
-                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"price\": " + (100 - getMsg().getPrice()) + ",\n" + //
-                "  \"delta\": " + (-1 * getMsg().getDelta()) + ",\n" + //
-                "  \"side\": \"ask\"\n" + //
-                "}";
+            return Map.of(
+                "type", "D",
+                "symbol", msg.getMarketTicker(),
+                "price", (100 - msg.getPrice()),
+                "delta", (-1 * msg.getDelta()),
+                "side", "ask"
+            );
         }
     }
 

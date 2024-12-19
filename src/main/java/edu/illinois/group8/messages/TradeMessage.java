@@ -3,6 +3,8 @@ package edu.illinois.group8.messages;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Map;
+
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TradeMessage extends Message {
     private Msg msg;
@@ -21,15 +23,15 @@ public class TradeMessage extends Message {
     }
 
     @Override
-    public String getFormattedMessage() {
-        return "{\n" + //
-                "  \"type\": \"T\",\n" + //
-                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"price\": " + getMsg().getYesPrice() + ",\n" + //
-                "  \"quantity\": " + getMsg().getCount() + ",\n" + //
-                "  \"side\": \"" + (getMsg().getTakerSide().equals("no") ? "ask" : "bid") + "\",\n" + //
-                "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
-                "}";
+    public Map<String, Object> getFormattedMessage() {
+        return Map.of(
+            "type", "T",
+            "symbol", msg.getMarketTicker(),
+            "price", msg.getYesPrice(),
+            "quantity", msg.getCount(),
+            "side", (getMsg().getTakerSide().equals("no") ? "ask" : "bid"),
+            "exchange_timestamp", msg.getTs() * 1000
+        );
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

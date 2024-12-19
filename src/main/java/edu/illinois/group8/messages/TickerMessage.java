@@ -3,6 +3,8 @@ package edu.illinois.group8.messages;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Map;
+
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TickerMessage extends Message {
     private Msg msg;
@@ -21,29 +23,27 @@ public class TickerMessage extends Message {
     }
 
     @Override
-    public String getFormattedMessage() {
-        return "{\n" + //
-                "  \"type\": \"R\",\n" + //
-                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"price\": " + getMsg().getPrice() + ",\n" + //
-                "  \"bid\": " + getMsg().getYesBid() + ",\n" + //
-                "  \"ask\": " + getMsg().getYesAsk() + ",\n" + //
-                "  \"open_interest\": " + getMsg().getOpenInterest() + ",\n" + //
-                "  \"dollar_volume\": " + getMsg().getDollarVolume() + ",\n" +
-                "  \"dollar_open_interest\": " + getMsg().getDollarOpenInterest() + ",\n" +
-                "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
-                "}";
+    public Map<String, Object> getFormattedMessage() {
+        return Map.of(
+            "type", "R",
+            "symbol", msg.getMarketTicker(),
+            "price", msg.getPrice(),
+            "bid", msg.getYesBid(),
+            "ask", msg.getYesAsk(),
+            "volume", msg.getVolume(),
+            "exchange_timestamp", msg.getTs() * 1000
+        );
     }
 
-    public String getOpenInterestMessage() {
-        return "{\n" + //
-                "  \"type\": \"O\",\n" + //
-                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"volume\": " + getMsg().getVolume() + ",\n" + //
-                "  \"open_interest\": " + getMsg().getOpenInterest() + ",\n" + //
-                "  \"dollar_volume\": " + getMsg().getDollarVolume() + ",\n" + //
-                "  \"dollar_open_interest\": " + getMsg().getDollarOpenInterest() + ",\n" + //
-                "}";
+    public Map<String, Object> getOpenInterestMessage() {
+        return Map.of(
+            "type", "O",
+            "symbol", msg.getMarketTicker(),
+            "volume", msg.getVolume(),
+            "open_interest", msg.getOpenInterest(),
+            "dollar_volume", msg.getDollarVolume(),
+            "dollar_open_interest", msg.getDollarOpenInterest()
+        );
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
