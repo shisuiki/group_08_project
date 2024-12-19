@@ -18,7 +18,7 @@ import java.sql.Timestamp;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 
-public class TradeDataStroage implements Runnable {
+public class TradeDataStorage implements Runnable {
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final Subscription tradeSubscription;
     private ObjectMapper objectMapper;
@@ -27,12 +27,9 @@ public class TradeDataStroage implements Runnable {
     private final String dbUser;
     private final String dbPassword;
 
-    public TradeDataStroage(ESBClusterCommunicationOrchestrator communicationOrchestrator, String redshiftUrl, String dbUser, String dbPassword) {
+    public TradeDataStorage(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;
-        this.tradeSubscription = communicationOrchestrator.getTradesPublication();
-        this.redshiftUrl = redshiftUrl;
-        this.dbUser = dbUser;
-        this.dbPassword = dbPassword;
+        this.tradeSubscription = communicationOrchestrator.getTradesSubscription();
         objectMapper = new ObjectMapper();
     }
 
