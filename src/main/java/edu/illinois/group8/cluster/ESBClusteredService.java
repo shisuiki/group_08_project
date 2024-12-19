@@ -20,6 +20,8 @@ import org.json.*;
 
 import edu.illinois.group8.esb.DataProcessor;
 import edu.illinois.group8.tickerplant.TPAeronServer;
+import edu.illinois.group8.dataStorage.TradeDataStorage;
+
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
@@ -31,6 +33,7 @@ public class ESBClusteredService implements ClusteredService {
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private DataProcessor processor;
     private Thread tickerplantThread;
+    private Thread dataStorageThread;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
@@ -76,6 +79,11 @@ public class ESBClusteredService implements ClusteredService {
         this.processor = new DataProcessor(communicationOrchestrator);
         this.tickerplantThread = new Thread(new TPAeronServer(communicationOrchestrator));
         this.tickerplantThread.start();
+
+        this.dataStorageThread = new Thread(new TradeDataStorage(communicationOrchestrator));
+        this.dataStorageThread.start();
+
+
 
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc

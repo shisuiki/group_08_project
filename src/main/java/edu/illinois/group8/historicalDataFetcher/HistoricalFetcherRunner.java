@@ -21,7 +21,7 @@ public class HistoricalFetcherRunner {
     }
 
     public void fetchTradesRunner(long startTime, long endTime, String tableName) {
-        String cursor = null; // Initialize cursor as null for the first request
+        String cursor = "null"; // Initialize cursor as null for the first request
         boolean moreData = true; // Flag to indicate if more data is available
 
         while (moreData) {
