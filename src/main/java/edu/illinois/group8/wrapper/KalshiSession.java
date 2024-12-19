@@ -1,12 +1,8 @@
 package edu.illinois.group8.wrapper;
 
-import java.util.HashMap;
-import java.util.Map;
-
 public class KalshiSession {
     private KalshiWrapper wrapper;
     private KalshiWebSocketClient wsClient;
-    private Map<String, OrderBook> orderBooks = new HashMap<>();
 
     public KalshiSession(String baseUrl, String keyId, String path) {
         this.wrapper = new KalshiWrapper(baseUrl, keyId, path);
@@ -19,9 +15,5 @@ public class KalshiSession {
 
     public KalshiWebSocketClient getWsClient() {
         return wsClient;
-    }
-
-    public Map<String, OrderBook> getOrderBooks() {
-        return orderBooks;
     }
 }

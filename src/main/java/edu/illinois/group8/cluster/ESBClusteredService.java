@@ -6,15 +6,11 @@ import io.aeron.cluster.codecs.CloseReason;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster.Role;
 import io.aeron.Aeron;
-import io.aeron.CommonContext;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
-import io.aeron.Publication;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
@@ -23,6 +19,7 @@ import io.aeron.logbuffer.Header;
 import org.json.*;
 
 import edu.illinois.group8.esb.DataProcessor;
+import edu.illinois.group8.tickerplant.TPAeronServer;
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
@@ -32,6 +29,8 @@ public class ESBClusteredService implements ClusteredService {
     private String hostname;
     private String aeronDirName;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
+    private DataProcessor processor;
+    private Thread tickerplantThread;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
@@ -73,7 +72,11 @@ public class ESBClusteredService implements ClusteredService {
         Aeron.Context ctx = new Aeron.Context().aeronDirectoryName(aeronDirName);
         aeron = Aeron.connect(ctx);
 
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname);
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname, true, aeronDirName);
+        this.processor = new DataProcessor(communicationOrchestrator);
+        this.tickerplantThread = new Thread(new TPAeronServer(communicationOrchestrator));
+        this.tickerplantThread.start();
+
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
         // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
@@ -104,7 +107,8 @@ public class ESBClusteredService implements ClusteredService {
         int offset,
         int length,
         Header header) {
-            
+        
+        
         // Process incoming messages from clients
         if (currentRole != Role.LEADER) {
             return;
@@ -114,7 +118,8 @@ public class ESBClusteredService implements ClusteredService {
         buffer.getBytes(offset, messageBytes);
         String payload = new String(messageBytes, StandardCharsets.UTF_8);
 
-        DataProcessor processor = new DataProcessor(communicationOrchestrator);
+        System.out.println("ESB: received message "+payload);
+
         processor.processMessage(payload);
     }
 
@@ -149,6 +154,7 @@ public class ESBClusteredService implements ClusteredService {
     @Override
     public void onRoleChange(Role newRole) {
         // React to role changes (LEADER, FOLLOWER, etc.)
+        System.out.println("new role: " + newRole);
         this.currentRole = newRole;
         
         // if (newRole == Role.LEADER) {

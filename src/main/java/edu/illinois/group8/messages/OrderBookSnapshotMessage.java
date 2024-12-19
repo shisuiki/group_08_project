@@ -1,10 +1,13 @@
 package edu.illinois.group8.messages;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class OrderBookSnapshotMessage extends Message {
     private int seq;
     private Msg msg;
@@ -30,7 +33,7 @@ public class OrderBookSnapshotMessage extends Message {
     @Override
     public String getFormattedMessage() {
         return "{\n" + //
-                "  \"type\": 'S',\n" + //
+                "  \"type\": \"S\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"bid\": " + getMsg().getYes() + ",\n" + //
                 "  \"ask\": " + getMsg().getNo().stream()
@@ -40,11 +43,12 @@ public class OrderBookSnapshotMessage extends Message {
                 "}";
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;
-        private List<List<Integer>> yes;
-        private List<List<Integer>> no;
+        private List<List<Integer>> yes = new ArrayList<>();
+        private List<List<Integer>> no = new ArrayList<>();
 
         public String getMarketTicker() {
             return marketTicker;

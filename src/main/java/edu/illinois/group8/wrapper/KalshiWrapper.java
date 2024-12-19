@@ -1,6 +1,5 @@
 package edu.illinois.group8.wrapper;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -133,13 +132,13 @@ public class KalshiWrapper {
             String key = entry.getKey();
             Object val = entry.getValue();
             if (val instanceof Integer && key.equals("limit")) {
-                paramsString += key + "=" + String.valueOf(val) + "&";
+                paramsString += key + "=" + val + "&";
             } else if (val instanceof String && (key.equals("cursor") || key.equals("series_ticker"))) {
                 paramsString += key + "=" + val + "&";
             } else if (val instanceof String && key.equals("status")) {
                 paramsString += key + "=" + ((String) val).replace(" ", "");
             } else if (val instanceof Boolean && key.equals("with_nested_markets")) {
-                paramsString += key + "=" + String.valueOf(val) + "&";
+                paramsString += key + "=" + val + "&";
             }
         }
         return sendGet(EVENTS_URL, paramsString);
@@ -155,7 +154,7 @@ public class KalshiWrapper {
             String key = entry.getKey();
             Object val = entry.getValue();
             if (val instanceof Boolean && key.equals("with_nested_markets")) {
-                paramsString += key + "=" + String.valueOf(val) + "&";
+                paramsString += key + "=" + val + "&";
             }
         }
         return sendGet(EVENTS_URL + "/" + eventTicker, paramsString);
@@ -191,7 +190,7 @@ public class KalshiWrapper {
             String key = entry.getKey();
             Object val = entry.getValue();
             if (val instanceof Integer && (key.equals("limit") || key.equals("max_ts") || key.equals("min_ts"))) {
-                paramsString += key + "=" + String.valueOf(val) + "&";
+                paramsString += key + "=" + val + "&";
             } else if (val instanceof String && (key.equals("cursor") || key.equals("ticker"))) {
                 paramsString += key + "=" + val + "&";
             }
@@ -213,7 +212,7 @@ public class KalshiWrapper {
             String key = entry.getKey();
             Object val = entry.getValue();
             if (val instanceof Integer && key.equals("depth")) {
-                paramsString += key + "=" + String.valueOf(val) + "&";
+                paramsString += key + "=" + val + "&";
             }
         }
         return sendAuthorizedGet(MARKETS_URL + "/" + ticker + "/orderbook", paramsString);

@@ -1,7 +1,9 @@
 package edu.illinois.group8.messages;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class OrderBookDeltaMessage extends Message {
     private int seq;
     private Msg msg;
@@ -26,9 +28,9 @@ public class OrderBookDeltaMessage extends Message {
 
     @Override
     public String getFormattedMessage() {
-        if (getMsg().getSide() == "yes") {
+        if (getMsg().getSide().equals("yes")) {
             return "{\n" + //
-                "  \"type\": 'D',\n" + //
+                "  \"type\": \"D\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getPrice() + ",\n" + //
                 "  \"delta\": " + getMsg().getDelta() + ",\n" + //
@@ -36,7 +38,7 @@ public class OrderBookDeltaMessage extends Message {
                 "}";
         } else {
             return "{\n" + //
-                "  \"type\": 'D',\n" + //
+                "  \"type\": \"D\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + (100 - getMsg().getPrice()) + ",\n" + //
                 "  \"delta\": " + (-1 * getMsg().getDelta()) + ",\n" + //
@@ -45,6 +47,7 @@ public class OrderBookDeltaMessage extends Message {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;

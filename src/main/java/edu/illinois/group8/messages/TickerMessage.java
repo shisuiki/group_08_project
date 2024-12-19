@@ -1,7 +1,9 @@
 package edu.illinois.group8.messages;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class TickerMessage extends Message {
     private Msg msg;
 
@@ -21,16 +23,30 @@ public class TickerMessage extends Message {
     @Override
     public String getFormattedMessage() {
         return "{\n" + //
-                "  \"type\": 'K',\n" + //
+                "  \"type\": \"R\",\n" + //
                 "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
                 "  \"price\": " + getMsg().getPrice() + ",\n" + //
                 "  \"bid\": " + getMsg().getYesBid() + ",\n" + //
                 "  \"ask\": " + getMsg().getYesAsk() + ",\n" + //
-                "  \"active_contracts\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"open_interest\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"dollar_volume\": " + getMsg().getDollarVolume() + ",\n" +
+                "  \"dollar_open_interest\": " + getMsg().getDollarOpenInterest() + ",\n" +
                 "  \"exchange_timestamp\": " + getMsg().getTs() * 1000 + "\n" + //
                 "}";
     }
 
+    public String getOpenInterestMessage() {
+        return "{\n" + //
+                "  \"type\": \"O\",\n" + //
+                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
+                "  \"volume\": " + getMsg().getVolume() + ",\n" + //
+                "  \"open_interest\": " + getMsg().getOpenInterest() + ",\n" + //
+                "  \"dollar_volume\": " + getMsg().getDollarVolume() + ",\n" + //
+                "  \"dollar_open_interest\": " + getMsg().getDollarOpenInterest() + ",\n" + //
+                "}";
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Msg {
         @JsonProperty("market_ticker")
         private String marketTicker;

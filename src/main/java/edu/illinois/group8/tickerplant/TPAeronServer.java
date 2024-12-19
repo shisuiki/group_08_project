@@ -1,71 +1,66 @@
 package edu.illinois.group8.tickerplant;
 
-import io.aeron.Aeron;
-import io.aeron.ConcurrentPublication;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
-
-import java.nio.charset.StandardCharsets;
-import java.nio.file.WatchEvent;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class TPAeronServer implements Runnable {
-    private final Aeron aeron;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
-    // private final int messageTypeOffset = 17;
+    private final int messageTypeOffset = 18;
+    private final Publication topOfBookPublication;
+    private final Publication tradePublication;
+    private final Publication bookEventsPublication;
+    private final Publication tickerPublication;
+    private final Publication openInterestPublication;
+    private final Subscription internalSubscription;
 
     private static final Logger logger = LoggerFactory.getLogger(TPAeronServer.class);
 
-    public TPAeronServer() {
-        aeron = Aeron.connect(new Aeron.Context());
-        String ip = System.getenv("IP_ADDRESS");
-        if (ip == "") {
-            System.out.println("Unable to get system IP");
-            System.exit(1);
-        }
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(ip);
+    public TPAeronServer(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
+        this.communicationOrchestrator = communicationOrchestrator;
+        this.internalSubscription = communicationOrchestrator.getInternalSubscription();
+        this.topOfBookPublication = communicationOrchestrator.getTopOfBookPublication();
+        this.tradePublication = communicationOrchestrator.getTradesPublication();
+        this.bookEventsPublication = communicationOrchestrator.getBookEventsPublication();
+        this.tickerPublication = communicationOrchestrator.getTickerPublication();
+        this.openInterestPublication = communicationOrchestrator.getOpenInterestPublication();
     }
 
     @Override
     public void run() {
-        Subscription a = communicationOrchestrator.getBookEventsSubscription();
-        Subscription b = communicationOrchestrator.getTopOfBookSubscription();
-        Subscription c = communicationOrchestrator.getTradesSubscription();
-
-        // TODO: write 3 different threads to listen and then offer processed data to external channels
-        
         while (true) {
-            // String currentLeaderIp = leaderIp.get();
-            // if (!currentLeaderIp.isEmpty()) {
-            //     internalChannels.get(currentLeaderIp).poll((buffer, offset, length, header) -> {
-            //             char messageType = (char) buffer.getByte(messageTypeOffset);
-        
-            //             switch (messageType) {
-            //                 case 'T':
-            //                     externalChannels.get(currentLeaderIp).get(tradeIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 case 'K':
-            //                     externalChannels.get(currentLeaderIp).get(topOfBookIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 case 'D':
-            //                     externalChannels.get(currentLeaderIp).get(bookEventsIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 case 'S':
-            //                     externalChannels.get(currentLeaderIp).get(bookEventsIdx).offer(buffer, offset, length);
-            //                     break;
-            //                 default:
-            //                     logger.warn("Unknown message type: " + messageType);
-            //             }
-            //         }, 1);
-            // }
+            internalSubscription.poll((buffer, offset, length, header) -> {
+                    byte msgType = buffer.getByte(offset + messageTypeOffset);
+    
+                    switch (msgType) {
+                        case 'T':
+                            System.out.println("tickerplant: publishing trade message");
+                            tradePublication.offer(buffer, offset, length);
+                            break;
+                        case 'K':
+                            System.out.println("tickerplant: publishing top of book message");
+                            topOfBookPublication.offer(buffer, offset, length);
+                            break;
+                        case 'D':
+                        case 'S':
+                            System.out.println("tickerplant: publishing book events message");
+                            bookEventsPublication.offer(buffer, offset, length);
+                            break;
+                        case 'R':
+                            System.out.println("tickerplant: publishing ticker event message");
+                            tickerPublication.offer(buffer, offset, length);
+                            break;
+                        case 'O':
+                            System.out.println("tickerplant: publishing open interest message");
+                            openInterestPublication.offer(buffer, offset, length);
+                            break;
+                        default:
+                            System.out.println("Unknown message type: " + msgType);
+                    }
+                }, 1);
         }
     }
 }
