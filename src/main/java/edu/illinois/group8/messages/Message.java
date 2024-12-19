@@ -1,5 +1,7 @@
 package edu.illinois.group8.messages;
 
+import java.util.Map;
+
 public abstract class Message {
     private String type;
     private int sid;
@@ -20,6 +22,6 @@ public abstract class Message {
                 '}';
     }
 
-    public abstract String getFormattedMessage();
+    public abstract Map<String, Object> getFormattedMessage();
 }
 

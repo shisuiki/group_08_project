@@ -38,7 +38,7 @@ public class DataProcessor {
             String type = rootNode.get("type").asText();
             Message msg = null;
 
-            System.out.println("ESB received message: " + message);
+            // System.out.println("ESB received message: " + message);
 
             switch (type) {
                 case "orderbook_snapshot":
@@ -69,12 +69,11 @@ public class DataProcessor {
         }
     }
 
-    public void publishMessage(String message) {
+    public void publishMessage(Map<String, Object> message) {
         try {
             byte[] byte_msg = objectMapper.writeValueAsBytes(message);
             buffer.putBytes(0, byte_msg);
             long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, byte_msg.length);
-            System.out.println("data processor: wrote message to internal channel. status: " + result);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -113,14 +112,16 @@ public class DataProcessor {
 
     private void sendTopOfBook(String symbol, OrderBook orderBook) {
         int[] topOfBook = orderBook.getTopOfBook();
-        String formattedMessage = "{\n" + //
-                                    "  \"type\": \"K\",\n" + //
-                                    "  \"symbol\": \"" + symbol + "\",\n" + //
-                                    "  \"bidPrice\": " + topOfBook[0] + ",\n" + //
-                                    "  \"bidSize\": " + topOfBook[1] + ",\n" + //
-                                    "  \"askPrice\": " + topOfBook[2] + ",\n" + //
-                                    "  \"askSize\": " + topOfBook[3] + ",\n" + //
-                                    "}";
+
+        Map<String, Object> formattedMessage = Map.of(
+            "type", "K",
+            "symbol", symbol,
+            "bidPrice", topOfBook[0],
+            "bidSize", topOfBook[1],
+            "askPrice", topOfBook[2],
+            "askSize", topOfBook[3]
+        );
+
         publishMessage(formattedMessage);
     }
 }

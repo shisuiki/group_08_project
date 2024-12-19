@@ -3,6 +3,7 @@ package edu.illinois.group8.messages;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -31,16 +32,15 @@ public class OrderBookSnapshotMessage extends Message {
     }
 
     @Override
-    public String getFormattedMessage() {
-        return "{\n" + //
-                "  \"type\": \"S\",\n" + //
-                "  \"symbol\": \"" + getMsg().getMarketTicker() + "\",\n" + //
-                "  \"bid\": " + getMsg().getYes() + ",\n" + //
-                "  \"ask\": " + getMsg().getNo().stream()
-                                    .map(innerList -> innerList.stream().map(i -> 100 - i)
-                                        .collect(Collectors.toList()))
-                                    .collect(Collectors.toList()) + "\n" + //
-                "}";
+    public Map<String, Object> getFormattedMessage() {
+        return Map.of(
+            "type", "S",
+            "symbol", msg.getMarketTicker(),
+            "bid", msg.getYes(),
+            "ask", msg.getNo().stream().map(innerList -> innerList.stream().map(i -> 100 - i)
+                        .collect(Collectors.toList()))
+                        .collect(Collectors.toList())
+        );
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
