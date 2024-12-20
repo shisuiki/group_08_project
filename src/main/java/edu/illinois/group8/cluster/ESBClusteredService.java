@@ -19,7 +19,7 @@ import io.aeron.logbuffer.Header;
 import org.json.*;
 
 import edu.illinois.group8.esb.DataProcessor;
-import edu.illinois.group8.tickerplant.TPAeronServer;
+import edu.illinois.group8.esb.Tickerplant;
 import edu.illinois.group8.dataStorage.TradeDataStorage;
 
 import edu.illinois.group8.demo.MarketGridDemo;
@@ -79,7 +79,7 @@ public class ESBClusteredService implements ClusteredService {
 
         this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname, true, aeronDirName);
         this.processor = new DataProcessor(communicationOrchestrator);
-        this.tickerplantThread = new Thread(new TPAeronServer(communicationOrchestrator));
+        this.tickerplantThread = new Thread(new Tickerplant(communicationOrchestrator));
         this.tickerplantThread.start();
 
         // this.dataStorageThread = new Thread(new TradeDataStorage(communicationOrchestrator));
