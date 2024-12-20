@@ -32,4 +32,28 @@ public class HistoricalDataFetcher {
         }
     }
 
+    public String fetchEvents(String cursor) {
+        try {
+            RequestParameters params = new RequestParameters();
+            params.addParam("status", "open,unopened");
+            params.addParam("with_nested_markets", true);
+            if (cursor != null && !cursor.isEmpty()) {
+                params.addParam("cursor", cursor);
+            }
+            return kalshiWrapper.getEvents(params);
+        } catch (Exception e) {
+            System.err.println("Error fetching events: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public String fetchSeries(String seriesTicker) {
+        try {
+            return kalshiWrapper.getSeries(seriesTicker);
+        } catch (Exception e) {
+            System.err.println("Error fetching events: " + e.getMessage());
+            return null;
+        }
+    }
+
 }

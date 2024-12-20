@@ -22,6 +22,7 @@ import edu.illinois.group8.esb.DataProcessor;
 import edu.illinois.group8.tickerplant.TPAeronServer;
 import edu.illinois.group8.dataStorage.TradeDataStorage;
 
+import edu.illinois.group8.demo.MarketGridDemo;
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
@@ -34,6 +35,7 @@ public class ESBClusteredService implements ClusteredService {
     private DataProcessor processor;
     private Thread tickerplantThread;
     private Thread dataStorageThread;
+    private Thread clientThread;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this.aeronDirName = aeronDirName;
@@ -82,6 +84,8 @@ public class ESBClusteredService implements ClusteredService {
 
         // this.dataStorageThread = new Thread(new TradeDataStorage(communicationOrchestrator));
         // this.dataStorageThread.start();
+        this.clientThread = new Thread(new MarketGridDemo(communicationOrchestrator));
+        this.clientThread.start();
 
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
@@ -124,7 +128,7 @@ public class ESBClusteredService implements ClusteredService {
         buffer.getBytes(offset, messageBytes);
         String payload = new String(messageBytes, StandardCharsets.UTF_8);
 
-        System.out.println("ESB: received message "+payload);
+        // System.out.println("ESB: received message "+payload);
 
         processor.processMessage(payload);
     }

@@ -136,7 +136,7 @@ public class KalshiWrapper {
             } else if (val instanceof String && (key.equals("cursor") || key.equals("series_ticker"))) {
                 paramsString += key + "=" + val + "&";
             } else if (val instanceof String && key.equals("status")) {
-                paramsString += key + "=" + ((String) val).replace(" ", "");
+                paramsString += key + "=" + ((String) val).replace(" ", "") + "&";
             } else if (val instanceof Boolean && key.equals("with_nested_markets")) {
                 paramsString += key + "=" + val + "&";
             }
