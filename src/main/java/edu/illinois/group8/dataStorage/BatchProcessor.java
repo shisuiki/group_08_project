@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import io.github.cdimascio.dotenv.Dotenv;
+
 
 public class BatchProcessor {
     private static final Dotenv dotenv = Dotenv.load();
@@ -73,7 +75,7 @@ public class BatchProcessor {
     }
 
     public static void shutdown() {
-        scheduler.shutdown();
+        // scheduler.shutdown();
         flushBatch();
     }
 }

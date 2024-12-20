@@ -1,3 +1,5 @@
+package edu.illinois.group8.dataStorage;
+
 import io.aeron.Aeron;
 import io.aeron.Subscription;
 import io.aeron.logbuffer.FragmentHandler;
@@ -22,6 +24,8 @@ public class AeronListener implements Runnable {
     private final int messageTypeOffset = 17;
 
     private BatchProcessor processor = new BatchProcessor();
+
+    private int MESSAGE_TYPE_OFFSET = 4;
 
     public AeronListener() {
         Aeron.Context ctx = new Aeron.Context();
