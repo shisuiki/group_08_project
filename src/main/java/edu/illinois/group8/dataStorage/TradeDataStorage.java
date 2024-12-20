@@ -3,9 +3,6 @@ package edu.illinois.group8.dataStorage;
 import edu.illinois.group8.cluster.StreamIDs;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 import io.aeron.Aeron;
 import io.aeron.Subscription;
 import io.aeron.driver.MediaDriver;
@@ -56,9 +53,11 @@ public class TradeDataStorage implements Runnable {
         try (Connection connection = DriverManager.getConnection(redshiftUrl, dbUser, dbPassword)) {
             JsonNode rootNode = objectMapper.readTree(message);
             String symbol = rootNode.get("msg").get("market_ticker").asText();
-            double price = rootNode.get("msg").get("yes_price").asDouble();
+            String takerSide = rootNode.get("msg").get("taker_side").asText();
+            double price = takerSide.equals("no") 
+                ? rootNode.get("msg").get("no_price").asDouble() 
+                : rootNode.get("msg").get("yes_price").asDouble();
             int size = rootNode.get("msg").get("count").asInt();
-            String side = rootNode.get("msg").get("taker_side").asText().equals("no") ? "ask" : "bid";
             long timestamp = rootNode.get("msg").get("ts").asLong() * 1000;
 
             String insertQuery = "INSERT INTO Trades (TradeTimestamp, Symbol, Price, Size, Side) VALUES (?, ?, ?, ?, ?)";
@@ -67,7 +66,7 @@ public class TradeDataStorage implements Runnable {
                 statement.setString(2, symbol);
                 statement.setDouble(3, price);
                 statement.setInt(4, size);
-                statement.setString(5, side);
+                statement.setString(5, takerSide.equals("no") ? "ask" : "bid");
                 statement.executeUpdate();
             }
         } catch (Exception e) {
