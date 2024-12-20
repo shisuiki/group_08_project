@@ -11,7 +11,6 @@ import org.agrona.concurrent.UnsafeBuffer;
 
 import edu.illinois.group8.dataStorage.BatchProcessor;
 
-
 public class AeronListener implements Runnable {
     private static final String CHANNEL = "aeron:udp?endpoint=localhost:40123"; // TODO: change to your Aeron channel
     private static final int STREAM_ID = 1001; // TODO: change to your Aeron stream ID

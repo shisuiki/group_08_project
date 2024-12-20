@@ -80,10 +80,8 @@ public class ESBClusteredService implements ClusteredService {
         this.tickerplantThread = new Thread(new TPAeronServer(communicationOrchestrator));
         this.tickerplantThread.start();
 
-        this.dataStorageThread = new Thread(new TradeDataStorage(communicationOrchestrator));
-        this.dataStorageThread.start();
-
-
+        // this.dataStorageThread = new Thread(new TradeDataStorage(communicationOrchestrator));
+        // this.dataStorageThread.start();
 
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc
