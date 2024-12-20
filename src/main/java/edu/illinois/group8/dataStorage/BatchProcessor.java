@@ -1,4 +1,4 @@
-package edu.illinois.group8.datastorage;
+package edu.illinois.group8.dataStorage;
 
 import java.sql.Connection;
 import java.sql.DriverManager;

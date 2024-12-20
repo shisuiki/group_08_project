@@ -48,12 +48,30 @@ public class DatabaseConnectionTest {
                 //                        ", Size: " + resultSet.getString("Size"));
                 // }
                 String countQuery = "SELECT COUNT(*) AS row_count FROM Trades;";
-                resultSet = statement.executeQuery(countQuery);
+                String dropColumn = "ALTER TABLE SymbolMaster DROP COLUMN Category";
+                resultSet = statement.executeQuery(dropColumn);
 
                 if (resultSet.next()) {
                     int rowCount = resultSet.getInt("row_count");
                     System.out.println("Total rows in Trades table: " + rowCount);
                 }
+
+                // String describeQuery = "DESCRIBE SymbolMaster;";
+                // resultSet = statement.executeQuery(describeQuery);
+                
+                // // Output the schema of the SymbolMaster table
+                // System.out.println("Schema of SymbolMaster Table:");
+                // while (resultSet.next()) {
+                //     String field = resultSet.getString("Field");
+                //     String type = resultSet.getString("Type");
+                //     String nullStatus = resultSet.getString("Null");
+                //     String key = resultSet.getString("Key");
+                //     String defaultValue = resultSet.getString("Default");
+                //     String extra = resultSet.getString("Extra");
+
+                //     System.out.println("Field: " + field + ", Type: " + type + ", Null: " + nullStatus +
+                //             ", Key: " + key + ", Default: " + defaultValue + ", Extra: " + extra);
+                // }
 
             } else {
                 System.out.println("Connection failed!");

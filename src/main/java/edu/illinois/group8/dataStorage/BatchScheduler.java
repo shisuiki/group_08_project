@@ -1,4 +1,4 @@
-package edu.illinois.group8.datastorage;
+package edu.illinois.group8.dataStorage;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
