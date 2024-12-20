@@ -35,26 +35,51 @@ public class DatabaseConnectionTest {
                 // Create a statement to execute SQL
                 statement = connection.createStatement();
 
-                // // Example query
-                // String query = "SELECT * FROM Trades LIMIT 10;"; // Replace with your query
+                // Example query
+                String query = "SELECT * FROM Trades ORDER BY TradeTimestamp DESC LIMIT 50";
 
-                // System.out.println("Executing query: " + query);
-                // resultSet = statement.executeQuery(query);
+                System.out.println("Executing query: " + query);
+                resultSet = statement.executeQuery(query);
 
-                // // Print results
-                // while (resultSet.next()) {
-                //     // Assuming the table has columns "column1", "column2", etc.
-                //     System.out.println("Price: " + resultSet.getString("Price") +
-                //                        ", Size: " + resultSet.getString("Size"));
-                // }
-                String countQuery = "SELECT COUNT(*) AS row_count FROM Trades;";
-                String dropColumn = "ALTER TABLE SymbolMaster DROP COLUMN Category";
-                resultSet = statement.executeQuery(dropColumn);
-
-                if (resultSet.next()) {
-                    int rowCount = resultSet.getInt("row_count");
-                    System.out.println("Total rows in Trades table: " + rowCount);
+                // Print results
+                while (resultSet.next()) {
+                    System.out.println(
+                        "TradeDate: " + resultSet.getDate("TradeDate") +
+                        ", TradeTimestamp: " + resultSet.getTimestamp("TradeTimestamp") +
+                        ", Symbol: " + resultSet.getString("Symbol") +
+                        ", Price: " + resultSet.getBigDecimal("Price") +
+                        ", Size: " + resultSet.getInt("Size") +
+                        ", Side: " + resultSet.getString("Side")
+                    );
                 }
+
+
+                query = "SELECT * FROM Trades WHERE Symbol LIKE 'KXBTCD%' ORDER BY TradeTimestamp DESC LIMIT 50";
+
+                System.out.println("Executing query: " + query);
+                resultSet = statement.executeQuery(query);
+
+                // Print results
+                while (resultSet.next()) {
+                    System.out.println(
+                        "TradeDate: " + resultSet.getDate("TradeDate") +
+                        ", TradeTimestamp: " + resultSet.getTimestamp("TradeTimestamp") +
+                        ", Symbol: " + resultSet.getString("Symbol") +
+                        ", Price: " + resultSet.getBigDecimal("Price") +
+                        ", Size: " + resultSet.getInt("Size") +
+                        ", Side: " + resultSet.getString("Side")
+                    );
+                }
+
+                // commented example queries
+                // String countQuery = "SELECT COUNT(*) AS row_count FROM Trades;";
+                // String dropColumn = "ALTER TABLE SymbolMaster DROP COLUMN Category";
+                // resultSet = statement.executeQuery(dropColumn);
+
+                // if (resultSet.next()) {
+                //     int rowCount = resultSet.getInt("row_count");
+                //     System.out.println("Total rows in Trades table: " + rowCount);
+                // }
 
                 // String describeQuery = "DESCRIBE SymbolMaster;";
                 // resultSet = statement.executeQuery(describeQuery);

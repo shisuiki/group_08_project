@@ -20,10 +20,20 @@ public class TradeDataStorage implements Runnable {
     private final String dbUser = dotenv.get("DB_USER");
     private final String dbPassword = dotenv.get("DB_PASSWORD");
 
+    private Connection connection;
+
     public TradeDataStorage(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;
         this.tradeSubscription = communicationOrchestrator.getTradesSubscription();
         this.objectMapper = new ObjectMapper();
+        try {
+            this.connection = DriverManager.getConnection(redshiftUrl, dbUser, dbPassword);
+            System.out.println("Database connection established.");
+        } catch (Exception e) {
+            System.err.println("Failed to establish database connection: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Database connection error.");
+        }
     }
 
     @Override
@@ -31,17 +41,20 @@ public class TradeDataStorage implements Runnable {
         System.out.println("Trade listener running...");
 
         while (true) {
-            tradeSubscription.poll((buffer, offset, length, header) -> {
-                String message = buffer.getStringWithoutLengthUtf8(offset, length);
-                System.out.println("Received trade message: " + message);
-                processTrades(message);
-            }, 1);
-        }
+            
+                System.out.println("Database connection established.");
+                tradeSubscription.poll((buffer, offset, length, header) -> {
+                    String message = buffer.getStringWithoutLengthUtf8(offset, length);
+                    System.out.println("Received trade message: " + message);
+                    processTrades(message);
+                }, 1);
+
+    }
     }
 
     private void processTrades(String message) {
-        try (Connection connection = DriverManager.getConnection(redshiftUrl, dbUser, dbPassword)) {
-            System.out.println("Database connection established.");
+
+        try {
             JsonNode rootNode = objectMapper.readTree(message);
 
             String symbol = rootNode.get("msg").get("market_ticker").asText();
@@ -66,9 +79,15 @@ public class TradeDataStorage implements Runnable {
                 int rowsInserted = statement.executeUpdate();
                 System.out.println("Rows inserted: " + rowsInserted);
             }
-        } catch (Exception e) {
+            catch (Exception e) {
+                System.err.println("Error processing trade: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+        catch (Exception e) {
             System.err.println("Error processing trade: " + e.getMessage());
             e.printStackTrace();
         }
     }
+    
 }
