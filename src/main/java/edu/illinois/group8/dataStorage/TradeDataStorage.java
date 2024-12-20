@@ -1,39 +1,29 @@
 package edu.illinois.group8.dataStorage;
 
-import edu.illinois.group8.cluster.StreamIDs;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
-
-import io.aeron.Aeron;
 import io.aeron.Subscription;
-import io.aeron.driver.MediaDriver;
 import io.github.cdimascio.dotenv.Dotenv;
-
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
-
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 
 public class TradeDataStorage implements Runnable {
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final Subscription tradeSubscription;
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     private final String redshiftUrl = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
-    Dotenv dotenv = Dotenv.load();
-
-    private String dbUser = dotenv.get("DB_USER");
-    private String dbPassword = dotenv.get("DB_PASSWORD");
+    private final Dotenv dotenv = Dotenv.load();
+    private final String dbUser = dotenv.get("DB_USER");
+    private final String dbPassword = dotenv.get("DB_PASSWORD");
 
     public TradeDataStorage(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;
         this.tradeSubscription = communicationOrchestrator.getTradesSubscription();
-        objectMapper = new ObjectMapper();
+        this.objectMapper = new ObjectMapper();
     }
 
     @Override
@@ -51,7 +41,9 @@ public class TradeDataStorage implements Runnable {
 
     private void processTrades(String message) {
         try (Connection connection = DriverManager.getConnection(redshiftUrl, dbUser, dbPassword)) {
+            System.out.println("Database connection established.");
             JsonNode rootNode = objectMapper.readTree(message);
+
             String symbol = rootNode.get("msg").get("market_ticker").asText();
             String takerSide = rootNode.get("msg").get("taker_side").asText();
             double price = takerSide.equals("no") 
@@ -60,6 +52,9 @@ public class TradeDataStorage implements Runnable {
             int size = rootNode.get("msg").get("count").asInt();
             long timestamp = rootNode.get("msg").get("ts").asLong() * 1000;
 
+            System.out.printf("Parsed trade data: Symbol=%s, Price=%.2f, Size=%d, Side=%s, Timestamp=%d%n",
+                    symbol, price, size, takerSide, timestamp);
+
             String insertQuery = "INSERT INTO Trades (TradeTimestamp, Symbol, Price, Size, Side) VALUES (?, ?, ?, ?, ?)";
             try (PreparedStatement statement = connection.prepareStatement(insertQuery)) {
                 statement.setTimestamp(1, new Timestamp(timestamp));
@@ -67,9 +62,12 @@ public class TradeDataStorage implements Runnable {
                 statement.setDouble(3, price);
                 statement.setInt(4, size);
                 statement.setString(5, takerSide.equals("no") ? "ask" : "bid");
-                statement.executeUpdate();
+
+                int rowsInserted = statement.executeUpdate();
+                System.out.println("Rows inserted: " + rowsInserted);
             }
         } catch (Exception e) {
+            System.err.println("Error processing trade: " + e.getMessage());
             e.printStackTrace();
         }
     }
