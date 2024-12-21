@@ -92,8 +92,9 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 1. Clone the repository. 
 2. Put your Kalshi API key file in the keys directory. 
 3. Edit `docker-compose.yml` line 67 to point to your key file in place of `<KEYDIRHERE>`. 
-4. Create a `.env` file with fields `DB_USER` and `DB_PASSWORD` with your Redshift database credentials. 
-5. Verify you have Docker installed and then run `docker-compose up --build`
+4. Edit [KalshiSystem.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/KalshiSystem.java) line 17 with your Kalshi API key ID.
+5. Create a `.env` file with fields `DB_USER` and `DB_PASSWORD` with your Redshift database credentials. 
+6. Verify you have Docker installed and then run `docker-compose up --build`
 
 ## Future Work
 
