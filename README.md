@@ -1,93 +1,105 @@
-# group_08_project
+# Final Report
 
+## Members
 
+- [Anushree Atmakuri](https://www.linkedin.com/in/anushree-atmakuri-072968243/) (aa127@illinois.edu)
+- [Brian Eide](https://www.linkedin.com/in/brian-eide/) (eide2@illinois.edu)
+- [Julie Lima](https://www.linkedin.com/in/julielima/) (julie11@illinois.edu)
+- [Akul Sharma](https://linkedin.com/in/akulsharma1) (akuls2@illinois.edu)
 
-## Getting started
+## Introduction
+Real-time market data feeds and stored historical market data are both crucial for ensuring that trading firms can make informed decisions when participating in the market. Real-time data feeds allow for automated trading strategies, risk monitoring, and live-updating dashboards. Historical data is needed for developing trading strategies, creating back-testing libraries, and performing post-trade analysis. Our team has developed the infrastructure to provide this market data to clients for Kalshi, an event contracts exchange, which does not supply robust historical market data.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### What is Kalshi?
+Kalshi is a U.S.-based exchange that allows users to trade financial contracts on the outcome of future events. Users are able to place trades on almost anything – from elections, to the weather in specific cities, to future Oscars winners. These contracts function like stock tickers, where the price reflects market sentiment; thus, Kalshi is often referred to as a “prediction market”. For example, a contract predicting that a particular politician will win an election might trade at $0.80 if they are expected to win by a large margin, while the opposing outcome trades at $0.20. Once the relevant data is released, the contract will settle either “Yes” or “No”. As a result of this type of binary trading, the prices of the two sides always sum to $1.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Kalshi aims to democratize access to event-driven markets, giving participants from all backgrounds the ability to gain insights into, speculate on, or hedge against a wide range of future events. The exchange provides continuously updated pricing data on the contracts traded on its platform. This data includes contract prices, volumes, open interest, and settlement information. Traders, analysts, and researchers rely on this data to assess market sentiment, evaluate probabilities, and track developments in real time.
 
-## Add your files
+## Overview
+Our infrastructure is centered around an Enterprise Service Bus (ESB), acting as the “brain” of the data collection system. At a high level, the ESB facilitates communication and integration between the different entities in our system. As a whole, our system receives messages containing Kalshi market data, processes them, and then sends the processed data to interested clients.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+To get market data, we connect to the Kalshi API with a custom WebSocket client. We subscribe to an array of markets for three types of updates: orderbook deltas, trades, and “ticker”.
 
-```
-cd existing_repo
-git remote add origin https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project.git
-git branch -M main
-git push -uf origin main
-```
+As stated before, our service running the WebSocket client sends data messages through the ESB orchestrator to the data processor, which processes them. Processing updates our internal copies of the order books, which lets the processor know if our custom “top of book” message type should be sent. Once the processor decides what should be published, the messages are sent to the tickerplant. The tickerplant then publishes each message to the appropriate data feed, where interested clients are able to connect and read from.
 
-## Integrate with your tools
+One such interested client is our market data recorder, which receives the real-time market data from the tickerplant’s data feeds and writes it to an Amazon Redshift data warehouse. Our system also includes a historical data fetcher to pre-populate our data tables with past market data from Kalshi.
 
-- [ ] [Set up project integrations](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/settings/integrations)
+## Terminology
 
-## Collaborate with your team
+Contract - an agreement between two counterparties to transfer money based on the outcome. On Kalshi, $1 is awarded to the counterparty who had the correct position on the outcome of the event contract.
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+Tickerplant - a common software (or even hardware) system in HFT that handles the dissemination of massive streams of financial data in a timely manner
 
-## Test and Deploy
+Orderbook deltas - a message type that describes an update to the state of an order book. On Kalshi, the message provides the market ticker, the price level that was modified, how much liquidity was added/removed, and the side (yes/no) that was modified.
 
-Use the built-in continuous integration in GitLab.
+Trades - a message type which states that a trade of some contract occurred. Contains metadata like the timestamp, the price at which the trade occurred, which side the user took, etc.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Ticker - a message type that gives a summary of the market’s latest state. It includes the last traded price, the best bid and offer, open interest, and volume data.
 
-***
+## Tools and Technologies
 
-# Editing this README
+We used various tools and technologies for our project. We wanted to emphasize the low-latency requirement, so many of our technologies are HFT-related software.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+For our ESB, we are using Aeron Cluster, a distributed system utilizing the Raft consensus algorithm for leader election, fault tolerance, and replication. Aeron clusters also have channels through which services can communicate in a publish/subscribe (pubsub) fashion. We specifically chose Aeron for its low-latency properties, as it is able to receive the messages, process them, and send them to the tickerplant with <100 microsecond latency.
 
-## Suggestions for a good README
+We are using Amazon Redshift for our data warehousing. There can be hundreds of thousands of trade messages on a given day, so a warehouse like Redshift can handle this scale effectively for an affordable price.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Because the Kalshi API uses the WebSocket protocol for streaming live data, we use a WebSocket connection to receive all live market updates. Due to the way that the API requires authentication through headers, it was hard to find a Java WebSocket library that could support this specific need. It ended up being easier to write our own lightweight WebSocket client, so we used our custom-made client to interface with the API.
 
-## Name
-Choose a self-explaining name for your project.
+## Components
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### Historical Market Data Fetcher
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+The historical market data fetcher gathers past market data that is available from Kalshi’s API. This data is mostly limited to historical trades data, but it is still useful to have a streamlined way to fetch data that predates our recordings. We can also use this in the future to ensure that our process from the real-time market data listener to the real-time data storage isn’t missing trades or executing too slowly.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+The fetcher uses Java to interact with Kalshi’s REST API. Retrieving years’ worth of data is extremely expensive, so we opted to only write this data to Redshift. Our code for the historical data fetcher, including our Redshift connection code, processing, and Kalshi data fetcher, is in the [historicalDataFetcher](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/tree/main/src/main/java/edu/illinois/group8/historicalDataFetcher) subdirectory.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Real-Time Market Data Listener
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+The real-time market data listener connects to the Kalshi API via a custom WebSocket client ([KalshiSystem.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/KalshiSystem.java)). It collects information from Kalshi’s `trade`, `ticker`, and `orderbook_delta` channels, sending this data to the Enterprise Service Bus through a custom communication orchestrator ([cluster/ClientClusterOrchestrator.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/cluster/ClientClusterOrchestrator.java)).
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Enterprise Service Bus
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+As stated previously, our overall architecture is centered around an Enterprise Service Bus (ESB) acting as the brain of our system. Below is a high-level diagram of this architecture.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+![diagram.png](diagram.png)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Our system has to handle extremely high loads (potentially thousands of updates being recorded and processed per second), so we built it on top of an Aeron Cluster. The ESB receives messages from the real time market data listener and handles the message passing between the different entities in our system.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+The ESB architecture and business logic was purposely designed to be abstracted away from clients who may want to connect to it. For example, the ESBClusterCommunicationOrchestrator class ([cluster/ESBClusterCommunicationOrchestrator.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/cluster/ESBClusterCommunicationOrchestrator.java)) allows services like the Tickerplant to send or receive data through Aeron Channels, without having to manage the details of setting up the pubsub architecture or dealing with cluster node leaders.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+### Data Processor
 
-## License
-For open source projects, say how it is licensed.
+The data processing itself is done in [esb/DataProcessor.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/DataProcessor.java), which receives the raw Kalshi API data from the real-time market data listener (through the ESB orchestrator) then classifies the message and cleans/formats it based on its type.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Furthermore, the data processor maintains an up-to-date order book for each subscribed symbol. Upon detecting an updated BBO, the data processor creates an additional top-of-book message for the respective symbol.
+
+Each formatted message is then published to our system’s internal Aeron channel, once again handled by the ESB.
+
+### Tickerplant
+
+The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and sending them to clients. To do this, we opted to create a multicast Aeron channel for each stream type (i.e. trades, top-of-book, open interest, etc.) so that our system supports many subscribed clients. This design also maintains market integrity by ensuring all clients receive the same data at the same time. The tickerplant categorizes each message received and publishes it to the appropriate channel(s).
+
+### Real-Time Data Storage
+
+Our system also has a subscriber to the tickerplant that records real time data to the AWS Redshift data warehouse. This client simply takes every message that the tickerplant sends and writes them all to the data warehouse. Because the client subscribes to Kalshi’s native message types (`orderbook_snapshot`, `orderbook_delta`, `trade`, `ticker`), we end up with a full history of all the raw data we received. This is very useful because if we have a new way we would like to process and save data, we can retroactively apply it to old raw data.
+
+## Demo Video
+
+https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=sharing
+
+## How to Run
+1. Clone the repository. 
+2. Put your Kalshi API key file in the keys directory. 
+3. Edit `docker-compose.yml` line 67 to point to your key file in place of `<KEYDIRHERE>`. 
+4. Create a `.env` file with fields `DB_USER` and `DB_PASSWORD` with your Redshift database credentials. 
+5. Verify you have Docker installed and then run `docker-compose up --build`
+
+## Future Work
+
+Currently, we are using Unicast for all Aeron channels which is inefficient and tough to code with. This is due to the fact that Multicast with Docker Bridges on MacOS doesn’t work properly; the only way to fix this is by deploying on Linux instead. We eventually plan to deploy our services on a K8s cluster running Linux which should fix our multicast problem. We purposely architected our codebase with layers of abstraction that allow us to switch from Unicast to Multicast endpoints easily.
+
+In the future, we can improve latency for the data storage by writing to an in-memory database first and then batch writing to the data warehouse. Currently, all trades are written to redshift individually which has extremely high latency.
+
+Because our WebSocket client is custom-made to be lightweight, it is lacking some features. For example, the Kalshi API documentation mentions that it uses the WebSocket protocol’s standard ping/pong frames (heartbeat), which we have not yet implemented. This is something we would like to implement to ensure a reliable connection.
+
