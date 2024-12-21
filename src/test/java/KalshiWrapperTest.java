@@ -7,7 +7,7 @@ import edu.illinois.group8.wrapper.RequestParameters;
 
 public class KalshiWrapperTest {
 
-    private static KalshiWrapper wrapper = new KalshiWrapper("https://trading-api.kalshi.com", "", "");
+    private static KalshiWrapper wrapper = new KalshiWrapper("https://api.elections.kalshi.com", "", "");
 
     @Test
     public void testGetExchangeSchedule() {
