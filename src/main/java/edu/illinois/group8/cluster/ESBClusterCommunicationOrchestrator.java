@@ -19,15 +19,11 @@ public class ESBClusterCommunicationOrchestrator {
 
     public ESBClusterCommunicationOrchestrator(String ip, boolean isCluster, String aeronDirName) {
         if (isCluster) {
-            mediaDriver = null;
-            aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(aeronDirName));
+            mediaDriver = launchEmbeddedDriver(aeronDirName + "-esb");
         } else {
-            mediaDriver = MediaDriver.launchEmbedded(new MediaDriver.Context()
-                    .dirDeleteOnStart(true)
-                    .termBufferSparseFile(true)
-                    .aeronDirectoryName(aeronDirName));
-            aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
+            mediaDriver = launchEmbeddedDriver(aeronDirName);
         }
+        aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
 
         String internalChannel = System.getenv().getOrDefault("AERON_INTERNAL_CHANNEL", "aeron:ipc");
         String externalChannel = System.getenv().getOrDefault(
@@ -39,6 +35,14 @@ public class ESBClusterCommunicationOrchestrator {
         addInternalChannelSubscription(internalChannel);
         addExternalChannelPublications(externalChannel);
         addExternalChannelSubscriptions(externalChannel);
+    }
+
+    private MediaDriver launchEmbeddedDriver(String directoryName) {
+        return MediaDriver.launchEmbedded(new MediaDriver.Context()
+                .dirDeleteOnStart(true)
+                .dirDeleteOnShutdown(true)
+                .termBufferSparseFile(true)
+                .aeronDirectoryName(directoryName));
     }
 
     private void addInternalChannelPublication(String channel) {
