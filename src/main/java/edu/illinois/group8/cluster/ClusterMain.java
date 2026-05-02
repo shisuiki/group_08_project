@@ -16,8 +16,9 @@ import org.agrona.ErrorHandler;
 import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 
+import edu.illinois.group8.config.BackendConfig;
+
 import java.io.File;
-import java.util.Arrays;
 import java.util.List;
 
 public class ClusterMain {
@@ -92,22 +93,14 @@ public class ClusterMain {
     }
 
     public static void main(String[] args) {
-        String clusterAddressesEnv = System.getenv("CLUSTER_ADDRESSES"); // gets IPs
-        String clusterNodeEnv = System.getenv("NODE_ID"); // gets node id
-        String baseDirEnv = System.getenv("BASE_DIR"); // gets base directory
-        String clusterPortBaseEnv = System.getenv("CLUSTER_PORT_BASE"); // gets port base
-        
-        if (clusterAddressesEnv == null || clusterNodeEnv == null || baseDirEnv == null || clusterPortBaseEnv == null) {
-            System.err.println("Missing required environment variables. Please set CLUSTER_ADDRESSES, CLUSTER_NODE, BASE_DIR, and CLUSTER_PORT_BASE.");
-            System.exit(1);
-        }
+        BackendConfig config = BackendConfig.fromEnvironment();
+        config.validateForClusterNode();
 
-        List<String> clusterAddresses = Arrays.asList(clusterAddressesEnv.split(",")); // e.g. [127.0.0.2, 127.0.0.3, ...]
-        
-        int nodeID = Integer.parseInt(clusterNodeEnv);
+        List<String> clusterAddresses = config.clusterAddresses();
+        int nodeID = Integer.parseInt(config.nodeId());
         final String hostname = clusterAddresses.get(nodeID);
-        String baseDir = baseDirEnv;
-        int node_port_base = Integer.parseInt(clusterPortBaseEnv);
+        String baseDir = config.baseDir();
+        int node_port_base = config.clusterPortBase();
         
         final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 

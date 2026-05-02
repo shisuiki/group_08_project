@@ -58,11 +58,15 @@ public class DataProcessor {
                         Timestamp tradeTimestamp = Timestamp.valueOf(createdTime.replace("Z", "").replace("T", " ")); // Convert to timestamp
 
                         String symbol = trade.getString("ticker");
-                        int size = trade.getInt("count");
+                        int size = trade.has("count_fp")
+                            ? (int) Math.round(Double.parseDouble(trade.getString("count_fp")))
+                            : trade.getInt("count");
                         String side = trade.getString("taker_side");
 
                         // Determine price based on side
-                        double price = side.equalsIgnoreCase("yes") ? trade.getDouble("yes_price") : trade.getDouble("no_price");
+                        double price = side.equalsIgnoreCase("yes")
+                            ? currentOrLegacyPrice(trade, "yes_price_dollars", "yes_price")
+                            : currentOrLegacyPrice(trade, "no_price_dollars", "no_price");
 
                         // Set parameters for insertion
                         statement.setDate(1, tradeDate);
@@ -214,5 +218,12 @@ public class DataProcessor {
             default:
                 System.err.println("Unsupported table: " + tableName);
         }
+    }
+
+    private double currentOrLegacyPrice(JSONObject object, String dollarsField, String centsField) {
+        if (object.has(dollarsField)) {
+            return Double.parseDouble(object.getString(dollarsField));
+        }
+        return object.getDouble(centsField) / 100.0;
     }
 }

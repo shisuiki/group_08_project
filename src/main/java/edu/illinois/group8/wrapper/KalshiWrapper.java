@@ -1,11 +1,13 @@
 package edu.illinois.group8.wrapper;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
 import edu.illinois.group8.utils.Cryptography;
 
@@ -27,10 +29,12 @@ public class KalshiWrapper {
         this.baseUrl = baseUrl;
         this.keyId = keyId;
         this.httpClient = HttpClient.newHttpClient();
-        try {
-            this.privateKey = Cryptography.loadPrivateKey(keyPath);
-        } catch (Exception e) {
-            System.err.println("Loading private key from filepath " + keyPath + " threw exception with message: " + e.getMessage());
+        if (keyPath != null && !keyPath.isBlank()) {
+            try {
+                this.privateKey = Cryptography.loadPrivateKey(keyPath);
+            } catch (Exception e) {
+                System.err.println("Loading private key from filepath " + keyPath + " threw exception with message: " + e.getMessage());
+            }
         }
     }
 
@@ -79,6 +83,9 @@ public class KalshiWrapper {
     }
 
     public String sendAuthorizedGet(String path, String paramsString) {
+        if (!hasCredentials()) {
+            return sendGet(path, paramsString);
+        }
         long currentTimeMilli = System.currentTimeMillis();
         String timestamp = String.valueOf(currentTimeMilli);
 
@@ -127,20 +134,7 @@ public class KalshiWrapper {
     }
 
     public String getEvents(RequestParameters params) {
-        String paramsString = "";
-        for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
-            String key = entry.getKey();
-            Object val = entry.getValue();
-            if (val instanceof Integer && key.equals("limit")) {
-                paramsString += key + "=" + val + "&";
-            } else if (val instanceof String && (key.equals("cursor") || key.equals("series_ticker"))) {
-                paramsString += key + "=" + val + "&";
-            } else if (val instanceof String && key.equals("status")) {
-                paramsString += key + "=" + ((String) val).replace(" ", "") + "&";
-            } else if (val instanceof Boolean && key.equals("with_nested_markets")) {
-                paramsString += key + "=" + val + "&";
-            }
-        }
+        String paramsString = buildParams(params, "limit", "cursor", "series_ticker", "status", "with_nested_markets");
         return sendGet(EVENTS_URL, paramsString);
     }
 
@@ -149,14 +143,7 @@ public class KalshiWrapper {
     }
 
     public String getEvent(String eventTicker, RequestParameters params) {
-        String paramsString = "";
-        for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
-            String key = entry.getKey();
-            Object val = entry.getValue();
-            if (val instanceof Boolean && key.equals("with_nested_markets")) {
-                paramsString += key + "=" + val + "&";
-            }
-        }
+        String paramsString = buildParams(params, "with_nested_markets");
         return sendGet(EVENTS_URL + "/" + eventTicker, paramsString);
     }
 
@@ -165,18 +152,23 @@ public class KalshiWrapper {
     }
 
     public String getMarkets(RequestParameters params) {
-        String paramsString = "";
-        for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
-            String key = entry.getKey();
-            Object val = entry.getValue();
-            if (val instanceof Integer && (key.equals("limit") || key.equals("max_close_ts") || key.equals("min_close_ts"))) {
-                paramsString += key + "=" + val + "&";
-            } else if (val instanceof String && (key.equals("cursor") || key.equals("event_ticker") || key.equals("series_ticker"))) {
-                paramsString += key + "=" + val + "&";
-            } else if (val instanceof String && (key.equals("status") || key.equals("tickers"))) {
-                paramsString += key + "=" + ((String) val).replace(" ", "") + "&";
-            }
-        }
+        String paramsString = buildParams(
+            params,
+            "limit",
+            "cursor",
+            "event_ticker",
+            "series_ticker",
+            "status",
+            "tickers",
+            "min_created_ts",
+            "max_created_ts",
+            "min_close_ts",
+            "max_close_ts",
+            "min_settled_ts",
+            "max_settled_ts",
+            "min_updated_ts",
+            "mve_filter"
+        );
         return sendAuthorizedGet(MARKETS_URL, paramsString);
     }
 
@@ -185,16 +177,7 @@ public class KalshiWrapper {
     }
 
     public String getTrades(RequestParameters params) {
-        String paramsString = "";
-        for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
-            String key = entry.getKey();
-            Object val = entry.getValue();
-            if (val instanceof Integer && (key.equals("limit") || key.equals("max_ts") || key.equals("min_ts"))) {
-                paramsString += key + "=" + val + "&";
-            } else if (val instanceof String && (key.equals("cursor") || key.equals("ticker"))) {
-                paramsString += key + "=" + val + "&";
-            }
-        }
+        String paramsString = buildParams(params, "limit", "cursor", "ticker", "min_ts", "max_ts");
         return sendGet(MARKETS_URL + "/trades", paramsString);
     }
 
@@ -207,14 +190,7 @@ public class KalshiWrapper {
     }
 
     public String getMarketOrderbook(String ticker, RequestParameters params) {
-        String paramsString = "";
-        for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
-            String key = entry.getKey();
-            Object val = entry.getValue();
-            if (val instanceof Integer && key.equals("depth")) {
-                paramsString += key + "=" + val + "&";
-            }
-        }
+        String paramsString = buildParams(params, "depth");
         return sendAuthorizedGet(MARKETS_URL + "/" + ticker + "/orderbook", paramsString);
     }
 
@@ -240,7 +216,46 @@ public class KalshiWrapper {
     }
 
     public String signMessage(String message) throws Exception {
+        if (privateKey == null) {
+            throw new IllegalStateException("Kalshi private key is not configured.");
+        }
         return Cryptography.signMessage(message, this.privateKey);
+    }
+
+    public boolean hasCredentials() {
+        return keyId != null && !keyId.isBlank() && privateKey != null;
+    }
+
+    private String buildParams(RequestParameters params, String... allowedKeys) {
+        if (params == null || params.getParams().isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<String, Object> entry : params.getParams().entrySet()) {
+            String key = entry.getKey();
+            Object val = entry.getValue();
+            if (!isAllowed(key, allowedKeys) || val == null) {
+                continue;
+            }
+            if (!builder.isEmpty()) {
+                builder.append('&');
+            }
+            String value = val instanceof String ? ((String) val).replace(" ", "") : String.valueOf(val);
+            builder
+                .append(URLEncoder.encode(key, StandardCharsets.UTF_8))
+                .append('=')
+                .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+        }
+        return builder.toString();
+    }
+
+    private boolean isAllowed(String key, String[] allowedKeys) {
+        for (String allowedKey : allowedKeys) {
+            if (allowedKey.equals(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }

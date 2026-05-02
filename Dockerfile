@@ -28,6 +28,9 @@ ENV CLUSTER_ADDRESSES=""
 ENV BASE_DIR="/app"
 ENV NODE_ID=""
 ENV CLUSTER_PORT_BASE=""
+ENV BACKEND_PROFILE="docker"
+ENV BACKEND_JOURNAL_ROOT="/app/journal"
+ENV AERON_CHANNEL="aeron:udp?endpoint=0.0.0.0:40456"
 
 # Define the command to run the application
 CMD ["java", "-cp", "/app/app.jar", "edu.illinois.group8.cluster.ClusterMain"]

@@ -89,12 +89,12 @@ Our system also has a subscriber to the tickerplant that records real time data 
 https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=sharing
 
 ## How to Run
-1. Clone the repository. 
-2. Put your Kalshi API key file in the keys directory. 
-3. Edit `docker-compose.yml` line 67 to point to your key file in place of `<KEYDIRHERE>`. 
-4. Edit [KalshiSystem.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/KalshiSystem.java) line 17 with your Kalshi API key ID.
-5. Create a `.env` file with fields `DB_USER` and `DB_PASSWORD` with your Redshift database credentials. 
-6. Verify you have Docker installed and then run `docker-compose up --build`
+1. Copy `.env.example` to `.env`.
+2. For live ingestion, set `KALSHI_KEY_ID`, `KALSHI_KEY_HOST_PATH`, and either `KALSHI_MARKET_TICKERS` or `KALSHI_MARKET_SERIES_TICKER`.
+3. Run a single local node with `docker compose --profile single-node-local up --build`, or the three-node live stack with `docker compose --profile cluster-live up --build`.
+4. Local replay mode can run without credentials using `docker compose --profile replay up --build`.
+
+Backend stream contracts, schema mappings, replay behavior, and operations notes are documented under `docs/`.
 
 ## Future Work
 
@@ -103,4 +103,3 @@ Currently, we are using Unicast for all Aeron channels which is inefficient and 
 In the future, we can improve latency for the data storage by writing to an in-memory database first and then batch writing to the data warehouse. Currently, all trades are written to redshift individually which has extremely high latency.
 
 Because our WebSocket client is custom-made to be lightweight, it is lacking some features. For example, the Kalshi API documentation mentions that it uses the WebSocket protocol’s standard ping/pong frames (heartbeat), which we have not yet implemented. This is something we would like to implement to ensure a reliable connection.
-

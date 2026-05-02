@@ -20,7 +20,6 @@ import org.json.*;
 
 import edu.illinois.group8.esb.DataProcessor;
 import edu.illinois.group8.esb.Tickerplant;
-import edu.illinois.group8.dataStorage.TradeDataStorage;
 
 import edu.illinois.group8.demo.MarketGridDemo;
 
@@ -34,7 +33,6 @@ public class ESBClusteredService implements ClusteredService {
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private DataProcessor processor;
     private Thread tickerplantThread;
-    private Thread dataStorageThread;
     private Thread clientThread;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
@@ -82,10 +80,10 @@ public class ESBClusteredService implements ClusteredService {
         this.tickerplantThread = new Thread(new Tickerplant(communicationOrchestrator));
         this.tickerplantThread.start();
 
-        // this.dataStorageThread = new Thread(new TradeDataStorage(communicationOrchestrator));
-        // this.dataStorageThread.start();
-        this.clientThread = new Thread(new MarketGridDemo(communicationOrchestrator));
-        this.clientThread.start();
+        if (Boolean.parseBoolean(System.getenv().getOrDefault("BACKEND_START_DEMO_CLIENT", "false"))) {
+            this.clientThread = new Thread(new MarketGridDemo(communicationOrchestrator));
+            this.clientThread.start();
+        }
 
         // TODO: write snapshot loader
         // will write snapshot loader later, based on what we need for data analysis like orderbook etc

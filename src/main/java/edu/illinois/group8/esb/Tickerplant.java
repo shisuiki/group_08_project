@@ -1,74 +1,72 @@
 package edu.illinois.group8.esb;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
+import edu.illinois.group8.metrics.BackendMetrics;
 import io.aeron.Publication;
 import io.aeron.Subscription;
-import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 
 import java.nio.charset.StandardCharsets;
 
 public class Tickerplant implements Runnable {
-    private ESBClusterCommunicationOrchestrator communicationOrchestrator;
-    private final int messageTypeOffset = 8;
-    private final Publication topOfBookPublication;
-    private final Publication tradePublication;
-    private final Publication bookEventsPublication;
-    private final Publication tickerPublication;
-    private final Publication openInterestPublication;
+    private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final Subscription internalSubscription;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final BackendMetrics metrics;
 
     public Tickerplant(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
+        this(communicationOrchestrator, new BackendMetrics());
+    }
+
+    public Tickerplant(ESBClusterCommunicationOrchestrator communicationOrchestrator, BackendMetrics metrics) {
         this.communicationOrchestrator = communicationOrchestrator;
         this.internalSubscription = communicationOrchestrator.getInternalSubscription();
-        this.topOfBookPublication = communicationOrchestrator.getTopOfBookPublication();
-        this.tradePublication = communicationOrchestrator.getTradesPublication();
-        this.bookEventsPublication = communicationOrchestrator.getBookEventsPublication();
-        this.tickerPublication = communicationOrchestrator.getTickerPublication();
-        this.openInterestPublication = communicationOrchestrator.getOpenInterestPublication();
+        this.metrics = metrics;
     }
 
     @Override
     public void run() {
-        while (true) {
-            internalSubscription.poll((buffer, offset, length, header) -> {
-
-                    byte[] data = new byte[length];
-                    buffer.getBytes(offset, data);
-                    String msg = new String(data, StandardCharsets.UTF_8);
-
-                    char msgType = extractMessageType(msg);
-    
-                    switch (msgType) {
-                        case 'T':
-                            // System.out.println("tickerplant: publishing trade message");
-                            tradePublication.offer(buffer, offset, length);
-                            break;
-                        case 'K':
-                            // System.out.println("tickerplant: publishing top of book message");
-                            topOfBookPublication.offer(buffer, offset, length);
-                            break;
-                        case 'S':
-                        case 'D':
-                            // System.out.println("tickerplant: publishing book events message");
-                            bookEventsPublication.offer(buffer, offset, length);
-                            break;
-                        case 'R':
-                            // System.out.println("tickerplant: publishing ticker event message");
-                            tickerPublication.offer(buffer, offset, length);
-                            break;
-                        case 'O':
-                            // System.out.println("tickerplant: publishing open interest message");
-                            openInterestPublication.offer(buffer, offset, length);
-                            break;
-                        default:
-                            System.out.println("Unknown message type: " + msgType);
-                    }
-                }, 1);
+        while (!Thread.currentThread().isInterrupted()) {
+            int fragments = internalSubscription.poll((buffer, offset, length, header) -> {
+                byte[] data = new byte[length];
+                buffer.getBytes(offset, data);
+                String message = new String(data, StandardCharsets.UTF_8);
+                routeMessage(message, buffer, offset, length);
+            }, 10);
+            if (fragments == 0) {
+                Thread.onSpinWait();
+            }
         }
     }
 
-    private char extractMessageType(String json) {
-        int idx = json.indexOf("\"type\":");
-        return idx == -1 ? '?' : json.charAt(idx + messageTypeOffset);
+    public boolean routeMessage(String message, org.agrona.DirectBuffer buffer, int offset, int length) {
+        try {
+            JsonNode root = objectMapper.readTree(message);
+            String streamName = root.path("stream_name").asText(null);
+            if (streamName == null || streamName.isBlank()) {
+                metrics.increment("tickerplant.route_failed.missing_stream_name");
+                return false;
+            }
+            Publication publication = communicationOrchestrator.getPublication(streamName);
+            if (publication == null) {
+                metrics.increment("tickerplant.route_failed.unknown_stream." + streamName);
+                return false;
+            }
+            long result = publication.offer(buffer, offset, length);
+            if (result < 0L) {
+                metrics.increment("tickerplant.route_failed.offer." + streamName);
+                return false;
+            }
+            metrics.increment("tickerplant.route_success." + streamName);
+            return true;
+        } catch (Exception e) {
+            metrics.increment("tickerplant.route_failed.parse_error");
+            return false;
+        }
     }
 
+    public BackendMetrics metrics() {
+        return metrics;
+    }
 }

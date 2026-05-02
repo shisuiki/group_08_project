@@ -2,6 +2,8 @@ package edu.illinois.group8.cluster;
 
 import java.util.concurrent.ConcurrentHashMap;
 
+import edu.illinois.group8.canonical.StreamContract;
+import edu.illinois.group8.canonical.StreamRegistry;
 import io.aeron.Aeron;
 import io.aeron.ConcurrentPublication;
 import io.aeron.Subscription;
@@ -11,10 +13,8 @@ public class ESBClusterCommunicationOrchestrator {
     private final MediaDriver mediaDriver;
     private ConcurrentPublication internalChannelPublication;
     private Subscription internalChannelSubscription;
-    private ConcurrentHashMap<Character, ConcurrentPublication> externalChannelPublications = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Character, Subscription> externalChannelSubscriptions = new ConcurrentHashMap<>();
-    private String[] ClusterNodes = {"172.20.0.2","172.20.0.3","172.20.0.4"};
-    private int currentNodeId = 0;
+    private final ConcurrentHashMap<String, ConcurrentPublication> externalChannelPublications = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Subscription> externalChannelSubscriptions = new ConcurrentHashMap<>();
     private final Aeron aeron;
 
     public ESBClusterCommunicationOrchestrator(String ip, boolean isCluster, String aeronDirName) {
@@ -25,13 +25,7 @@ public class ESBClusterCommunicationOrchestrator {
 
         aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
 
-        String channel;
-        // channel = "aeron:udp?endpoint=" + ip + ":40456";
-        if (isCluster) {
-            channel = "aeron:udp?endpoint=0.0.0.0:40456";
-        } else {
-            channel = "aeron:udp?endpoint=0.0.0.0:40456";
-        }
+        String channel = System.getenv().getOrDefault("AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456");
         
         addInternalChannelPublication(channel);
         addInternalChannelSubscription(channel);
@@ -48,19 +42,23 @@ public class ESBClusterCommunicationOrchestrator {
     }
 
     private void addExternalChannelPublications(String channel) {
-        externalChannelPublications.put('T', aeron.addPublication(channel, StreamIDs.TRADE_IDX.getValue()));
-        externalChannelPublications.put('K', aeron.addPublication(channel, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
-        externalChannelPublications.put('D', aeron.addPublication(channel, StreamIDs.BOOK_EVENTS_IDX.getValue()));
-        externalChannelPublications.put('R', aeron.addPublication(channel, StreamIDs.TICKER_IDX.getValue()));
-        externalChannelPublications.put('O', aeron.addPublication(channel, StreamIDs.OPEN_INTEREST_IDX.getValue()));
+        for (StreamContract stream : StreamRegistry.all()) {
+            externalChannelPublications.put(stream.streamName(), aeron.addPublication(channel, stream.streamId()));
+        }
     }
 
     private void addExternalChannelSubscriptions(String channel) {
-        externalChannelSubscriptions.put('T', aeron.addSubscription(channel, StreamIDs.TRADE_IDX.getValue()));
-        externalChannelSubscriptions.put('K', aeron.addSubscription(channel, StreamIDs.TOP_OF_BOOK_IDX.getValue()));
-        externalChannelSubscriptions.put('D', aeron.addSubscription(channel, StreamIDs.BOOK_EVENTS_IDX.getValue()));
-        externalChannelSubscriptions.put('R', aeron.addSubscription(channel, StreamIDs.TICKER_IDX.getValue()));
-        externalChannelSubscriptions.put('O', aeron.addSubscription(channel, StreamIDs.OPEN_INTEREST_IDX.getValue()));
+        for (StreamContract stream : StreamRegistry.all()) {
+            externalChannelSubscriptions.put(stream.streamName(), aeron.addSubscription(channel, stream.streamId()));
+        }
+    }
+
+    public ConcurrentPublication getPublication(String streamName) {
+        return externalChannelPublications.get(streamName);
+    }
+
+    public Subscription getSubscription(String streamName) {
+        return externalChannelSubscriptions.get(streamName);
     }
 
     /**
@@ -68,7 +66,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getTradesPublication() {
-        return externalChannelPublications.get('T');
+        return externalChannelPublications.get("canonical.trade");
     }
 
     /**
@@ -76,7 +74,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getTopOfBookPublication() {
-        return externalChannelPublications.get('K');
+        return externalChannelPublications.get("derived.top_of_book");
     }
 
     /**
@@ -84,7 +82,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getBookEventsPublication() {
-        return externalChannelPublications.get('D');
+        return externalChannelPublications.get("canonical.orderbook.delta");
     }
 
     /**
@@ -92,7 +90,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getTickerPublication() {
-        return externalChannelPublications.get('R');
+        return externalChannelPublications.get("canonical.ticker");
     }
 
     /**
@@ -100,7 +98,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public ConcurrentPublication getOpenInterestPublication() {
-        return externalChannelPublications.get('O');
+        return externalChannelPublications.get("canonical.open_interest");
     }
 
     /**
@@ -108,7 +106,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public Subscription getTradesSubscription() {
-        return externalChannelSubscriptions.get('T');
+        return externalChannelSubscriptions.get("canonical.trade");
     }
 
     /**
@@ -116,7 +114,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public Subscription getTopOfBookSubscription() {
-        return externalChannelSubscriptions.get('K');
+        return externalChannelSubscriptions.get("derived.top_of_book");
     }
 
     /**
@@ -124,7 +122,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public Subscription getBookEventsSubscription() {
-        return externalChannelSubscriptions.get('D');
+        return externalChannelSubscriptions.get("canonical.orderbook.delta");
     }
 
     /**
@@ -132,7 +130,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public Subscription getTickerSubscription() {
-        return externalChannelSubscriptions.get('R');
+        return externalChannelSubscriptions.get("canonical.ticker");
     }
 
     /**
@@ -140,7 +138,7 @@ public class ESBClusterCommunicationOrchestrator {
      * @return ConcurrentPublication object
      */
     public Subscription getOpenInterestSubscription() {
-        return externalChannelSubscriptions.get('O');
+        return externalChannelSubscriptions.get("canonical.open_interest");
     }
 
     /**

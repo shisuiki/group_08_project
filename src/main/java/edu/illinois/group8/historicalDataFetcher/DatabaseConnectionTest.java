@@ -6,17 +6,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-import io.github.cdimascio.dotenv.Dotenv;
+import edu.illinois.group8.config.BackendConfig;
 
 public class DatabaseConnectionTest {
-    // Redshift connection details
-    static Dotenv dotenv = Dotenv.load();
-
-    private static final String REDSHIFT_URL = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
-    private static final String DB_USER = dotenv.get("DB_USER");
-    private static final String DB_PASSWORD = dotenv.get("DB_PASSWORD");
-
     public static void main(String[] args) {
+        BackendConfig config = BackendConfig.fromEnvironment();
+        if (config.databaseUrl().isBlank()) {
+            throw new IllegalStateException("BACKEND_DATABASE_URL is required for database connection tests.");
+        }
         Connection connection = null;
         Statement statement = null;
         ResultSet resultSet = null;
@@ -27,7 +24,11 @@ public class DatabaseConnectionTest {
 
             System.out.println("Attempting to connect to the database...");
             // Establish connection
-            connection = DriverManager.getConnection(REDSHIFT_URL, DB_USER, DB_PASSWORD);
+            connection = DriverManager.getConnection(
+                config.databaseUrl(),
+                config.databaseUser(),
+                config.databasePassword()
+            );
 
             if (connection != null) {
                 System.out.println("Connection successful!");

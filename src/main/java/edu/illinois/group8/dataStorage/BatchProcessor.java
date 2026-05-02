@@ -6,17 +6,11 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import io.github.cdimascio.dotenv.Dotenv;
 
+import edu.illinois.group8.config.BackendConfig;
 
 public class BatchProcessor {
-    private static final Dotenv dotenv = Dotenv.load();
-    private static final String DB_URL = "jdbc:postgresql://kalshi-raw-data.cluuu2aq0l4j.us-east-2.rds.amazonaws.com:5432/<database-name>"; // TODO: add database name
-    private static final String DB_USER = dotenv.get("DB_USER");
-    private static final String DB_PASSWORD = dotenv.get("DB_PASSWORD");
+    private static final BackendConfig CONFIG = BackendConfig.fromEnvironment();
 
     // A map for table-specific SQL INSERT queries
     private static final String INSERT_TRADE_SQL = "INSERT INTO Trades (raw_data) VALUES (?)";
@@ -26,11 +20,11 @@ public class BatchProcessor {
     private static final int BATCH_SIZE = 100;
 
 
-    public static synchronized void addToBatch(char messageType, String message) {
-        String tableInsertSQL = getInsertSQLForMessageType(messageType);
+    public static synchronized void addToBatch(String streamName, String message) {
+        String tableInsertSQL = getInsertSQLForStream(streamName);
 
         if (tableInsertSQL == null) {
-            System.out.println("Unknown message type: " + messageType);
+            System.out.println("Unknown stream: " + streamName);
             return;
         }
 
@@ -41,17 +35,24 @@ public class BatchProcessor {
         }
     }
 
-    private static String getInsertSQLForMessageType(char messageType) {
-        switch (messageType) {
-            case 'T': return INSERT_TRADE_SQL;
-            default: return null;
+    private static String getInsertSQLForStream(String streamName) {
+        if ("canonical.trade".equals(streamName)) {
+            return INSERT_TRADE_SQL;
         }
+        return null;
     }
 
     public static synchronized void flushBatch() {
         if (batch.isEmpty()) return;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
+        if (CONFIG.databaseUrl().isBlank()) {
+            throw new IllegalStateException("BACKEND_DATABASE_URL is required to flush the batch.");
+        }
+        try (Connection conn = DriverManager.getConnection(
+            CONFIG.databaseUrl(),
+            CONFIG.databaseUser(),
+            CONFIG.databasePassword()
+        )) {
             conn.setAutoCommit(false);
 
             for (String data : batch) {

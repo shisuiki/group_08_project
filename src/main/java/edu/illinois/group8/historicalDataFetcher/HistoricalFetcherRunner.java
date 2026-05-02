@@ -1,9 +1,9 @@
 package edu.illinois.group8.historicalDataFetcher;
 
+import edu.illinois.group8.config.BackendConfig;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import org.json.JSONArray;
 import org.json.JSONObject;
-import io.github.cdimascio.dotenv.Dotenv;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -139,14 +139,17 @@ public class HistoricalFetcherRunner {
     }
 
     public static void main(String[] args) {
-        Dotenv dotenv = Dotenv.load();
+        BackendConfig config = BackendConfig.fromEnvironment();
         // Initialize the Kalshi API wrapper
-        KalshiWrapper wrapper = new KalshiWrapper("https://api.elections.kalshi.com", dotenv.get("KALSHI_KEY_ID"), "keys/brian.key");
+        KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
 
         // Set up the data fetcher, processor, and throttler
         HistoricalDataFetcher fetcher = new HistoricalDataFetcher(wrapper);
-        String redshift_url = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
-        DataProcessor processor = new DataProcessor(redshift_url, dotenv.get("DB_USER"), dotenv.get("DB_PASSWORD"));
+        DataProcessor processor = new DataProcessor(
+            config.databaseUrl(),
+            config.databaseUser(),
+            config.databasePassword()
+        );
         ThrottlingManager throttler = new ThrottlingManager(10, 1000); // 10 requests per second
 
         // Configure fetch parameters

@@ -1,8 +1,8 @@
 package edu.illinois.group8.dataStorage;
 
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
+import edu.illinois.group8.config.BackendConfig;
 import io.aeron.Subscription;
-import io.github.cdimascio.dotenv.Dotenv;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -15,19 +15,18 @@ public class TradeDataStorage implements Runnable {
     private final Subscription tradeSubscription;
     private final ObjectMapper objectMapper;
 
-    private final String redshiftUrl = "jdbc:redshift://kalshi-cluster.cqnzqxki7plp.us-east-2.redshift.amazonaws.com:5439/processed_data";
-    private final Dotenv dotenv = Dotenv.load();
-    private final String dbUser = dotenv.get("DB_USER");
-    private final String dbPassword = dotenv.get("DB_PASSWORD");
-
     private Connection connection;
 
     public TradeDataStorage(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;
         this.tradeSubscription = communicationOrchestrator.getTradesSubscription();
         this.objectMapper = new ObjectMapper();
+        BackendConfig config = BackendConfig.fromEnvironment();
+        if (config.databaseUrl().isBlank()) {
+            throw new IllegalStateException("BACKEND_DATABASE_URL is required for TradeDataStorage.");
+        }
         try {
-            this.connection = DriverManager.getConnection(redshiftUrl, dbUser, dbPassword);
+            this.connection = DriverManager.getConnection(config.databaseUrl(), config.databaseUser(), config.databasePassword());
             System.out.println("Database connection established.");
         } catch (Exception e) {
             System.err.println("Failed to establish database connection: " + e.getMessage());
@@ -57,13 +56,13 @@ public class TradeDataStorage implements Runnable {
         try {
             JsonNode rootNode = objectMapper.readTree(message);
 
-            String symbol = rootNode.get("msg").get("market_ticker").asText();
-            String takerSide = rootNode.get("msg").get("taker_side").asText();
-            double price = takerSide.equals("no") 
-                ? rootNode.get("msg").get("no_price").asDouble() 
-                : rootNode.get("msg").get("yes_price").asDouble();
-            int size = rootNode.get("msg").get("count").asInt();
-            long timestamp = rootNode.get("msg").get("ts").asLong() * 1000;
+            String symbol = rootNode.get("metadata").get("market_ticker").asText();
+            String takerSide = rootNode.get("taker_side").asText();
+            double price = takerSide.equals("no")
+                ? rootNode.get("no_price_micros").asDouble() / 1_000_000.0
+                : rootNode.get("yes_price_micros").asDouble() / 1_000_000.0;
+            int size = (int) Math.round(rootNode.get("quantity_micros").asDouble() / 1_000_000.0);
+            long timestamp = rootNode.get("metadata").get("event_ts_ms").asLong();
 
             System.out.printf("Parsed trade data: Symbol=%s, Price=%.2f, Size=%d, Side=%s, Timestamp=%d%n",
                     symbol, price, size, takerSide, timestamp);

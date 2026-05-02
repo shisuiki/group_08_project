@@ -22,6 +22,9 @@ public class ClientClusterOrchestrator {
     private final MutableDirectBuffer buf = new ExpandableArrayBuffer();
 
     public ClientClusterOrchestrator(List<String> hostnames, String ip) {
+        if (hostnames == null || hostnames.isEmpty()) {
+            throw new IllegalArgumentException("At least one cluster hostname is required.");
+        }
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < hostnames.size(); i++) {
             sb.append(i).append('=').append(hostnames.get(i)).append(':').append(9000 + ClusterMain.getClientFacingPortOffset()).append(',');

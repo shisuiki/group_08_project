@@ -1,96 +1,109 @@
 services:
   node0:
     build: .
+    profiles: ["cluster-live", "single-node-local"]
     environment:
-      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
-      - BASE_DIR=/app
-      - NODE_ID=0
-      - CLUSTER_PORT_BASE=9000
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
+      BASE_DIR: /app
+      NODE_ID: "0"
+      CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
+      AERON_CHANNEL: ${AERON_CHANNEL:-aeron:udp?endpoint=0.0.0.0:40456}
+      BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+      BACKEND_START_DEMO_CLIENT: ${BACKEND_START_DEMO_CLIENT:-false}
     networks:
       cluster_net:
-        ipv4_address: 172.20.0.2
+        ipv4_address: ${CLUSTER_NODE0_IP:-172.20.0.2}
     ports:
-      - "9001-9006:9001-9006"
-      - "40456:40456"
-      - "40457:40457"
+      - "${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
+      - "${NODE0_AERON_PORT:-40456}:40456"
     volumes:
       - ./logs/node0:/app/cluster
-    shm_size: '2gb'
+      - ./journal:/app/journal
+    shm_size: "2gb"
 
   node1:
     build: .
+    profiles: ["cluster-live"]
     environment:
-      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
-      - BASE_DIR=/app
-      - NODE_ID=1
-      - CLUSTER_PORT_BASE=9000
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
+      BASE_DIR: /app
+      NODE_ID: "1"
+      CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
+      AERON_CHANNEL: ${AERON_CHANNEL:-aeron:udp?endpoint=0.0.0.0:40456}
+      BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
     networks:
       cluster_net:
-        ipv4_address: 172.20.0.3
+        ipv4_address: ${CLUSTER_NODE1_IP:-172.20.0.3}
     ports:
-      - "9101-9106:9001-9006"
-      - "40458:40456"
-      - "40459:40457"
+      - "${NODE1_CLUSTER_PORT_RANGE:-9101-9106}:9001-9006"
+      - "${NODE1_AERON_PORT:-40458}:40456"
     volumes:
       - ./logs/node1:/app/cluster
-    shm_size: '2gb'
+      - ./journal:/app/journal
+    shm_size: "2gb"
 
   node2:
     build: .
+    profiles: ["cluster-live"]
     environment:
-      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
-      - BASE_DIR=/app
-      - NODE_ID=2
-      - CLUSTER_PORT_BASE=9000
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
+      BASE_DIR: /app
+      NODE_ID: "2"
+      CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
+      AERON_CHANNEL: ${AERON_CHANNEL:-aeron:udp?endpoint=0.0.0.0:40456}
+      BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
     networks:
       cluster_net:
-        ipv4_address: 172.20.0.4
+        ipv4_address: ${CLUSTER_NODE2_IP:-172.20.0.4}
     ports:
-      - "9201-9206:9001-9006"
-      - "40460:40456"
-      - "40461:40457"
+      - "${NODE2_CLUSTER_PORT_RANGE:-9201-9206}:9001-9006"
+      - "${NODE2_AERON_PORT:-40460}:40456"
     volumes:
       - ./logs/node2:/app/cluster
-    shm_size: '2gb'
-  
+      - ./journal:/app/journal
+    shm_size: "2gb"
+
   wsclient:
     build: .
+    profiles: ["cluster-live"]
     environment:
-      - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
-      - BASE_DIR=/app
-      - CLUSTER_PORT_BASE=9300
-      - IP=172.20.0.6
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
+      BASE_DIR: /app
+      IP: ${WSCLIENT_IP:-172.20.0.6}
+      KALSHI_BASE_URL: ${KALSHI_BASE_URL:-https://api.elections.kalshi.com}
+      KALSHI_KEY_ID: ${KALSHI_KEY_ID:?Set KALSHI_KEY_ID for live ingestion}
+      KALSHI_KEY_PATH: ${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}
+      KALSHI_MARKET_TICKERS: ${KALSHI_MARKET_TICKERS:-}
+      KALSHI_MARKET_SERIES_TICKER: ${KALSHI_MARKET_SERIES_TICKER:-}
+      KALSHI_WS_CHANNELS: ${KALSHI_WS_CHANNELS:-orderbook_delta,trade,ticker,market_lifecycle_v2}
     networks:
       cluster_net:
-        ipv4_address: 172.20.0.6
+        ipv4_address: ${WSCLIENT_IP:-172.20.0.6}
     volumes:
       - ./logs/wsclient:/app/cluster
-      - <KEYDIRHERE>:/app/key.txt # put your key directory here
-    shm_size: '2gb'
+      - ${KALSHI_KEY_HOST_PATH:?Set KALSHI_KEY_HOST_PATH to your private key file}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
+    shm_size: "2gb"
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
 
-  # test deployment for publisher
-  # publisher:
-  #   build: .
-  #   environment:
-  #     - CLUSTER_ADDRESSES=172.20.0.2,172.20.0.3,172.20.0.4
-  #     - BASE_DIR=/app
-  #     - NODE_ID=3 # Not a cluster node
-  #     - CLUSTER_PORT_BASE=9300
-  #   networks:
-  #     cluster_net:
-  #       ipv4_address: 172.20.0.5
-  #   volumes:
-  #     - ./logs/publisher:/app/cluster
-  #   shm_size: '2gb'
-  #   command: >
-  #     sh -c "java -cp /app/app.jar edu.illinois.group8.tests.TestPublisher 'Hello Cluster!'"
+  replay:
+    build: .
+    profiles: ["replay"]
+    environment:
+      BACKEND_PROFILE: replay
+      BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+    volumes:
+      - ./journal:/app/journal
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.replay.ReplayCli --journal-root=/app/journal"
 
-             
 networks:
   cluster_net:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: ${CLUSTER_SUBNET:-172.20.0.0/16}

@@ -1,127 +1,84 @@
 package edu.illinois.group8.esb;
 
+import edu.illinois.group8.book.OrderBookStateManager;
+import edu.illinois.group8.canonical.CanonicalEvent;
+import edu.illinois.group8.canonical.CanonicalEvents;
+import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
-import edu.illinois.group8.messages.Message;
-import edu.illinois.group8.messages.TradeMessage;
-import edu.illinois.group8.messages.TickerMessage;
-import edu.illinois.group8.messages.OrderBookDeltaMessage;
-import edu.illinois.group8.messages.OrderBookSnapshotMessage;
-
-import edu.illinois.group8.wrapper.OrderBook;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import org.agrona.ExpandableArrayBuffer;
-
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.parser.CanonicalParseResult;
+import edu.illinois.group8.parser.KalshiCanonicalParser;
+import edu.illinois.group8.persistence.EventJournal;
+import edu.illinois.group8.persistence.FileEventJournal;
+import edu.illinois.group8.publication.AeronEventPublisher;
+import edu.illinois.group8.publication.EventPublisher;
 
 public class DataProcessor {
-    private final ExpandableArrayBuffer buffer;
-    private final ObjectMapper objectMapper;
-    private ESBClusterCommunicationOrchestrator communicationOrchestrator;
-
-    private Map<String, OrderBook> orderBooks;
+    private final KalshiCanonicalParser parser;
+    private final OrderBookStateManager orderBookStateManager;
+    private final EventPublisher publisher;
+    private final EventJournal journal;
+    private final BackendMetrics metrics;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
-        this.buffer = new ExpandableArrayBuffer();
-        this.objectMapper = new ObjectMapper();
-        this.communicationOrchestrator = communicationOrchestrator;
-        this.orderBooks = new HashMap<>();
-    }
-    
-    public void processMessage(String message) {
-        try {
-            JsonNode rootNode = objectMapper.readTree(message);
-            String type = rootNode.get("type").asText();
-            Message msg = null;
-
-            // System.out.println("ESB received message: " + message);
-
-            switch (type) {
-                case "orderbook_snapshot":
-                    msg = objectMapper.readValue(message, OrderBookSnapshotMessage.class);
-                    this.processSnapshot((OrderBookSnapshotMessage) msg);
-                    break;
-                case "orderbook_delta":
-                    msg = objectMapper.readValue(message, OrderBookDeltaMessage.class);
-                    this.processDelta((OrderBookDeltaMessage) msg);
-                    break;
-                case "ticker":
-                    msg = objectMapper.readValue(message, TickerMessage.class);
-                    publishMessage(((TickerMessage) msg).getOpenInterestMessage());
-                    break;
-                case "trade":
-                    msg = objectMapper.readValue(message, TradeMessage.class);
-                    break;
-                default:
-                    System.out.println("Unknown message type: " + type);
-            }
-
-            if (msg != null) {
-                publishMessage(msg.getFormattedMessage());
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        this(communicationOrchestrator, new BackendMetrics());
     }
 
-    public void publishMessage(Map<String, Object> message) {
-        try {
-            byte[] byte_msg = objectMapper.writeValueAsBytes(message);
-            buffer.putBytes(0, byte_msg);
-            long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, byte_msg.length);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void processSnapshot(OrderBookSnapshotMessage msg) {
-        OrderBookSnapshotMessage.Msg snapshot = msg.getMsg();
-        String marketTicker = snapshot.getMarketTicker();
-        OrderBook orderBook = new OrderBook();
-        for (List<Integer> level : snapshot.getYes()) {
-            int price = level.get(0);
-            int quantity = level.get(1);
-            orderBook.getBids().put(price, quantity);
-        }
-        for (List<Integer> level : snapshot.getNo()) {
-            int price = 100 - level.get(0);
-            int quantity = level.get(1);
-            orderBook.getAsks().put(price, quantity);
-        }
-        orderBooks.put(marketTicker, orderBook);
-        this.sendTopOfBook(marketTicker, orderBook);
-    }
-
-    private void processDelta(OrderBookDeltaMessage msg) {
-        OrderBookDeltaMessage.Msg delta = msg.getMsg();
-        String marketTicker = delta.getMarketTicker();
-        OrderBook orderBook = orderBooks.get(marketTicker);
-
-        int[] topOfBookPre = orderBook.getTopOfBook();
-
-        orderBook.updateBook(delta.getSide(), delta.getPrice(), delta.getDelta());
-
-        if (!Arrays.equals(topOfBookPre, orderBook.getTopOfBook()))
-            sendTopOfBook(marketTicker, orderBook);
-    }
-
-    private void sendTopOfBook(String symbol, OrderBook orderBook) {
-        int[] topOfBook = orderBook.getTopOfBook();
-
-        Map<String, Object> formattedMessage = Map.of(
-            "type", "K",
-            "symbol", symbol,
-            "bidPrice", topOfBook[0],
-            "bidSize", topOfBook[1],
-            "askPrice", topOfBook[2],
-            "askSize", topOfBook[3]
+    private DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator, BackendMetrics metrics) {
+        this(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            new AeronEventPublisher(communicationOrchestrator, new JsonCanonicalSerializer(), metrics),
+            new FileEventJournal(BackendConfig.fromEnvironment().journalRoot()),
+            metrics
         );
+    }
 
-        publishMessage(formattedMessage);
+    public DataProcessor(
+        KalshiCanonicalParser parser,
+        OrderBookStateManager orderBookStateManager,
+        EventPublisher publisher,
+        EventJournal journal,
+        BackendMetrics metrics
+    ) {
+        this.parser = parser;
+        this.orderBookStateManager = orderBookStateManager;
+        this.publisher = publisher;
+        this.journal = journal;
+        this.metrics = metrics;
+    }
+
+    public void processMessage(String message) {
+        CanonicalParseResult parseResult = parser.parseWebSocketMessage(message, System.nanoTime());
+        journal.appendRaw(parseResult.rawSourceEvent());
+        publish(parseResult.rawSourceEvent());
+        metrics.increment("processor.raw_events");
+
+        for (CanonicalEvent event : parseResult.canonicalEvents()) {
+            handleCanonicalEvent(event);
+        }
+    }
+
+    public BackendMetrics metrics() {
+        return metrics;
+    }
+
+    private void handleCanonicalEvent(CanonicalEvent event) {
+        journal.appendCanonical(event);
+        publish(event);
+        metrics.increment("processor.canonical_events." + event.eventType());
+
+        for (CanonicalEvent generated : orderBookStateManager.apply(event).generatedEvents()) {
+            journal.appendCanonical(generated);
+            publish(generated);
+            metrics.increment("processor.generated_events." + generated.eventType());
+        }
+    }
+
+    private void publish(CanonicalEvent event) {
+        CanonicalEvent publishedEvent = CanonicalEvents.withPublishTsNs(event, System.nanoTime());
+        boolean success = publisher.publish(publishedEvent);
+        metrics.increment(success ? "processor.publish_success" : "processor.publish_failure");
     }
 }

@@ -85,44 +85,44 @@ public abstract class WebSocketClient {
                         if (messageBytes.length < 2) break;
 
                         int b1 = messageBytes[0] & 0xFF;
-                        boolean fin = (b1 & 0x80) != 0;
                         int opcode = b1 & 0x0F;
 
-                        if (opcode == 8) { // Close frame
-                            onClose();
-                            return;
-                        } else if (opcode != 1) { // Only handle text frames
+                        if (opcode != 1 && opcode != 8 && opcode != 9 && opcode != 10) {
                             messageBuffer.reset();
                             break;
                         }
 
                         int b2 = messageBytes[1] & 0xFF;
                         boolean masked = (b2 & 0x80) != 0;
-                        int payloadLength = b2 & 0x7F;
-
-                        int headerSize = 2;
-                        if (payloadLength == 126) headerSize += 2;
-                        else if (payloadLength == 127) headerSize += 8;
-                        if (masked) headerSize += 4;
-
-                        if (messageBytes.length < headerSize + payloadLength) break;
-
+                        int payloadLengthCode = b2 & 0x7F;
                         int offset = 2;
-                        if (payloadLength == 126) {
-                            payloadLength = ((messageBytes[2] & 0xFF) << 8) | (messageBytes[3] & 0xFF);
+                        long payloadLengthLong = payloadLengthCode;
+
+                        if (payloadLengthCode == 126) {
+                            if (messageBytes.length < 4) break;
+                            payloadLengthLong = ((messageBytes[2] & 0xFF) << 8) | (messageBytes[3] & 0xFF);
                             offset += 2;
-                        } else if (payloadLength == 127) {
-                            payloadLength = 0;
+                        } else if (payloadLengthCode == 127) {
+                            if (messageBytes.length < 10) break;
+                            payloadLengthLong = 0;
                             for (int i = 0; i < 8; i++) {
-                                payloadLength = (payloadLength << 8) | (messageBytes[offset++] & 0xFF);
+                                payloadLengthLong = (payloadLengthLong << 8) | (messageBytes[offset++] & 0xFF);
                             }
+                        }
+
+                        if (payloadLengthLong > Integer.MAX_VALUE) {
+                            throw new IOException("WebSocket frame too large: " + payloadLengthLong);
                         }
 
                         byte[] maskingKey = new byte[4];
                         if (masked) {
+                            if (messageBytes.length < offset + 4) break;
                             System.arraycopy(messageBytes, offset, maskingKey, 0, 4);
                             offset += 4;
                         }
+
+                        int payloadLength = (int) payloadLengthLong;
+                        if (messageBytes.length < offset + payloadLength) break;
 
                         byte[] payloadData = new byte[payloadLength];
                         System.arraycopy(messageBytes, offset, payloadData, 0, payloadLength);
@@ -132,11 +132,21 @@ public abstract class WebSocketClient {
                             }
                         }
 
-                        String message = new String(payloadData, "UTF-8");
-                        onMessage(message);
+                        if (opcode == 8) { // Close frame
+                            onClose();
+                            return;
+                        } else if (opcode == 9) { // Ping frame
+                            sendControlFrame(0xA, payloadData);
+                        } else if (opcode == 10) { // Pong frame
+                            // No-op. Receiving the frame is enough to keep the connection healthy.
+                        } else if (opcode == 1) {
+                            String message = new String(payloadData, "UTF-8");
+                            onMessage(message);
+                        }
 
                         messageBuffer.reset();
-                        messageBuffer.write(messageBytes, headerSize + payloadLength, messageBytes.length - headerSize - payloadLength);
+                        int frameLength = offset + payloadLength;
+                        messageBuffer.write(messageBytes, frameLength, messageBytes.length - frameLength);
                     }
                 }
             } catch (IOException e) {
@@ -196,6 +206,26 @@ public abstract class WebSocketClient {
         }
     }
 
+    private void sendControlFrame(int opcode, byte[] payload) throws IOException {
+        ByteArrayOutputStream frame = new ByteArrayOutputStream();
+        frame.write(0x80 | (opcode & 0x0F));
+        int length = payload.length;
+        if (length > 125) {
+            throw new IOException("WebSocket control frame payload too large: " + length);
+        }
+        frame.write(0x80 | length);
+        byte[] maskKey = new byte[4];
+        new Random().nextBytes(maskKey);
+        frame.write(maskKey);
+        byte[] maskedPayload = payload.clone();
+        for (int i = 0; i < maskedPayload.length; i++) {
+            maskedPayload[i] ^= maskKey[i % 4];
+        }
+        frame.write(maskedPayload);
+        this.outputStream.write(frame.toByteArray());
+        this.outputStream.flush();
+    }
+
     public void close() {
         try {
             socket.close();
@@ -211,4 +241,3 @@ public abstract class WebSocketClient {
     public abstract void onError(Exception e);
     public abstract void onClose();
 }
-

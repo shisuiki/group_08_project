@@ -6,13 +6,15 @@ import java.nio.charset.StandardCharsets;
 import org.agrona.concurrent.UnsafeBuffer;
 
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
+import edu.illinois.group8.config.BackendConfig;
 import io.aeron.ConcurrentPublication;
 
 public class TestPublisher {
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
 
     public TestPublisher() {
-        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator("172.20.0.5", false, "dirName");
+        BackendConfig config = BackendConfig.fromEnvironment();
+        this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(config.hostIp(), false, "dirName");
     }
 
     public void sendMessage(String message) {
