@@ -44,6 +44,9 @@ jobs:
       KALSHI_MARKET_TICKERS: ${{ vars.KALSHI_MARKET_TICKERS }}
       KALSHI_MARKET_SERIES_TICKER: ${{ vars.KALSHI_MARKET_SERIES_TICKER || 'KXHIGHCHI' }}
       KALSHI_WS_CHANNELS: ${{ vars.KALSHI_WS_CHANNELS || 'orderbook_delta,trade,ticker,market_lifecycle_v2' }}
+      AERON_EXTERNAL_CHANNEL: ${{ vars.AERON_EXTERNAL_CHANNEL || 'aeron:udp?endpoint=224.0.1.1:40456' }}
+      STREAM_TAP_HOST_PORT: ${{ vars.STREAM_TAP_HOST_PORT || '8080' }}
+      STREAM_TAP_STREAMS: ${{ vars.STREAM_TAP_STREAMS || 'canonical.trade,canonical.ticker,canonical.open_interest,derived.top_of_book,system.sequence_gaps' }}
     steps:
       - name: Validate required deployment secrets
         run: |
@@ -128,6 +131,10 @@ jobs:
           KALSHI_MARKET_TICKERS=$KALSHI_MARKET_TICKERS
           KALSHI_MARKET_SERIES_TICKER=$KALSHI_MARKET_SERIES_TICKER
           KALSHI_WS_CHANNELS=$KALSHI_WS_CHANNELS
+          AERON_INTERNAL_CHANNEL=aeron:ipc
+          AERON_EXTERNAL_CHANNEL=$AERON_EXTERNAL_CHANNEL
+          STREAM_TAP_HOST_PORT=$STREAM_TAP_HOST_PORT
+          STREAM_TAP_STREAMS=$STREAM_TAP_STREAMS
           BACKEND_START_DEMO_CLIENT=false
           BACKEND_JOURNAL_ROOT=/app/journal
           EOF

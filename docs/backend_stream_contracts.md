@@ -35,6 +35,13 @@ All events include:
 
 The internal tickerplant bus uses stream ID 20 and routes canonical JSON by `stream_name`. No production route depends on a fixed JSON character offset.
 
+The deployed `cluster-live` profile also starts `streamtap`, a local HTTP endpoint bound to
+`127.0.0.1:8080` on the host. It subscribes to the Aeron external channel and exposes:
+
+- `GET /health` for stream counts and tap status.
+- `GET /events` for recently observed stream payloads.
+- `GET /metrics` for plain-text counters.
+
 ## Numeric Representation
 
 - Prices use integer `*_price_micros` or `*_micros` fields scaled by 1,000,000 where `1_000_000` equals $1.00 probability.

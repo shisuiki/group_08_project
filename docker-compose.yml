@@ -8,7 +8,8 @@ services:
       BASE_DIR: /app
       NODE_ID: "0"
       CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
-      AERON_CHANNEL: ${AERON_CHANNEL:-aeron:udp?endpoint=0.0.0.0:40456}
+      AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
       BACKEND_START_DEMO_CLIENT: ${BACKEND_START_DEMO_CLIENT:-false}
     networks:
@@ -31,7 +32,8 @@ services:
       BASE_DIR: /app
       NODE_ID: "1"
       CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
-      AERON_CHANNEL: ${AERON_CHANNEL:-aeron:udp?endpoint=0.0.0.0:40456}
+      AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
     networks:
       cluster_net:
@@ -53,7 +55,8 @@ services:
       BASE_DIR: /app
       NODE_ID: "2"
       CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
-      AERON_CHANNEL: ${AERON_CHANNEL:-aeron:udp?endpoint=0.0.0.0:40456}
+      AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
     networks:
       cluster_net:
@@ -100,6 +103,24 @@ services:
       - ./journal:/app/journal
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.replay.ReplayCli --journal-root=/app/journal"
+
+  streamtap:
+    build: .
+    profiles: ["cluster-live"]
+    environment:
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      STREAM_TAP_CHANNEL: ${STREAM_TAP_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      STREAM_TAP_PORT: ${STREAM_TAP_PORT:-8080}
+      STREAM_TAP_STREAMS: ${STREAM_TAP_STREAMS:-canonical.trade,canonical.ticker,canonical.open_interest,derived.top_of_book,system.sequence_gaps}
+      STREAM_TAP_MAX_EVENTS: ${STREAM_TAP_MAX_EVENTS:-200}
+    networks:
+      cluster_net:
+        ipv4_address: ${STREAM_TAP_IP:-172.20.0.7}
+    ports:
+      - "127.0.0.1:${STREAM_TAP_HOST_PORT:-8080}:${STREAM_TAP_PORT:-8080}"
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.stream.StreamTapServer"
 
 networks:
   cluster_net:

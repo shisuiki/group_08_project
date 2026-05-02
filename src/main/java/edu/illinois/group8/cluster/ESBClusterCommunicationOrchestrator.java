@@ -25,12 +25,16 @@ public class ESBClusterCommunicationOrchestrator {
 
         aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
 
-        String channel = System.getenv().getOrDefault("AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456");
+        String internalChannel = System.getenv().getOrDefault("AERON_INTERNAL_CHANNEL", "aeron:ipc");
+        String externalChannel = System.getenv().getOrDefault(
+            "AERON_EXTERNAL_CHANNEL",
+            System.getenv().getOrDefault("AERON_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")
+        );
         
-        addInternalChannelPublication(channel);
-        addInternalChannelSubscription(channel);
-        addExternalChannelPublications(channel);
-        addExternalChannelSubscriptions(channel);
+        addInternalChannelPublication(internalChannel);
+        addInternalChannelSubscription(internalChannel);
+        addExternalChannelPublications(externalChannel);
+        addExternalChannelSubscriptions(externalChannel);
     }
 
     private void addInternalChannelPublication(String channel) {

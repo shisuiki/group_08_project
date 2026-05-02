@@ -26,6 +26,9 @@ Recommended repository variables:
 - `KALSHI_BASE_URL`: default `https://api.elections.kalshi.com`.
 - `KALSHI_MARKET_SERIES_TICKER`: default `KXHIGHCHI`.
 - `KALSHI_WS_CHANNELS`: default `orderbook_delta,trade,ticker,market_lifecycle_v2`.
+- `AERON_EXTERNAL_CHANNEL`: default `aeron:udp?endpoint=224.0.1.1:40456`.
+- `STREAM_TAP_HOST_PORT`: default `8080`, bound to `127.0.0.1` on the EC2 host.
+- `STREAM_TAP_STREAMS`: comma-separated canonical stream names for the local stream tap.
 
 Optional:
 
@@ -50,6 +53,8 @@ cd /opt/group_08_project
 sudo docker compose --env-file .env --profile cluster-live ps
 sudo docker compose --env-file .env --profile cluster-live logs -f --tail=200
 sudo docker compose --env-file .env --profile cluster-live down
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/events
 ```
 
 ## Security Notes
