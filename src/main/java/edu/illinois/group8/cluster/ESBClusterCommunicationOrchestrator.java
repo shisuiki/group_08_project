@@ -18,12 +18,16 @@ public class ESBClusterCommunicationOrchestrator {
     private final Aeron aeron;
 
     public ESBClusterCommunicationOrchestrator(String ip, boolean isCluster, String aeronDirName) {
-        mediaDriver = MediaDriver.launchEmbedded(new MediaDriver.Context()
-                .dirDeleteOnStart(true)
-                .termBufferSparseFile(true)
-                .aeronDirectoryName(aeronDirName));
-
-        aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
+        if (isCluster) {
+            mediaDriver = null;
+            aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(aeronDirName));
+        } else {
+            mediaDriver = MediaDriver.launchEmbedded(new MediaDriver.Context()
+                    .dirDeleteOnStart(true)
+                    .termBufferSparseFile(true)
+                    .aeronDirectoryName(aeronDirName));
+            aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(mediaDriver.aeronDirectoryName()));
+        }
 
         String internalChannel = System.getenv().getOrDefault("AERON_INTERNAL_CHANNEL", "aeron:ipc");
         String externalChannel = System.getenv().getOrDefault(
