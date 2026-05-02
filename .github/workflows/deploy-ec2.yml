@@ -89,7 +89,7 @@ jobs:
               -o /usr/local/lib/docker/cli-plugins/docker-compose
             sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
           fi
-REMOTE
+          REMOTE
 
       - name: Sync repository on EC2
         run: |
@@ -111,7 +111,7 @@ REMOTE
 
           mkdir -p "\$APP_DIR/secrets" "\$APP_DIR/logs" "\$APP_DIR/journal"
           chmod 700 "\$APP_DIR/secrets"
-REMOTE
+          REMOTE
 
       - name: Write runtime secrets and environment
         run: |
