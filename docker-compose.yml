@@ -19,7 +19,6 @@ services:
       - "${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
       - "${NODE0_AERON_PORT:-40456}:40456"
     volumes:
-      - ./logs/node0:/app/cluster
       - ./journal:/app/journal
     shm_size: "2gb"
 
@@ -42,7 +41,6 @@ services:
       - "${NODE1_CLUSTER_PORT_RANGE:-9101-9106}:9001-9006"
       - "${NODE1_AERON_PORT:-40458}:40456"
     volumes:
-      - ./logs/node1:/app/cluster
       - ./journal:/app/journal
     shm_size: "2gb"
 
@@ -65,13 +63,17 @@ services:
       - "${NODE2_CLUSTER_PORT_RANGE:-9201-9206}:9001-9006"
       - "${NODE2_AERON_PORT:-40460}:40456"
     volumes:
-      - ./logs/node2:/app/cluster
       - ./journal:/app/journal
     shm_size: "2gb"
 
   wsclient:
     build: .
     profiles: ["cluster-live"]
+    depends_on:
+      - node0
+      - node1
+      - node2
+    restart: unless-stopped
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
       CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
@@ -83,15 +85,15 @@ services:
       KALSHI_MARKET_TICKERS: ${KALSHI_MARKET_TICKERS:-}
       KALSHI_MARKET_SERIES_TICKER: ${KALSHI_MARKET_SERIES_TICKER:-}
       KALSHI_WS_CHANNELS: ${KALSHI_WS_CHANNELS:-orderbook_delta,trade,ticker,market_lifecycle_v2}
+      WSCLIENT_START_DELAY_SECONDS: ${WSCLIENT_START_DELAY_SECONDS:-20}
     networks:
       cluster_net:
         ipv4_address: ${WSCLIENT_IP:-172.20.0.6}
     volumes:
-      - ./logs/wsclient:/app/cluster
       - ${KALSHI_KEY_HOST_PATH:?Set KALSHI_KEY_HOST_PATH to your private key file}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
     shm_size: "2gb"
     command: >
-      sh -c "java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
+      sh -c "sleep $${WSCLIENT_START_DELAY_SECONDS:-20}; java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
 
   replay:
     build: .
@@ -107,6 +109,7 @@ services:
   streamtap:
     build: .
     profiles: ["cluster-live"]
+    restart: unless-stopped
     environment:
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       STREAM_TAP_CHANNEL: ${STREAM_TAP_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}

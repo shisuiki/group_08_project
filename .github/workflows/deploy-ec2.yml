@@ -47,6 +47,7 @@ jobs:
       AERON_EXTERNAL_CHANNEL: ${{ vars.AERON_EXTERNAL_CHANNEL || 'aeron:udp?endpoint=224.0.1.1:40456' }}
       STREAM_TAP_HOST_PORT: ${{ vars.STREAM_TAP_HOST_PORT || '8080' }}
       STREAM_TAP_STREAMS: ${{ vars.STREAM_TAP_STREAMS || 'canonical.trade,canonical.ticker,canonical.open_interest,derived.top_of_book,system.sequence_gaps' }}
+      WSCLIENT_START_DELAY_SECONDS: ${{ vars.WSCLIENT_START_DELAY_SECONDS || '20' }}
     steps:
       - name: Validate required deployment secrets
         run: |
@@ -135,6 +136,7 @@ jobs:
           AERON_EXTERNAL_CHANNEL=$AERON_EXTERNAL_CHANNEL
           STREAM_TAP_HOST_PORT=$STREAM_TAP_HOST_PORT
           STREAM_TAP_STREAMS=$STREAM_TAP_STREAMS
+          WSCLIENT_START_DELAY_SECONDS=$WSCLIENT_START_DELAY_SECONDS
           BACKEND_START_DEMO_CLIENT=false
           BACKEND_JOURNAL_ROOT=/app/journal
           EOF
@@ -144,7 +146,7 @@ jobs:
 
       - name: Deploy Docker Compose stack
         run: |
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
 
       - name: Show service status
         run: |

@@ -29,6 +29,7 @@ Recommended repository variables:
 - `AERON_EXTERNAL_CHANNEL`: default `aeron:udp?endpoint=224.0.1.1:40456`.
 - `STREAM_TAP_HOST_PORT`: default `8080`, bound to `127.0.0.1` on the EC2 host.
 - `STREAM_TAP_STREAMS`: comma-separated canonical stream names for the local stream tap.
+- `WSCLIENT_START_DELAY_SECONDS`: default `20`, gives the Aeron cluster time to elect a leader before the live WebSocket client connects.
 
 Optional:
 
