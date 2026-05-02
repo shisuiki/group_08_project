@@ -1,0 +1,144 @@
+name: CI/CD Deploy To EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ec2-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run Maven tests
+        run: mvn -B test
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/group_08_project' }}
+      DEPLOY_PROFILE: ${{ vars.DEPLOY_PROFILE || 'cluster-live' }}
+      KALSHI_BASE_URL: ${{ vars.KALSHI_BASE_URL || 'https://api.elections.kalshi.com' }}
+      KALSHI_KEY_ID: ${{ secrets.KALSHI_KEY_ID }}
+      KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+      KALSHI_MARKET_TICKERS: ${{ vars.KALSHI_MARKET_TICKERS }}
+      KALSHI_MARKET_SERIES_TICKER: ${{ vars.KALSHI_MARKET_SERIES_TICKER || 'KXHIGHCHI' }}
+      KALSHI_WS_CHANNELS: ${{ vars.KALSHI_WS_CHANNELS || 'orderbook_delta,trade,ticker,market_lifecycle_v2' }}
+    steps:
+      - name: Validate required deployment secrets
+        run: |
+          test -n "$EC2_HOST"
+          test -n "$EC2_USER"
+          test -n "${{ secrets.EC2_SSH_PRIVATE_KEY }}"
+          test -n "$KALSHI_KEY_ID"
+          test -n "$KALSHI_PRIVATE_KEY"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Bootstrap EC2 host
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          if ! command -v git >/dev/null 2>&1; then
+            sudo dnf install -y git
+          fi
+
+          if ! command -v curl >/dev/null 2>&1; then
+            sudo dnf install -y curl
+          fi
+
+          if ! command -v docker >/dev/null 2>&1; then
+            sudo dnf install -y docker
+          fi
+
+          sudo systemctl enable --now docker
+
+          if ! sudo docker compose version >/dev/null 2>&1; then
+            sudo dnf install -y docker-compose-plugin || true
+          fi
+
+          if ! sudo docker compose version >/dev/null 2>&1; then
+            sudo mkdir -p /usr/local/lib/docker/cli-plugins
+            sudo curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+              -o /usr/local/lib/docker/cli-plugins/docker-compose
+            sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          fi
+REMOTE
+
+      - name: Sync repository on EC2
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "bash -s" <<REMOTE
+          set -euo pipefail
+          APP_DIR="$DEPLOY_PATH"
+          sudo mkdir -p "\$APP_DIR"
+          sudo chown "$EC2_USER:$EC2_USER" "\$APP_DIR"
+
+          if [ -d "\$APP_DIR/.git" ]; then
+            git -C "\$APP_DIR" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+            git -C "\$APP_DIR" fetch --prune origin
+            git -C "\$APP_DIR" checkout main
+            git -C "\$APP_DIR" reset --hard origin/main
+          else
+            sudo find "\$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+            git clone --branch main "https://github.com/${GITHUB_REPOSITORY}.git" "\$APP_DIR"
+          fi
+
+          mkdir -p "\$APP_DIR/secrets" "\$APP_DIR/logs" "\$APP_DIR/journal"
+          chmod 700 "\$APP_DIR/secrets"
+REMOTE
+
+      - name: Write runtime secrets and environment
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "mkdir -p '$DEPLOY_PATH/secrets'"
+          printf '%s\n' "$KALSHI_PRIVATE_KEY" | ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
+            "cat > '$DEPLOY_PATH/secrets/kalshi_private_key.pem' && chmod 600 '$DEPLOY_PATH/secrets/kalshi_private_key.pem'"
+
+          cat > deploy.env <<EOF
+          BACKEND_PROFILE=production
+          KALSHI_BASE_URL=$KALSHI_BASE_URL
+          KALSHI_KEY_ID=$KALSHI_KEY_ID
+          KALSHI_KEY_PATH=/run/secrets/kalshi_private_key
+          KALSHI_KEY_HOST_PATH=$DEPLOY_PATH/secrets/kalshi_private_key.pem
+          KALSHI_MARKET_TICKERS=$KALSHI_MARKET_TICKERS
+          KALSHI_MARKET_SERIES_TICKER=$KALSHI_MARKET_SERIES_TICKER
+          KALSHI_WS_CHANNELS=$KALSHI_WS_CHANNELS
+          BACKEND_START_DEMO_CLIENT=false
+          BACKEND_JOURNAL_ROOT=/app/journal
+          EOF
+
+          scp -i ~/.ssh/ec2_key deploy.env "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/.env"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+
+      - name: Deploy Docker Compose stack
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
+
+      - name: Show service status
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' ps"
