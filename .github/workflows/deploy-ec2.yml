@@ -253,7 +253,7 @@ jobs:
 
       - name: Deploy Docker Compose stack
         run: |
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile cluster-live --profile recording-capture --profile observability --profile featureplant --profile storage-replay --profile raw-replay down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
 
       - name: Show service status
         run: |
