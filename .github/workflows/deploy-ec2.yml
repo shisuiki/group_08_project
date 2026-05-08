@@ -162,8 +162,9 @@ jobs:
             git clone --branch main "https://github.com/${GITHUB_REPOSITORY}.git" "\$APP_DIR"
           fi
 
-          mkdir -p "\$APP_DIR/secrets" "\$APP_DIR/logs" "\$APP_DIR/journal" "\$APP_DIR/recordings"
-          chmod 700 "\$APP_DIR/secrets"
+          sudo mkdir -p "\$APP_DIR/secrets" "\$APP_DIR/logs" "\$APP_DIR/journal" "\$APP_DIR/recordings"
+          sudo chown -R "$EC2_USER:$EC2_USER" "\$APP_DIR/secrets" "\$APP_DIR/logs"
+          sudo chmod 700 "\$APP_DIR/secrets"
           REMOTE
 
       - name: Configure EC2 PTP clock when enabled
