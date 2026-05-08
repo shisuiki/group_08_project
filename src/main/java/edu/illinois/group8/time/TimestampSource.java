@@ -25,10 +25,8 @@ public final class TimestampSource {
         String value = firstNonBlank(
             System.getenv("RAW_INGEST_RECORDER_TIMESTAMP_SOURCE"),
             System.getenv("STREAM_RECORDER_TIMESTAMP_SOURCE"),
-            System.getenv("FRONTEND_ADAPTER_TIMESTAMP_SOURCE"),
             System.getenv("INSTRUMENTATION_TIMESTAMP_SOURCE"),
             System.getenv("BACKEND_TIMESTAMP_SOURCE"),
-            System.getenv("GATEWAY_TIMESTAMP_SOURCE"),
             "system_nano"
         );
         String ptpDevice = firstNonBlank(System.getenv("EC2_PTP_DEVICE"), "/dev/ptp_ena");

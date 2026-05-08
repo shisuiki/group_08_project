@@ -138,6 +138,9 @@ public class RecordingEventReader {
             return "";
         }
         String directory = relative.getName(0).toString();
+        if (directory.startsWith("stream=")) {
+            return directory.substring("stream=".length());
+        }
         return streamByDirectory.getOrDefault(directory, directory.replace('_', '.'));
     }
 }

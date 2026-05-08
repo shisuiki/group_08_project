@@ -51,19 +51,15 @@ Recommended repository variables:
 - `S3_UPLOAD_INTERVAL_SECONDS`: default `60`.
 - `S3_UPLOAD_MIN_AGE_SECONDS`: default `120`.
 - `S3_DELETE_AFTER_UPLOAD`: default `false`; set `true` for whole-universe capture on the EC2 root volume.
-- `FRONTEND_ADAPTER_HOST_PORT`: default `8090`.
-- `FRONTEND_ADAPTER_BIND_ADDR`: default `127.0.0.1`. Set to `0.0.0.0` only when the adapter API should be public.
-- `FRONTEND_ADAPTER_HISTORY_ROOT`: default `/app/recordings/producer-canonical`, the producer-side canonical source of truth. It can be pointed at `/app/recordings` to use the downstream stream recorder's `canonical` subtree.
-- `FRONTEND_ADAPTER_STREAMS`: comma-separated normalized stream names available to optional adapter stream diagnostics.
-- `FRONTEND_ADAPTER_ENABLE_STREAM`: default `false`. Keep false for frontend integrations so the adapter consumes recorder-backed storage instead of Aeron.
-- `FRONTEND_ADAPTER_SEED_JOURNAL`: default `true`, seeds historical APIs from recorder output.
-- `FRONTEND_ADAPTER_ENABLE_STORAGE_TAIL`: default `true`, keeps the adapter projection current by tailing recorder output.
-- `FRONTEND_ADAPTER_STORAGE_POLL_INTERVAL_MS`: default `1000`.
-- `FRONTEND_ADAPTER_TIMESTAMP_SOURCE`: default `system_nano`. Use `ptp_system_clock` only when chrony is using EC2 PHC/PTP.
-- `CHART_DEMO_HOST_PORT`: default `8091`.
-- `CHART_DEMO_BIND_ADDR`: default `127.0.0.1`. Set to `0.0.0.0` only when the chart demo should be public.
-- `FRONTEND_PUBLIC_PROXY_HOST_PORT`: default `8093`, serves the chart and proxies `/api/*` to the adapter.
-- `FRONTEND_PUBLIC_PROXY_BIND_ADDR`: default `127.0.0.1`.
+- `FEATUREPLANT_SOURCE`: default `recording`; use `aeron` for live tickerplant input.
+- `FEATUREPLANT_RECORDING_ROOT`: default `/app/recordings`.
+- `FEATUREPLANT_AERON_CHANNEL`: optional override, otherwise uses `AERON_EXTERNAL_CHANNEL`.
+- `FEATUREPLANT_STREAMS`: default `canonical.trade,canonical.ticker,derived.top_of_book`.
+- `FEATUREPLANT_MODULES`: default `bbo,ticker_snapshot,trade_tape`.
+- `FEATUREPLANT_MAX_EVENTS`: default `0` for no limit.
+- `FEATUREPLANT_BATCH_SIZE`: default `100`.
+- `FEATUREPLANT_IDLE_SLEEP_MS`: default `1`.
+- `FEATUREPLANT_RUN_ONCE`: default `true` for history/backfill runs. Set `false` for live Aeron follow mode.
 - `ENABLE_EC2_PTP`: default `false`. When `true`, the workflow configures ENA PHC/PTP on the host.
 - `EC2_PTP_DEVICE`: default `/dev/ptp_ena`.
 - `WSCLIENT_START_DELAY_SECONDS`: default `20`, gives the Aeron cluster time to elect a leader before the live WebSocket client connects.
@@ -84,7 +80,7 @@ It then clones or resets the repo at `DEPLOY_PATH`, writes runtime secrets into 
 
 ## Optional EC2 PTP Clock
 
-The stream recorder and frontend adapter can report whether an EC2 PTP hardware clock is available and can use the OS wall clock as a PTP-disciplined timestamp source. PTP is most useful for the recorder because it writes durable historical data and storage latency timestamps. Enable this only on an instance family and Region/Local Zone that exposes ENA PHC.
+The raw recorder, stream recorder, and backend journal can report whether an EC2 PTP hardware clock is available and can use the OS wall clock as a PTP-disciplined timestamp source. PTP is most useful for raw ingress and recorder timestamps because they become durable latency measurement anchors. Enable this only on an instance family and Region/Local Zone that exposes ENA PHC.
 
 Set `ENABLE_EC2_PTP=true` in GitHub repository variables. The deploy workflow runs `scripts/configure-ec2-ptp.sh`, which:
 
@@ -120,8 +116,7 @@ curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/events
 curl http://127.0.0.1:8092/health
 curl http://127.0.0.1:8092/events
-curl http://127.0.0.1:8090/health
-curl http://127.0.0.1:8090/symbols
+sudo docker compose --env-file .env --profile featureplant run --rm featureplant --max-events=1000
 ```
 
 ## Security Notes

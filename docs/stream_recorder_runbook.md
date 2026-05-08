@@ -8,9 +8,9 @@
 
 Set `STREAM_RECORDER_PARTITION_GRANULARITY=minute` to add a `minute=<mm>` partition between `hour=<hh>` and `events.ndjson`. That is the better setting for S3-backed query stores because active files become stable and uploadable within roughly one minute instead of waiting for an hour boundary.
 
-The frontend adapter can use this directory as a historical source, but the
-current source-of-truth canonical recording is normally
-`/app/recordings/producer-canonical`.
+Featureplant and query/export modules can use this directory as a historical
+source when they need to validate what a real Aeron consumer observed. The
+producer-side canonical recording is normally `/app/recordings/producer-canonical`.
 
 ## Configuration
 

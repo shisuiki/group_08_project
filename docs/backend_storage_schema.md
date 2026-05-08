@@ -34,8 +34,8 @@ recordings/producer-canonical/
           events.ndjson
 ```
 
-This is the preferred historical source for frontend APIs, backtests, and
-canonical research exports.
+This is a producer-side normalized historical source for featureplant backfills,
+query APIs, backtests, and canonical research exports.
 
 ## Downstream Canonical
 

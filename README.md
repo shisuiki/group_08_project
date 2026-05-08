@@ -80,7 +80,7 @@ The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_h
 
 ### Real-Time Data Storage
 
-Our system records real-time data to partitioned local files and, in deployment, uploads stable partitions to S3. Raw websocket payloads are the source of truth for full replay. Producer-side canonical storage is the source for frontend visualizations, backtesting, and research exports. The downstream stream recorder remains useful for validating what external Aeron clients receive.
+Our system records real-time data to partitioned local files and, in deployment, uploads stable partitions to S3. Raw websocket payloads are the source of truth for full replay. Canonical recordings are the source for backfills, featureplant runs, visualization, backtesting, and research exports. The downstream stream recorder remains useful for validating what Aeron clients receive.
 
 ## Demo Video
 
@@ -91,10 +91,11 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 2. For live ingestion, set `KALSHI_KEY_ID`, `KALSHI_KEY_HOST_PATH`, and either `KALSHI_MARKET_TICKERS`, `KALSHI_MARKET_SERIES_TICKER`, or `KALSHI_MARKET_SELECTION_MODE=open_markets`.
 3. Run a single local node with `docker compose --profile single-node-local up --build`, or the three-node live stack with `docker compose --profile cluster-live up --build`.
 4. Raw replay can run in dry-run mode with `docker compose --profile raw-replay run --rm -e RAW_REPLAY_DRY_RUN=true raw-ingress-replay`.
-5. Frontend/chart, dashboard, replay-control, and research-export integrations are available with `docker compose --profile frontend-integration up --build`.
+5. Observability is available with `docker compose --profile observability up --build`.
 6. Stream-recorder backed replay/load tests are available with `docker compose --profile storage-replay up --build recording-replay`.
+7. Featureplant templates can run over recorded history with `docker compose --profile featureplant run --rm featureplant`.
 
-Backend stream contracts, schema mappings, replay behavior, frontend integration, and operations notes are documented under `docs/`.
+Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 
 ## Future Work
 

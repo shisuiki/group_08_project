@@ -281,7 +281,7 @@ services:
 
   streamtap:
     build: .
-    profiles: ["cluster-live", "frontend-integration"]
+    profiles: ["cluster-live", "observability"]
     restart: unless-stopped
     environment:
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
@@ -301,7 +301,7 @@ services:
 
   stream-recorder:
     build: .
-    profiles: ["cluster-live", "frontend-integration", "recording-capture"]
+    profiles: ["cluster-live", "recording-capture", "observability"]
     restart: unless-stopped
     environment:
       BASE_DIR: /app
@@ -332,7 +332,7 @@ services:
       context: .
       dockerfile: ops/docker/s3-recording-sync.Dockerfile
     image: group_08_project-s3-recording-sync
-    profiles: ["cluster-live", "frontend-integration", "recording-capture"]
+    profiles: ["cluster-live", "recording-capture"]
     depends_on:
       - stream-recorder
     restart: unless-stopped
@@ -351,67 +351,33 @@ services:
       - ./recordings:/app/recordings
       - ./scripts:/app/scripts:ro
 
-  frontend-adapter:
+  featureplant:
     build: .
-    profiles: ["cluster-live", "frontend-integration"]
-    depends_on:
-      - stream-recorder
-    restart: unless-stopped
+    profiles: ["featureplant"]
     environment:
       BASE_DIR: /app
-      BACKEND_JOURNAL_ROOT: ${FRONTEND_ADAPTER_HISTORY_ROOT:-/app/recordings/producer-canonical}
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
-      FRONTEND_ADAPTER_AERON_CHANNEL: ${FRONTEND_ADAPTER_AERON_CHANNEL:-}
-      FRONTEND_ADAPTER_ENABLE_STREAM: ${FRONTEND_ADAPTER_ENABLE_STREAM:-false}
-      FRONTEND_ADAPTER_SEED_JOURNAL: ${FRONTEND_ADAPTER_SEED_JOURNAL:-true}
-      FRONTEND_ADAPTER_ENABLE_STORAGE_TAIL: ${FRONTEND_ADAPTER_ENABLE_STORAGE_TAIL:-true}
-      FRONTEND_ADAPTER_STORAGE_POLL_INTERVAL_MS: ${FRONTEND_ADAPTER_STORAGE_POLL_INTERVAL_MS:-1000}
-      FRONTEND_ADAPTER_PORT: ${FRONTEND_ADAPTER_PORT:-8090}
-      FRONTEND_ADAPTER_STREAMS: ${FRONTEND_ADAPTER_STREAMS:-canonical.trade,canonical.ticker,canonical.open_interest,canonical.orderbook.snapshot,canonical.orderbook.delta,canonical.market_lifecycle,system.parser_errors,derived.top_of_book,system.sequence_gaps}
-      FRONTEND_ADAPTER_MAX_INDEXED_EVENTS: ${FRONTEND_ADAPTER_MAX_INDEXED_EVENTS:-200000}
-      FRONTEND_ADAPTER_AUTH_TOKEN: ${FRONTEND_ADAPTER_AUTH_TOKEN:-}
-      FRONTEND_ADAPTER_TIMESTAMP_SOURCE: ${FRONTEND_ADAPTER_TIMESTAMP_SOURCE:-system_nano}
-      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
-      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
+      FEATUREPLANT_SOURCE: ${FEATUREPLANT_SOURCE:-recording}
+      FEATUREPLANT_RECORDING_ROOT: ${FEATUREPLANT_RECORDING_ROOT:-/app/recordings}
+      FEATUREPLANT_AERON_CHANNEL: ${FEATUREPLANT_AERON_CHANNEL:-}
+      FEATUREPLANT_STREAMS: ${FEATUREPLANT_STREAMS:-canonical.trade,canonical.ticker,derived.top_of_book}
+      FEATUREPLANT_MODULES: ${FEATUREPLANT_MODULES:-bbo,ticker_snapshot,trade_tape}
+      FEATUREPLANT_MAX_EVENTS: ${FEATUREPLANT_MAX_EVENTS:-0}
+      FEATUREPLANT_BATCH_SIZE: ${FEATUREPLANT_BATCH_SIZE:-100}
+      FEATUREPLANT_IDLE_SLEEP_MS: ${FEATUREPLANT_IDLE_SLEEP_MS:-1}
+      FEATUREPLANT_RUN_ONCE: ${FEATUREPLANT_RUN_ONCE:-true}
     networks:
-      cluster_net:
-        ipv4_address: ${FRONTEND_ADAPTER_IP:-172.20.0.8}
-    ports:
-      - "${FRONTEND_ADAPTER_BIND_ADDR:-127.0.0.1}:${FRONTEND_ADAPTER_HOST_PORT:-8090}:${FRONTEND_ADAPTER_PORT:-8090}"
+      - cluster_net
     volumes:
       - ./recordings:/app/recordings:ro
     shm_size: "512mb"
     command: >
-      sh -c "java -cp /app/app.jar edu.illinois.group8.integration.IntegrationGatewayServer"
-
-  chart-demo:
-    image: nginx:1.27-alpine
-    profiles: ["frontend-integration"]
-    depends_on:
-      - frontend-adapter
-    ports:
-      - "${CHART_DEMO_BIND_ADDR:-127.0.0.1}:${CHART_DEMO_HOST_PORT:-8091}:80"
-    volumes:
-      - ./frontend/tradingview-lightweight:/usr/share/nginx/html:ro
-
-  frontend-public-proxy:
-    image: nginx:1.27-alpine
-    profiles: ["frontend-integration"]
-    depends_on:
-      - frontend-adapter
-    ports:
-      - "${FRONTEND_PUBLIC_PROXY_BIND_ADDR:-127.0.0.1}:${FRONTEND_PUBLIC_PROXY_HOST_PORT:-8093}:80"
-    volumes:
-      - ./frontend/tradingview-lightweight:/usr/share/nginx/html:ro
-      - ./ops/nginx/frontend-public-proxy.conf:/etc/nginx/conf.d/default.conf:ro
-    networks:
-      - cluster_net
+      sh -c "java -cp /app/app.jar edu.illinois.group8.feature.FeaturePlantCli"
 
   prometheus:
     image: prom/prometheus:v2.55.1
-    profiles: ["frontend-integration"]
+    profiles: ["observability"]
     depends_on:
-      - frontend-adapter
       - stream-recorder
       - streamtap
     ports:
@@ -423,7 +389,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.3.1
-    profiles: ["frontend-integration"]
+    profiles: ["observability"]
     depends_on:
       - prometheus
     ports:

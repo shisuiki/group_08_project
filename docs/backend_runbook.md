@@ -66,8 +66,8 @@ than live derived book analytics.
 
 For EC2 recorder-only soak tests, use the `recording-capture` compose profile.
 It starts a single Aeron cluster member, `wsclient-capture`, the stream recorder,
-and the S3 sync sidecar without the frontend adapter, stream tap, Prometheus, or
-Grafana.
+and the S3 sync sidecar without stream tap, Prometheus, Grafana, or downstream
+feature/query modules.
 
 The source-of-truth replay log is the raw websocket capture, not the downstream
 stream recorder. Enable:
@@ -98,8 +98,8 @@ subset of injected raw traffic after normalization and should not be treated as
 the authoritative replay database.
 
 ```bash
-docker compose --env-file .env --profile cluster-live --profile frontend-integration stop \
-  wsclient node0 node1 node2 streamtap frontend-adapter frontend-public-proxy chart-demo prometheus grafana
+docker compose --env-file .env --profile cluster-live --profile observability stop \
+  wsclient node0 node1 node2 streamtap prometheus grafana
 docker compose --env-file .env --profile recording-capture up -d --build \
   node0-capture stream-recorder s3-recording-sync wsclient-capture
 ```

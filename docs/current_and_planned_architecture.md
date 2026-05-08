@@ -22,23 +22,115 @@ The current codebase has expanded that simple path:
   `StreamRegistry` instead of hardcoded message offsets.
 - `External Aeron Channels` now mean versioned stream IDs 10-19:
   raw, canonical, derived top-of-book, parser errors, and sequence gaps.
-- `Data Warehousing Service -> Redshift` has been replaced by file/object
-  storage: `raw-ingest` for exact websocket payloads, `producer-canonical` for
-  normalized source-of-truth events, and optional downstream `canonical`
-  recorder output for Aeron-consumer validation.
+- `Data Warehousing Service -> Redshift` has been removed from the current
+  source tree and replaced by file/object recording: `raw-ingest` for exact
+  websocket payloads, `producer-canonical` for normalized producer-side events,
+  and optional downstream `canonical` recorder output for Aeron-consumer
+  validation.
 - New current modules not shown in the old diagram include stream recording,
-  storage-backed replay, frontend/research adapters, stream tap inspection,
-  Prometheus/Grafana, and hot-path profiling.
+  storage-backed replay, source-agnostic featureplant templates, stream tap
+  inspection, Prometheus/Grafana, and hot-path profiling.
 
 Plan status from the markdowns:
 
 | Plan | Current state | Where remaining planned modules belong |
 | --- | --- | --- |
 | `01_core_backend_implementation_plan.md` | Mostly represented in code: config, canonical events, parser, order book state, stream registry, file/object recording, replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket heartbeat reliability. |
-| `02_feature_plant_basic_implementation_plan.md` | No dedicated `feature` package or feature-plant service exists. Backend publishes `derived.top_of_book`, and `GatewayEventStore` builds simple chart bars in memory. | Add a separate feature plant after canonical tickerplant streams and replay, before frontend/backtest/semantic consumers. |
-| `03_standard_frontend_integration_plan.md` | Largely implemented: `TickerplantStreamRecorder`, `IntegrationGatewayServer`, Lightweight Charts demo, research CSV export, replay sessions, nginx proxy, Prometheus, and Grafana. | Once the feature plant exists, the frontend adapter should consume feature bars/BBO/depth instead of owning those projections itself. |
-| `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, recorder/streamtap/frontend metrics endpoints, Prometheus, Grafana, and profiling CLI. | Add feature-module metrics, explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
+| `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, recording-backed and Aeron-backed sources, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
+| `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer`, live chart demo, and research CSV gateway path have been removed. | Frontend visualization, backtesting, and research export should attach to the same feature/query boundary used for historical replay, not directly to live tickerplant streams. |
+| `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
 | `05_semantic_feature_plant_ontology_pricing_plan.md` | Not implemented in source packages today. | Add a downstream semantic/pricing service that consumes canonical streams, feature streams, market metadata, replay, and quality/staleness indicators. |
+
+## Diagram 0: Legacy Baseline Codebase
+
+This diagram treats `1181b6010da1d53d6cff073c07ff351cb57d313e` as the
+baseline, before the newer work on the legacy code. At that point the codebase
+already matched the old block diagram fairly closely: Kalshi ingestion fed an
+Aeron Cluster ESB, the ESB normalized messages onto an internal Aeron stream,
+and the tickerplant routed those formatted messages to stream-specific Aeron
+publications.
+
+```mermaid
+flowchart LR
+  classDef source fill:#fff4d6,stroke:#9a6b00,color:#1f1f1f;
+  classDef legacy fill:#eef3ff,stroke:#315b7c,color:#102033;
+  classDef bus fill:#e8f7ee,stroke:#2d6a4f,color:#102033;
+  classDef storage fill:#f5e8ff,stroke:#6d4c86,color:#102033;
+  classDef external fill:#f7f7f7,stroke:#555,color:#102033;
+  classDef optional fill:#fff7ed,stroke:#9a6b00,color:#102033,stroke-dasharray: 5 5;
+
+  KALSHI0["Kalshi API<br/>REST + WebSocket"]:::source
+
+  subgraph Collect0["Kalshi Data Collection Service"]
+    KS0["KalshiSystem<br/>KXHIGHCHI market discovery<br/>subscribes trade, ticker, orderbook_delta"]:::legacy
+    KW0["KalshiWrapper<br/>signed REST wrapper<br/>markets, trades, orderbook, series"]:::legacy
+    WS0["KalshiWebSocketClient<br/>custom WebSocket client<br/>type switch + single book sequence check"]:::legacy
+    CCO0["ClientClusterOrchestrator<br/>Aeron Cluster ingress client"]:::bus
+  end
+
+  KALSHI0 -->|REST market discovery| KW0
+  KS0 --> KW0
+  KW0 --> WS0
+  KALSHI0 -->|raw WS JSON| WS0
+  WS0 -->|accepted trade, ticker, book JSON| CCO0
+
+  subgraph ESB0["Enterprise Service Bus / Aeron Cluster"]
+    CM0["ClusterMain<br/>MediaDriver + Archive + ConsensusModule<br/>ClusteredServiceContainer"]:::bus
+    ECS0["ESBClusteredService<br/>leader-only onSessionMessage"]:::bus
+    ORCH0["ESBClusterCommunicationOrchestrator<br/>internal pub/sub + char-keyed external streams"]:::bus
+    DP0["DataProcessor<br/>legacy formatter + order book state<br/>emits top-of-book"]:::legacy
+    MSG0["messages/*<br/>Trade, Ticker, Snapshot, Delta"]:::legacy
+    INTERNAL0["Internal Aeron stream<br/>StreamIDs.INTERNAL_IDX = 3"]:::bus
+    TP0["Tickerplant<br/>polls internal stream<br/>routes by JSON type char"]:::legacy
+  end
+
+  CCO0 -->|cluster ingress| ECS0
+  CM0 --> ECS0
+  ECS0 --> ORCH0
+  ECS0 --> DP0
+  DP0 --> MSG0
+  DP0 -->|formatted JSON via orchestrator| INTERNAL0
+  INTERNAL0 --> TP0
+
+  subgraph Streams0["External Aeron Streams"]
+    TRADE0["T trade stream<br/>ID 0"]:::bus
+    TOB0["K top-of-book stream<br/>ID 1"]:::bus
+    BOOK0["D/S book events stream<br/>ID 2"]:::bus
+    TICKER0["R ticker stream<br/>ID 4"]:::bus
+    OI0["O open-interest stream<br/>ID 5"]:::bus
+  end
+
+  TP0 --> TRADE0
+  TP0 --> TOB0
+  TP0 --> BOOK0
+  TP0 --> TICKER0
+  TP0 --> OI0
+
+  subgraph Consumers0["Legacy Consumers And Storage"]
+    GRID0["MarketGridDemo<br/>demo Aeron client<br/>started by ESB service"]:::external
+    STORE0["TradeDataStorage<br/>trade-stream Redshift subscriber<br/>thread present but disabled in ESB startup"]:::optional
+    LISTENER0["AeronListener + BatchProcessor<br/>separate batch storage listener"]:::optional
+    DAO0["MessageDAO<br/>placeholder DAO methods"]:::storage
+    REDSHIFT0["Amazon Redshift / RDS-era storage<br/>Trades and master tables"]:::storage
+  end
+
+  TRADE0 --> GRID0
+  TOB0 --> GRID0
+  TRADE0 -.-> STORE0
+  STORE0 -.-> REDSHIFT0
+  TRADE0 -.-> LISTENER0
+  LISTENER0 -.-> REDSHIFT0
+  DAO0 -.-> REDSHIFT0
+
+  subgraph Historical0["Historical Backfill"]
+    HF0["HistoricalFetcherRunner<br/>HistoricalDataFetcher + ThrottlingManager"]:::legacy
+    HDP0["historicalDataFetcher.DataProcessor<br/>REST data to Redshift tables"]:::legacy
+  end
+
+  KALSHI0 -->|REST trades, events, series| HF0
+  HF0 --> HDP0
+  HDP0 --> REDSHIFT0
+```
 
 ## Diagram 1: Current Codebase
 
@@ -49,13 +141,16 @@ flowchart LR
   classDef bus fill:#e8f7ee,stroke:#2d6a4f,color:#102033;
   classDef storage fill:#f5e8ff,stroke:#6d4c86,color:#102033;
   classDef external fill:#f7f7f7,stroke:#555,color:#102033;
+  classDef optional fill:#fff7ed,stroke:#9a6b00,color:#102033,stroke-dasharray: 5 5;
 
   KALSHI["Kalshi API<br/>REST + WebSocket"]:::source
 
-  subgraph Live["Live Ingestion"]
-    KS["KalshiSystem<br/>startup + market selection"]:::current
+  subgraph Ingestion["Live Ingestion And Raw Capture"]
+    KS["KalshiSystem<br/>configured or open-market capture<br/>chunked subscriptions + WS sharding"]:::current
     KW["KalshiWrapper<br/>REST market discovery"]:::current
-    KWS["KalshiWebSocketClient<br/>trade, ticker, orderbook, lifecycle"]:::current
+    KWS["KalshiWebSocketClient shards<br/>trade, ticker, orderbook, lifecycle<br/>subscribe/update acknowledgements"]:::current
+    RAWREC["RawIngestRecorder<br/>exact inbound WebSocket payloads"]:::current
+    RAWSTORE["recordings/raw-ingest<br/>source/date/hour/minute NDJSON"]:::storage
     CCO["ClientClusterOrchestrator<br/>Aeron Cluster ingress"]:::bus
   end
 
@@ -63,15 +158,26 @@ flowchart LR
   KS --> KW
   KW --> KWS
   KALSHI -->|WebSocket messages| KWS
+  KWS -->|recordInbound| RAWREC
+  RAWREC --> RAWSTORE
   KWS -->|raw Kalshi JSON| CCO
+
+  subgraph RawReplay["Raw Ingress Replay"]
+    RAWREPLAY["RawIngressReplayCli / Service<br/>replays raw payloads to cluster ingress"]:::current
+  end
+
+  RAWSTORE --> RAWREPLAY
+  RAWREPLAY --> CCO
 
   subgraph ESB["Aeron Cluster / ESB Runtime"]
     CM["ClusterMain<br/>node0-node2 profiles"]:::bus
     ECS["ESBClusteredService<br/>leader handles ingress"]:::bus
     DP["DataProcessor<br/>normalization hot path"]:::current
     PARSER["KalshiCanonicalParser<br/>RawSourceEvent + canonical events"]:::current
-    BOOK["OrderBookStateManager<br/>snapshot/delta state + top of book"]:::current
-    JOURNAL["FileEventJournal<br/>raw + canonical NDJSON"]:::storage
+    SEQ["SourceSequenceMonitor<br/>optional source sequence gaps"]:::current
+    BOOK["OrderBookStateManager<br/>optional snapshot/delta state<br/>derived top of book"]:::current
+    JOURNAL["FileEventJournal<br/>optional producer-side recorder<br/>producer raw/canonical recordings"]:::storage
+    PRODUCER["recordings/producer-canonical<br/>producer-side normalized source of truth"]:::storage
     INTERNAL["Internal canonical bus<br/>StreamRegistry ID 20"]:::bus
     TP["Tickerplant<br/>routes by stream_name"]:::current
   end
@@ -80,8 +186,10 @@ flowchart LR
   CM --> ECS
   ECS --> DP
   DP --> PARSER
+  DP --> SEQ
   DP --> BOOK
   DP --> JOURNAL
+  JOURNAL --> PRODUCER
   DP -->|canonical JSON| INTERNAL
   INTERNAL --> TP
 
@@ -95,30 +203,31 @@ flowchart LR
     CLIENTS["External Aeron clients"]:::external
     TAP["StreamTapServer<br/>/events /health /metrics"]:::current
     RECORDER["TickerplantStreamRecorder<br/>records normalized streams"]:::current
-    RECORDINGS["recordings/canonical/*.ndjson"]:::storage
-    REPLAY["StorageBackedRecordingReplay<br/>CLI/service replay + load tests"]:::current
-    GATEWAY["IntegrationGatewayServer<br/>frontend-adapter REST + WS"]:::current
-    STORE["GatewayEventStore<br/>symbols, quotes, bars, replay windows"]:::storage
-    CHART["TradingView Lightweight demo<br/>nginx public proxy"]:::external
-    EXPORT["ResearchExportCli<br/>CSV export"]:::current
+    CANONREC["recordings/canonical<br/>consumer-side Aeron validation copy"]:::storage
+    REPLAY["StorageBackedRecordingReplay<br/>republish recorded canonical streams"]:::current
+    S3SYNC["s3-recording-sync<br/>uploads canonical, raw-ingest,<br/>producer-canonical subtrees"]:::optional
+    FEATURECLI["FeaturePlantCli / FeaturePlantService<br/>source-agnostic canonical input"]:::current
+    FEATUREBUF["FeatureOutputSink / BoundedFeatureOutputBuffer<br/>feature output boundary"]:::storage
+    QUERYLAYER["Future dataviz, backtest,<br/>research export query modules"]:::external
     MON["Prometheus + Grafana<br/>dashboard scrape targets"]:::external
   end
 
   EXT --> CLIENTS
   EXT --> TAP
   EXT --> RECORDER
-  RECORDER --> RECORDINGS
-  RECORDINGS --> GATEWAY
-  EXT -.->|optional live diagnostics| GATEWAY
-  GATEWAY --> STORE
-  GATEWAY --> CHART
-  STORE --> EXPORT
-  RECORDINGS --> REPLAY
+  RECORDER --> CANONREC
+  EXT -.->|live feature source option| FEATURECLI
+  PRODUCER -.->|historical feature source option| FEATURECLI
+  CANONREC -.->|consumer-observed history option| FEATURECLI
+  FEATURECLI --> FEATUREBUF
+  FEATUREBUF --> QUERYLAYER
+  CANONREC --> REPLAY
   REPLAY -->|republish stored stream events| EXT
+  RAWSTORE --> S3SYNC
+  CANONREC --> S3SYNC
+  PRODUCER --> S3SYNC
   TAP --> MON
   RECORDER --> MON
-  GATEWAY --> MON
-
 ```
 
 ## Diagram 2: Planned Module Placement
@@ -147,9 +256,10 @@ flowchart LR
   KALSHI2 --> META
 
   subgraph Feature["Planned Basic Feature Plant"]
-    FPSVC["FeaturePlantService<br/>module runtime, registry, toggles"]:::planned
+    FPSVC["FeaturePlantService<br/>module runtime, registry, toggles"]:::current
+    FSRC["CanonicalEnvelopeSource<br/>Aeron live or recording/history source"]:::current
     STATE["MarketStateStore<br/>latest trade/ticker/OI/BBO/depth"]:::planned
-    BASE["Baseline feature modules<br/>feature.bbo, spread, depth_summary,<br/>trade_tape_enriched, open_interest"]:::planned
+    BASE["Baseline feature modules<br/>feature.bbo, ticker_snapshot,<br/>trade_tape, spread/depth templates"]:::current
     BARS["Bar and bucket modules<br/>1s, 1m, 5m, 1h, volume buckets"]:::planned
     GROUPS["Basic contract grouping<br/>contract_group, members, chain_snapshot"]:::planned
     FSTREAMS["Feature streams<br/>feature.*"]:::output
@@ -157,8 +267,10 @@ flowchart LR
     FAPI["Feature API<br/>/features, /bars, WS features"]:::planned
   end
 
-  CANON -->|live/replay canonical inputs| FPSVC
-  REPLAY2 -->|deterministic replay inputs| FPSVC
+  CANON -->|live tickerplant source| FSRC
+  RAWSTORE -->|historical canonical source| FSRC
+  REPLAY2 -->|deterministic replay inputs| FSRC
+  FSRC --> FPSVC
   META -->|market metadata| FPSVC
   FPSVC --> STATE
   STATE --> BASE
@@ -172,12 +284,12 @@ flowchart LR
   FSTORE --> FAPI
 
   subgraph Frontend["Frontend / Research Placement"]
-    FE2["frontend-adapter<br/>consume feature bars/BBO/depth<br/>instead of deriving all projections"]:::current
-    CHART2["TradingView Lightweight / dashboards"]:::external
+    FE2["Feature/query adapter<br/>reads feature buffers or storage"]:::planned
+    CHART2["Dataviz dashboards"]:::external
     RESEARCH["Research exports + backtests"]:::external
   end
 
-  FAPI --> FE2
+  FSTREAMS --> FE2
   FSTORE --> FE2
   FE2 --> CHART2
   FSTORE --> RESEARCH
@@ -233,7 +345,11 @@ flowchart LR
   COLLECTOR --> ALERTS
 ```
 
-The important placement decision is that the feature plant is a consumer of
-canonical tickerplant streams, not part of the Kalshi ingestion hot path. The
-semantic/pricing layer sits even farther downstream and consumes feature streams,
-market metadata, replay, and quality signals.
+The important placement decision is that the feature plant consumes canonical
+envelopes through an abstract source. That source can be a live Aeron
+tickerplant stream or a canonical historical source, so feature modules do not
+care whether they are being run live, replayed, or backfilled. Frontend
+visualization, backtesting, and research export should consume the same feature
+output/query boundary instead of subscribing directly to live tickerplant
+streams. The semantic/pricing layer sits even farther downstream and consumes
+feature streams, market metadata, replay, and quality signals.

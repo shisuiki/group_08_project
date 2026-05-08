@@ -8,9 +8,9 @@
   "id": null,
   "links": [
     {
-      "title": "Frontend Integration Runbook",
+      "title": "Stream Recorder Runbook",
       "type": "link",
-      "url": "/d/kalshi-integration/kalshi-integration"
+      "url": "docs/stream_recorder_runbook.md"
     }
   ],
   "panels": [
@@ -25,36 +25,10 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
             "drawStyle": "line",
             "fillOpacity": 8,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
             "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "showPoints": "never"
           },
           "mappings": [],
           "thresholds": {
@@ -92,22 +66,17 @@
       },
       "targets": [
         {
-          "expr": "rate(stream_tap_events_total[1m])",
-          "legendFormat": "streamtap events/sec",
+          "expr": "sum(rate(stream_recorder_events_total[1m]))",
+          "legendFormat": "stream recorder events/sec",
           "refId": "A"
         },
         {
-          "expr": "rate(frontend_adapter_live_events_total[1m])",
-          "legendFormat": "adapter live events/sec",
+          "expr": "rate(stream_tap_events_total[1m])",
+          "legendFormat": "stream tap events/sec",
           "refId": "B"
-        },
-        {
-          "expr": "sum(rate(stream_recorder_events_total[1m]))",
-          "legendFormat": "recorder events/sec",
-          "refId": "C"
         }
       ],
-      "title": "Ingest Rate",
+      "title": "Tickerplant Consumer Rates",
       "type": "timeseries"
     },
     {
@@ -117,165 +86,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "11.3.1",
-      "targets": [
-        {
-          "expr": "frontend_adapter_websocket_clients",
-          "legendFormat": "clients",
-          "refId": "A"
-        }
-      ],
-      "title": "Frontend WebSocket Clients",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "orange",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "11.3.1",
-      "targets": [
-        {
-          "expr": "frontend_adapter_ptp_device_present",
-          "legendFormat": "ptp",
-          "refId": "A"
-        }
-      ],
-      "title": "PTP Device Present",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 8,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -285,7 +95,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "none"
         },
         "overrides": []
       },
@@ -293,14 +104,11 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 4
+        "y": 0
       },
-      "id": 4,
+      "id": 2,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
@@ -312,12 +120,12 @@
       },
       "targets": [
         {
-          "expr": "stream_tap_events_by_stream",
+          "expr": "sum by (stream) (rate(stream_recorder_events_total[1m]))",
           "legendFormat": "{{stream}}",
           "refId": "A"
         }
       ],
-      "title": "Stream Counts",
+      "title": "Recorder Events By Stream",
       "type": "timeseries"
     },
     {
@@ -327,9 +135,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -339,44 +144,38 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "ns"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 8
       },
-      "id": 5,
+      "id": 3,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
-      "pluginVersion": "11.3.1",
       "targets": [
         {
-          "expr": "frontend_adapter_symbols",
-          "legendFormat": "symbols",
+          "expr": "backend_storage_commit_latency_ns_max{service=\"stream_recorder\"}",
+          "legendFormat": "{{stream}} max",
           "refId": "A"
         }
       ],
-      "title": "Indexed Symbols",
-      "type": "stat"
+      "title": "Recorder Commit Latency",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -385,9 +184,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -397,51 +193,46 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
+        "h": 8,
+        "w": 12,
+        "x": 12,
         "y": 8
       },
-      "id": 6,
+      "id": 4,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
-      "pluginVersion": "11.3.1",
       "targets": [
         {
-          "expr": "frontend_adapter_events_total",
-          "legendFormat": "events",
+          "expr": "feature_module_lag_ms_max{service=\"stream_recorder\"}",
+          "legendFormat": "{{stream}} max",
           "refId": "A"
         }
       ],
-      "title": "Indexed Events",
-      "type": "stat"
+      "title": "Stream Age At Recorder",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
-  "schemaVersion": 40,
+  "schemaVersion": 39,
   "tags": [
     "kalshi",
-    "frontend-integration"
+    "tickerplant",
+    "recording"
   ],
   "templating": {
     "list": []
@@ -450,9 +241,8 @@
     "from": "now-30m",
     "to": "now"
   },
-  "timepicker": {},
   "timezone": "browser",
-  "title": "Kalshi Integration",
+  "title": "Kalshi Tickerplant Recording",
   "uid": "kalshi-integration",
   "version": 1,
   "weekStart": ""

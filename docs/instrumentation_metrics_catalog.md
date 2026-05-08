@@ -62,6 +62,6 @@ Avoid labels for `trade_id`, raw error messages, raw payload values, and unconst
 
 ## Current Implementation Notes
 
-`stream-recorder` emits the storage, parser visibility, order book quality, and feature input metrics for normalized tickerplant streams. `frontend-adapter` emits frontend projection metrics under `frontend_adapter_*`. `streamtap` remains a lightweight inspection tool for recent normalized stream events.
+`stream-recorder` emits the storage, parser visibility, order book quality, and feature input metrics for normalized tickerplant streams. `FeaturePlantService` emits `feature_module_*` metrics when embedded or run by a module host. `streamtap` remains a lightweight inspection tool for recent normalized stream events.
 
 For profiling before optimization, use `edu.illinois.group8.profile.HotPathProfileCli`. It exercises the parser, order-book state, processor, serialization, and file journal with synthetic Kalshi-shaped messages and can print the same Prometheus metrics emitted by the hot path.
