@@ -17,16 +17,16 @@ The current codebase has expanded that simple path:
   `KalshiWrapper`, `KalshiWebSocketClient`, and `ClientClusterOrchestrator`.
 - `Enterprise Service Bus` now maps to Aeron Cluster nodes running
   `ESBClusteredService`, `DataProcessor`, `KalshiCanonicalParser`,
-  `OrderBookStateManager`, `FileEventJournal`, and the internal canonical bus.
+  `OrderBookStateManager`, and the internal canonical bus.
 - `Tickerplant` still exists, but it now routes by `stream_name` through
   `StreamRegistry` instead of hardcoded message offsets.
-- `External Aeron Channels` now mean versioned stream IDs 10-19:
-  raw, canonical, derived top-of-book, parser errors, and sequence gaps.
+- `External Aeron Channels` now mean Aeron stream IDs 10-19 on the configured
+  external channel. They are protocol stream IDs, not Kalshi contract IDs.
 - `Data Warehousing Service -> Redshift` has been removed from the current
   source tree and replaced by file/object recording: `raw-ingest` for exact
-  websocket payloads, `producer-canonical` for normalized producer-side events,
-  and optional downstream `canonical` recorder output for Aeron-consumer
-  validation.
+  websocket payloads, `raw-rest` for REST backfill responses, and downstream
+  `canonical` recorder output for normalized Aeron-consumer observation and
+  backfilled canonical history.
 - New current modules not shown in the old diagram include stream recording,
   storage-backed replay, source-agnostic featureplant templates, stream tap
   inspection, Prometheus/Grafana, and hot-path profiling.
@@ -145,22 +145,26 @@ flowchart LR
 
   KALSHI["Kalshi API<br/>REST + WebSocket"]:::source
 
-  subgraph Ingestion["Live Ingestion And Raw Capture"]
+  subgraph Ingestion["Live Ingestion"]
+    CFG["BackendConfig<br/>env-driven profiles, channels,<br/>recording roots, cluster endpoints"]:::current
     KS["KalshiSystem<br/>configured or open-market capture<br/>chunked subscriptions + WS sharding"]:::current
     KW["KalshiWrapper<br/>REST market discovery"]:::current
-    KWS["KalshiWebSocketClient shards<br/>trade, ticker, orderbook, lifecycle<br/>subscribe/update acknowledgements"]:::current
-    RAWREC["RawIngestRecorder<br/>exact inbound WebSocket payloads"]:::current
+    KWS["KalshiWebSocketClient shards<br/>custom WS client<br/>subscribe/update acknowledgements"]:::current
+    RAWREC["RawIngestRecorder<br/>optional exact inbound WS payload capture"]:::optional
     RAWSTORE["recordings/raw-ingest<br/>source/date/hour/minute NDJSON"]:::storage
+    ENVELOPE["KalshiIngressEnvelope<br/>raw payload + receive timestamp<br/>connection/replay metadata"]:::current
     CCO["ClientClusterOrchestrator<br/>Aeron Cluster ingress"]:::bus
   end
 
+  CFG --> KS
   KALSHI -->|REST markets| KW
   KS --> KW
   KW --> KWS
-  KALSHI -->|WebSocket messages| KWS
-  KWS -->|recordInbound| RAWREC
-  RAWREC --> RAWSTORE
-  KWS -->|raw Kalshi JSON| CCO
+  KALSHI -->|WS market data| KWS
+  KWS -.->|recordInbound when enabled| RAWREC
+  RAWREC -.-> RAWSTORE
+  KWS -->|enveloped raw Kalshi JSON| ENVELOPE
+  ENVELOPE --> CCO
 
   subgraph RawReplay["Raw Ingress Replay"]
     RAWREPLAY["RawIngressReplayCli / Service<br/>replays raw payloads to cluster ingress"]:::current
@@ -172,62 +176,79 @@ flowchart LR
   subgraph ESB["Aeron Cluster / ESB Runtime"]
     CM["ClusterMain<br/>node0-node2 profiles"]:::bus
     ECS["ESBClusteredService<br/>leader handles ingress"]:::bus
-    DP["DataProcessor<br/>normalization hot path"]:::current
-    PARSER["KalshiCanonicalParser<br/>RawSourceEvent + canonical events"]:::current
+    ORCH["ESBClusterCommunicationOrchestrator<br/>internal IPC stream + external Aeron channel"]:::bus
+    DP["DataProcessor<br/>normalization, publishing,<br/>metrics"]:::current
+    PARSER["KalshiCanonicalParser<br/>RawSourceEvent + canonical events<br/>WS parser"]:::current
     SEQ["SourceSequenceMonitor<br/>optional source sequence gaps"]:::current
-    BOOK["OrderBookStateManager<br/>optional snapshot/delta state<br/>derived top of book"]:::current
-    JOURNAL["FileEventJournal<br/>optional producer-side recorder<br/>producer raw/canonical recordings"]:::storage
-    PRODUCER["recordings/producer-canonical<br/>producer-side normalized source of truth"]:::storage
-    INTERNAL["Internal canonical bus<br/>StreamRegistry ID 20"]:::bus
+    BOOK["OrderBookStateManager<br/>snapshot/delta state<br/>derived top of book"]:::current
+    PUB["AeronEventPublisher<br/>serializes canonical JSON"]:::bus
+    INTERNAL["Internal event bus<br/>StreamRegistry ID 20"]:::bus
     TP["Tickerplant<br/>routes by stream_name"]:::current
   end
 
   CCO --> ECS
   CM --> ECS
+  ECS --> ORCH
   ECS --> DP
   DP --> PARSER
   DP --> SEQ
   DP --> BOOK
-  DP --> JOURNAL
-  JOURNAL --> PRODUCER
-  DP -->|canonical JSON| INTERNAL
+  DP --> PUB
+  PUB -->|raw/canonical/derived/system JSON| INTERNAL
   INTERNAL --> TP
+  ORCH --> INTERNAL
 
   subgraph Streams["External Aeron Streams"]
-    EXT["StreamRegistry IDs 10-19<br/>raw, canonical, derived, system"]:::bus
+    EXT["StreamRegistry external IDs 10-19<br/>raw.kalshi.websocket<br/>canonical.*, derived.top_of_book, system.*"]:::bus
   end
 
   TP -->|public stream payloads| EXT
+  ORCH --> EXT
 
   subgraph Tooling["Current Consumers And Tooling"]
-    CLIENTS["External Aeron clients"]:::external
+    CLIENTS["Aeron clients<br/>stream-recorder, featureplant,<br/>or other subscribers"]:::external
+    DEMO["MarketGridDemo<br/>optional demo client"]:::optional
     TAP["StreamTapServer<br/>/events /health /metrics"]:::current
     RECORDER["TickerplantStreamRecorder<br/>records normalized streams"]:::current
     CANONREC["recordings/canonical<br/>consumer-side Aeron validation copy"]:::storage
+    RESTBACKFILL["HistoricalBackfillCli<br/>KalshiWrapper + KalshiRestParser<br/>REST markets/trades/orderbook/candles"]:::current
+    RAWREST["recordings/raw-rest<br/>raw REST response capture"]:::storage
     REPLAY["StorageBackedRecordingReplay<br/>republish recorded canonical streams"]:::current
-    S3SYNC["s3-recording-sync<br/>uploads canonical, raw-ingest,<br/>producer-canonical subtrees"]:::optional
-    FEATURECLI["FeaturePlantCli / FeaturePlantService<br/>source-agnostic canonical input"]:::current
-    FEATUREBUF["FeatureOutputSink / BoundedFeatureOutputBuffer<br/>feature output boundary"]:::storage
-    QUERYLAYER["Future dataviz, backtest,<br/>research export query modules"]:::external
-    MON["Prometheus + Grafana<br/>dashboard scrape targets"]:::external
+    S3SYNC["s3-recording-sync<br/>uploads canonical, raw-ingest,<br/>raw-rest subtrees"]:::optional
+    MON["Prometheus + Grafana<br/>scrapes stream-recorder and streamtap"]:::external
+    PROF["HotPathProfileCli<br/>synthetic parser/book/journal profiling"]:::current
   end
 
   EXT --> CLIENTS
+  EXT -.-> DEMO
   EXT --> TAP
   EXT --> RECORDER
   RECORDER --> CANONREC
-  EXT -.->|live feature source option| FEATURECLI
-  PRODUCER -.->|historical feature source option| FEATURECLI
-  CANONREC -.->|consumer-observed history option| FEATURECLI
-  FEATURECLI --> FEATUREBUF
-  FEATUREBUF --> QUERYLAYER
+  KALSHI -->|historical REST| RESTBACKFILL
+  RESTBACKFILL --> RAWREST
+  RESTBACKFILL --> CANONREC
   CANONREC --> REPLAY
   REPLAY -->|republish stored stream events| EXT
   RAWSTORE --> S3SYNC
   CANONREC --> S3SYNC
-  PRODUCER --> S3SYNC
+  RAWREST --> S3SYNC
   TAP --> MON
   RECORDER --> MON
+
+  subgraph FeatureCurrent["Current Featureplant Templates"]
+    AERONSRC["AeronCanonicalEnvelopeSource<br/>live external stream input"]:::current
+    RECSRC["RecordingCanonicalEnvelopeSource<br/>recordings/canonical input"]:::current
+    FPSVC1["FeaturePlantCli / FeaturePlantService<br/>poll + module dispatch + metrics text"]:::current
+    FMODS["Current modules<br/>feature.bbo, feature.ticker_snapshot,<br/>feature.trade_tape"]:::current
+    FSINKS["Current sinks<br/>Stdout, Collecting,<br/>BoundedFeatureOutputBuffer"]:::storage
+  end
+
+  EXT -.-> AERONSRC
+  CANONREC --> RECSRC
+  AERONSRC --> FPSVC1
+  RECSRC --> FPSVC1
+  FPSVC1 --> FMODS
+  FMODS --> FSINKS
 ```
 
 ## Diagram 2: Planned Module Placement
@@ -244,58 +265,86 @@ flowchart LR
     KALSHI2["Kalshi REST/WS"]:::external
     CORE["Core backend<br/>KalshiSystem + ESBClusteredService + DataProcessor"]:::current
     CANON["Canonical tickerplant streams<br/>raw.*, canonical.*, derived.top_of_book, system.*"]:::current
-    RAWSTORE["Raw/canonical recordings<br/>raw-ingest + producer-canonical + stream-recorder"]:::current
+    RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + stream-recorder"]:::current
     REPLAY2["Replay services<br/>raw-ingest replay + storage-backed replay"]:::current
-    META["Market metadata snapshots<br/>REST markets/events/series"]:::current
+    RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
+    CURFEATURE["FeaturePlantService skeleton<br/>Aeron/recording sources + stdout/buffer sinks"]:::current
+    CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
   end
 
   KALSHI2 --> CORE
   CORE --> CANON
   CORE --> RAWSTORE
   RAWSTORE --> REPLAY2
-  KALSHI2 --> META
+  KALSHI2 --> RESTHELPERS
+  CANON --> CURFEATURE
+  RAWSTORE --> CURFEATURE
+  CANON --> CURMON
+  RAWSTORE --> CURMON
 
-  subgraph Feature["Planned Basic Feature Plant"]
-    FPSVC["FeaturePlantService<br/>module runtime, registry, toggles"]:::current
-    FSRC["CanonicalEnvelopeSource<br/>Aeron live or recording/history source"]:::current
+  subgraph CoreHardening["Planned Core Backend Hardening"]
+    HEARTBEAT["WebSocket heartbeat/reconnect<br/>connection state metrics"]:::planned
+    RECOVERY["Order book recovery<br/>snapshot reload after gaps<br/>cluster snapshot/restore"]:::planned
+    OBJECTBACKFILL["Object-store backfill<br/>S3 to local/replay/query loaders"]:::plannedStorage
+    BINARY["Binary serialization experiment<br/>SBE, FlatBuffers, protobuf,<br/>or Agrona buffers"]:::planned
+    METASTORE["Market metadata and terms store<br/>markets, events, series, rules text"]:::plannedStorage
+  end
+
+  CORE --> HEARTBEAT
+  CORE --> RECOVERY
+  RAWSTORE --> OBJECTBACKFILL
+  CANON --> BINARY
+  RESTHELPERS --> METASTORE
+
+  subgraph Feature["Planned Feature Plant Production Layer"]
+    FSRC["CanonicalEnvelopeSource<br/>current live or recording input boundary"]:::current
+    FPSVC["FeaturePlantService<br/>current module dispatch runtime"]:::current
+    FPUB["Feature publisher + feature stream registry<br/>versioned feature.* outputs"]:::planned
     STATE["MarketStateStore<br/>latest trade/ticker/OI/BBO/depth"]:::planned
-    BASE["Baseline feature modules<br/>feature.bbo, ticker_snapshot,<br/>trade_tape, spread/depth templates"]:::current
-    BARS["Bar and bucket modules<br/>1s, 1m, 5m, 1h, volume buckets"]:::planned
-    GROUPS["Basic contract grouping<br/>contract_group, members, chain_snapshot"]:::planned
+    BASE["Current baseline modules<br/>feature.bbo, ticker_snapshot,<br/>trade_tape"]:::current
+    ENRICHED["Planned stateful modules<br/>spread, depth summary,<br/>enriched trade tape, OI deltas"]:::planned
+    BARS["Bar and bucket modules<br/>1s, 1m, 5m, 1h,<br/>quote bars, volume buckets"]:::planned
+    GROUPS["Basic metadata grouping<br/>contract_group, members,<br/>chain_snapshot"]:::planned
     FSTREAMS["Feature streams<br/>feature.*"]:::output
-    FSTORE["Feature storage + backfill<br/>versioned, replay-compatible"]:::plannedStorage
-    FAPI["Feature API<br/>/features, /bars, WS features"]:::planned
+    FSTORE["Feature store + backfill<br/>module version, schema version,<br/>replay-compatible storage"]:::plannedStorage
+    FAPI["Feature/query API<br/>/features, /bars,<br/>latest BBO, WS features"]:::planned
   end
 
   CANON -->|live tickerplant source| FSRC
   RAWSTORE -->|historical canonical source| FSRC
   REPLAY2 -->|deterministic replay inputs| FSRC
   FSRC --> FPSVC
-  META -->|market metadata| FPSVC
+  METASTORE -->|market metadata| FPSVC
   FPSVC --> STATE
-  STATE --> BASE
+  FPSVC --> BASE
+  STATE --> ENRICHED
   STATE --> BARS
   STATE --> GROUPS
-  BASE --> FSTREAMS
-  BARS --> FSTREAMS
-  GROUPS --> FSTREAMS
+  BASE --> FPUB
+  ENRICHED --> FPUB
+  BARS --> FPUB
+  GROUPS --> FPUB
+  FPUB --> FSTREAMS
   FSTREAMS --> FSTORE
   FSTREAMS --> FAPI
   FSTORE --> FAPI
 
   subgraph Frontend["Frontend / Research Placement"]
-    FE2["Feature/query adapter<br/>reads feature buffers or storage"]:::planned
-    CHART2["Dataviz dashboards"]:::external
-    RESEARCH["Research exports + backtests"]:::external
+    FE2["Frontend adapter service<br/>symbols, quotes, depth,<br/>history, WS stream"]:::planned
+    CHART2["TradingView or Lightweight Charts<br/>standard datafeed adapter"]:::external
+    REPLAYCTRL["Replay viewer controls<br/>pause, resume, seek, speed"]:::planned
+    RESEARCH["Research exports and backtests<br/>CSV, Parquet, Python client"]:::external
   end
 
-  FSTREAMS --> FE2
-  FSTORE --> FE2
-  FE2 --> CHART2
+  FAPI --> FE2
   FSTORE --> RESEARCH
+  REPLAY2 --> REPLAYCTRL
+  REPLAYCTRL --> FE2
+  FE2 --> CHART2
+  FAPI --> RESEARCH
 
   subgraph Semantic["Planned Semantic, Ontology, Pricing Layer"]
-    TERMS["Contract terms + metadata corpus"]:::planned
+    TERMS["Contract terms + metadata corpus"]:::plannedStorage
     SPARSER["Semantic parser<br/>deterministic + LLM-assisted"]:::planned
     SCHEMA["SemanticContract schema"]:::planned
     ONTO["Ontology + fundamental registry"]:::planned
@@ -308,7 +357,7 @@ flowchart LR
     SSTREAMS["semantic.* streams<br/>constraints, synthetic prices,<br/>model prices, arb opportunities"]:::output
   end
 
-  META --> TERMS
+  METASTORE --> TERMS
   TERMS --> SPARSER
   SPARSER --> SCHEMA
   REVIEW --> SPARSER
@@ -328,10 +377,11 @@ flowchart LR
   SSTREAMS --> RESEARCH
 
   subgraph Instrumentation["Planned Cross-Cutting Instrumentation"]
-    HOOKS["Timestamp hooks + metric wrappers"]:::planned
+    HOOKS["Timestamp hooks + metric wrappers<br/>backend, feature, semantic"]:::planned
     QUALITY["DataQualityEvent stream<br/>staleness, gaps, bad books, replay drift"]:::planned
-    COLLECTOR["Prometheus / OpenTelemetry collector"]:::current
-    ALERTS["Grafana dashboards + alerts + runbooks"]:::current
+    TRACES["OpenTelemetry trace sampling<br/>cross-service spans"]:::planned
+    COLLECTOR["Expanded collection<br/>Prometheus scrape + OpenTelemetry pipeline"]:::planned
+    ALERTS["Grafana dashboards,<br/>alerts, runbooks"]:::planned
   end
 
   CORE --> HOOKS
@@ -340,16 +390,18 @@ flowchart LR
   ARB --> HOOKS
   CORE --> QUALITY
   FPSVC --> QUALITY
+  CONSTRAINTS --> QUALITY
   HOOKS --> COLLECTOR
+  HOOKS --> TRACES
   QUALITY --> COLLECTOR
+  TRACES --> COLLECTOR
   COLLECTOR --> ALERTS
 ```
 
-The important placement decision is that the feature plant consumes canonical
-envelopes through an abstract source. That source can be a live Aeron
-tickerplant stream or a canonical historical source, so feature modules do not
-care whether they are being run live, replayed, or backfilled. Frontend
-visualization, backtesting, and research export should consume the same feature
-output/query boundary instead of subscribing directly to live tickerplant
-streams. The semantic/pricing layer sits even farther downstream and consumes
-feature streams, market metadata, replay, and quality signals.
+The important placement decision is that the current featureplant code remains
+the source adapter and module-runtime boundary, not yet the durable feature
+platform. The next planned pass should put stateful feature modules, feature
+stream publication, feature storage, and a query API behind that boundary.
+Frontend visualization, backtesting, and research export should attach to that
+feature/query layer. The semantic/pricing layer sits farther downstream and
+consumes feature streams, market metadata, replay, and quality signals.

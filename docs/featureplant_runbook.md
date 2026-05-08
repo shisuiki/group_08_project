@@ -39,8 +39,9 @@ docker compose --profile featureplant run --rm featureplant \
   --run-once
 ```
 
-`RecordingCanonicalEnvelopeSource` reads `recordings/canonical` when present and
-falls back to `recordings/producer-canonical`.
+`RecordingCanonicalEnvelopeSource` reads `recordings/canonical`, which may
+contain downstream stream-recorder records, REST historical backfill records, or
+both.
 
 ## Live Run
 

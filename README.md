@@ -22,7 +22,7 @@ To get market data, we connect to the Kalshi API with a custom WebSocket client.
 
 As stated before, our service running the WebSocket client sends data messages through the ESB orchestrator to the data processor, which processes them. Processing updates our internal copies of the order books, which lets the processor know if our custom “top of book” message type should be sent. Once the processor decides what should be published, the messages are sent to the tickerplant. The tickerplant then publishes each message to the appropriate data feed, where interested clients are able to connect and read from.
 
-Durable storage is handled by recording modules: `raw-ingest` captures exact inbound Kalshi websocket payloads before parsing, `producer-canonical` records normalized source-of-truth events, and `stream-recorder` can record what an Aeron tickerplant consumer observes.
+Durable storage is handled by recording modules: `raw-ingest` captures exact inbound Kalshi websocket payloads before parsing, `raw-rest` captures historical REST responses, and `stream-recorder` records normalized tickerplant streams as a downstream Aeron client.
 
 ## Terminology
 
@@ -50,7 +50,7 @@ Because the Kalshi API uses the WebSocket protocol for streaming live data, we u
 
 ### Raw And Canonical Recording
 
-The recording path is split by purpose. `RawIngestRecorder` writes the exact websocket payload with receive timestamps before cluster injection, so replay can exercise the parser and cluster ingress path. `FileEventJournal` can write producer-side canonical events after normalization. `TickerplantStreamRecorder` is a pluggable Aeron consumer that records the normalized streams a downstream client observes.
+The recording path is split by purpose. `RawIngestRecorder` writes exact websocket payloads with receive timestamps before cluster injection, and those timestamps are carried through the ingress envelope into canonical metadata. `TickerplantStreamRecorder` is the canonical normalized recorder: it subscribes as a downstream Aeron client to every configured normalized stream and records what a real tickerplant consumer observes. `HistoricalBackfillCli` connects `KalshiWrapper` and `KalshiRestParser` to the same canonical storage layout for REST backfill, while also preserving raw REST responses under `raw-rest`.
 
 ### Real-Time Market Data Listener
 

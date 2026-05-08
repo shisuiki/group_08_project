@@ -7,15 +7,12 @@ import edu.illinois.group8.canonical.CanonicalEvents;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.ingress.KalshiIngressEnvelope;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.CanonicalParseResult;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
-import edu.illinois.group8.persistence.EventJournal;
-import edu.illinois.group8.persistence.FileEventJournal;
 import edu.illinois.group8.publication.AeronEventPublisher;
 import edu.illinois.group8.publication.EventPublisher;
-import edu.illinois.group8.recorder.StreamRecordingWriter;
-import edu.illinois.group8.time.TimestampSource;
 
 public class DataProcessor {
     private final KalshiCanonicalParser parser;
@@ -24,7 +21,6 @@ public class DataProcessor {
     private final boolean sourceSequenceMonitorEnabled;
     private final boolean orderBookDerivedEnabled;
     private final EventPublisher publisher;
-    private final EventJournal journal;
     private final BackendMetrics metrics;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
@@ -47,16 +43,6 @@ public class DataProcessor {
             config.sourceSequenceMonitorEnabled(),
             config.orderBookDerivedEnabled(),
             new AeronEventPublisher(communicationOrchestrator, new JsonCanonicalSerializer(), metrics),
-            new FileEventJournal(
-                config.journalRoot(),
-                new JsonCanonicalSerializer(),
-                metrics,
-                config.legacyJournalEnabled(),
-                config.rawRecordingRootOptional().orElse(null),
-                config.canonicalRecordingRootOptional().orElse(null),
-                TimestampSource.fromEnvironment(),
-                StreamRecordingWriter.PartitionGranularity.from(config.recordingPartitionGranularity())
-            ),
             metrics
         );
     }
@@ -65,10 +51,9 @@ public class DataProcessor {
         KalshiCanonicalParser parser,
         OrderBookStateManager orderBookStateManager,
         EventPublisher publisher,
-        EventJournal journal,
         BackendMetrics metrics
     ) {
-        this(parser, orderBookStateManager, new SourceSequenceMonitor(), false, true, publisher, journal, metrics);
+        this(parser, orderBookStateManager, new SourceSequenceMonitor(), false, true, publisher, metrics);
     }
 
     public DataProcessor(
@@ -78,7 +63,6 @@ public class DataProcessor {
         boolean sourceSequenceMonitorEnabled,
         boolean orderBookDerivedEnabled,
         EventPublisher publisher,
-        EventJournal journal,
         BackendMetrics metrics
     ) {
         this.parser = parser;
@@ -87,7 +71,6 @@ public class DataProcessor {
         this.sourceSequenceMonitorEnabled = sourceSequenceMonitorEnabled;
         this.orderBookDerivedEnabled = orderBookDerivedEnabled;
         this.publisher = publisher;
-        this.journal = journal;
         this.metrics = metrics;
     }
 
@@ -95,11 +78,15 @@ public class DataProcessor {
         long parseStartTsNs = System.nanoTime();
         metrics.increment("backend_ws_messages_total", BackendMetrics.labels("service", "backend", "source", "kalshi"));
         metrics.add("backend_ws_bytes_total", BackendMetrics.labels("service", "backend", "source", "kalshi"), message.length());
-        CanonicalParseResult parseResult = parser.parseWebSocketMessage(message, parseStartTsNs);
+        KalshiIngressEnvelope ingress = KalshiIngressEnvelope.parse(message, parseStartTsNs);
+        CanonicalParseResult parseResult = parser.parseWebSocketMessage(
+            ingress.rawPayload(),
+            ingress.receiveTsNs(),
+            ingress.replayId()
+        );
         metrics.increment("backend_parser_messages_total", BackendMetrics.labels("service", "backend", "source", "kalshi"));
         metrics.observe("backend_parser_latency_ns", BackendMetrics.labels("service", "backend", "source", "kalshi"),
             Math.max(0L, System.nanoTime() - parseStartTsNs));
-        journal.appendRaw(parseResult.rawSourceEvent());
         publish(parseResult.rawSourceEvent());
         metrics.increment("processor.raw_events");
 
@@ -121,7 +108,6 @@ public class DataProcessor {
     }
 
     private void handleCanonicalEvent(CanonicalEvent event) {
-        journal.appendCanonical(event);
         publish(event);
         metrics.increment("processor.canonical_events." + event.eventType());
 
@@ -133,7 +119,6 @@ public class DataProcessor {
     }
 
     private void handleGeneratedEvent(CanonicalEvent generated) {
-        journal.appendCanonical(generated);
         publish(generated);
         metrics.increment("processor.generated_events." + generated.eventType());
     }

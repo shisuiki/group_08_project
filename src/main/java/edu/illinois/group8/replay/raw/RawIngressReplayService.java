@@ -30,7 +30,7 @@ public class RawIngressReplayService {
                 }
                 previousReceiveTsNs = event.receiveTsNs() == null ? previousReceiveTsNs : event.receiveTsNs();
                 attempted++;
-                boolean ok = config.dryRun() || publisher.publish(event.rawPayload());
+                boolean ok = config.dryRun() || publisher.publish(event, config.replayId());
                 var labels = BackendMetrics.labels("service", "raw_ingress_replay", "replay_id", config.replayId());
                 metrics.increment("backend_replay_events_attempted_total", labels);
                 if (ok) {

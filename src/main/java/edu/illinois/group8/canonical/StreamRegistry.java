@@ -2,10 +2,15 @@ package edu.illinois.group8.canonical;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 public final class StreamRegistry {
+    /*
+     * These values are Aeron stream IDs on AERON_EXTERNAL_CHANNEL. They are not
+     * Kalshi market IDs, tickers, or contract universe identifiers.
+     */
     public static final int RAW_KALSHI_WEBSOCKET = 10;
     public static final int CANONICAL_TRADE = 11;
     public static final int CANONICAL_ORDERBOOK_SNAPSHOT = 12;
@@ -21,7 +26,7 @@ public final class StreamRegistry {
     private static final Map<String, StreamContract> STREAMS = new LinkedHashMap<>();
 
     static {
-        register(EventType.RAW_SOURCE_EVENT, RAW_KALSHI_WEBSOCKET, "append-only local files plus optional Aeron", false);
+        register(EventType.RAW_SOURCE_EVENT, RAW_KALSHI_WEBSOCKET, "append-only local files plus optional Aeron", true);
         register(EventType.MARKET_TRADE, CANONICAL_TRADE, "append-only local/S3 recordings", true);
         register(EventType.ORDER_BOOK_SNAPSHOT, CANONICAL_ORDERBOOK_SNAPSHOT, "append-only local files", true);
         register(EventType.ORDER_BOOK_DELTA, CANONICAL_ORDERBOOK_DELTA, "append-only local files", true);
@@ -42,6 +47,19 @@ public final class StreamRegistry {
 
     public static Collection<StreamContract> all() {
         return STREAMS.values();
+    }
+
+    public static List<StreamContract> externalStreams() {
+        return STREAMS.values().stream()
+            .filter(StreamContract::external)
+            .toList();
+    }
+
+    public static List<StreamContract> normalizedStreams() {
+        return STREAMS.values().stream()
+            .filter(StreamContract::external)
+            .filter(stream -> !EventType.RAW_SOURCE_EVENT.streamName().equals(stream.streamName()))
+            .toList();
     }
 
     private static void register(EventType eventType, int streamId, String retentionPolicy, boolean external) {

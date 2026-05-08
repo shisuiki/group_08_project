@@ -37,17 +37,17 @@ Recommended repository variables:
 - `KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION`: default `10000`; opens another websocket shard after this many filtered market subscriptions.
 - `KALSHI_WS_SUBSCRIPTION_DELAY_MS`: default `250` between subscription commands.
 - `KALSHI_WS_ACK_TIMEOUT_MS`: default `30000`; timeout for Kalshi subscribe/update acknowledgements during open-market startup.
-- `BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED`: default `false`; leave disabled for sharded open-market capture until live ingestion carries a websocket connection id.
+- `BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED`: default `false`; enable only when the selected feed's per-connection sequence semantics are understood.
 - `BACKEND_ORDERBOOK_DERIVED_ENABLED`: default `true`; set `false` for recorder-first high-volume open-market runs.
 - `AERON_EXTERNAL_CHANNEL`: default `aeron:udp?endpoint=224.0.1.1:40456`.
 - `STREAM_TAP_HOST_PORT`: default `8080`, bound to `127.0.0.1` on the EC2 host.
 - `STREAM_TAP_STREAMS`: comma-separated canonical stream names for the local stream tap.
 - `STREAM_RECORDER_HOST_PORT`: default `8092`, bound to `127.0.0.1` on the EC2 host.
-- `STREAM_RECORDER_STREAMS`: comma-separated normalized stream names persisted by the recorder.
+- `STREAM_RECORDER_STREAMS`: comma-separated normalized stream names persisted by the recorder, or `all-normalized`.
 - `STREAM_RECORDER_TIMESTAMP_SOURCE`: default `system_nano`. Use `ptp_system_clock` only when chrony is using EC2 PHC/PTP.
 - `S3_RECORDING_BUCKET`: optional S3 bucket for recorder upload.
 - `S3_RECORDING_PREFIX`: default `kalshi-normalized/`.
-- `S3_RECORDING_SUBTREES`: default `canonical,raw-ingest,producer-canonical`.
+- `S3_RECORDING_SUBTREES`: default `canonical,raw-ingest,raw-rest`.
 - `S3_UPLOAD_INTERVAL_SECONDS`: default `60`.
 - `S3_UPLOAD_MIN_AGE_SECONDS`: default `120`.
 - `S3_DELETE_AFTER_UPLOAD`: default `false`; set `true` for whole-universe capture on the EC2 root volume.

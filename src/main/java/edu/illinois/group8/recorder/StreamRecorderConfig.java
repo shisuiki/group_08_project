@@ -31,8 +31,7 @@ public record StreamRecorderConfig(
             Path.of(value(env, "STREAM_RECORDER_OUTPUT_ROOT", baseDir + "/recordings")),
             value(env, "STREAM_RECORDER_AERON_CHANNEL",
                 value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
-            resolveStreams(value(env, "STREAM_RECORDER_STREAMS",
-                "canonical.trade,canonical.ticker,canonical.open_interest,canonical.orderbook.snapshot,canonical.orderbook.delta,canonical.market_lifecycle,system.parser_errors,derived.top_of_book,system.sequence_gaps")),
+            resolveStreams(value(env, "STREAM_RECORDER_STREAMS", "all-normalized")),
             TimestampSource.fromEnvironment(),
             intValue(env, "STREAM_RECORDER_RECENT_EVENTS", 200),
             StreamRecordingWriter.PartitionGranularity.from(value(env, "STREAM_RECORDER_PARTITION_GRANULARITY", "hour")),
@@ -41,6 +40,11 @@ public record StreamRecorderConfig(
     }
 
     private static List<StreamContract> resolveStreams(String raw) {
+        if (raw == null || raw.isBlank()
+            || "all".equalsIgnoreCase(raw.trim())
+            || "all-normalized".equalsIgnoreCase(raw.trim())) {
+            return StreamRegistry.normalizedStreams();
+        }
         List<StreamContract> streams = new ArrayList<>();
         for (String streamName : csv(raw)) {
             Optional<StreamContract> contract = StreamRegistry.byName(streamName);

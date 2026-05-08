@@ -2,12 +2,15 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.cluster.ClientClusterOrchestrator;
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.ingress.KalshiIngressEnvelope;
 import edu.illinois.group8.recorder.RawIngestRecorder;
+import edu.illinois.group8.time.TimestampSource;
 import edu.illinois.group8.utils.WebSocketClient;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -25,6 +28,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
     private final boolean closeClusterOnClose;
     private final RawIngestRecorder rawIngestRecorder;
     private final String rawIngestConnectionId;
+    private final TimestampSource timestampSource;
     private final Map<Long, CompletableFuture<Long>> subscriptionAcks = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<Void>> updateAcks = new ConcurrentHashMap<>();
     
@@ -50,6 +54,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
         this.closeClusterOnClose = closeClusterOnClose;
         this.rawIngestRecorder = RawIngestRecorder.fromEnvironment();
         this.rawIngestConnectionId = rawIngestRecorder.newConnectionId();
+        this.timestampSource = TimestampSource.fromEnvironment();
 
         try {
             String timestamp = String.valueOf(System.currentTimeMillis());
@@ -73,7 +78,10 @@ public class KalshiWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
-        rawIngestRecorder.recordInbound(rawIngestConnectionId, message);
+        long receiveTsNs = timestampSource.nowNanos();
+        Instant receiveWallTs = Instant.now();
+        rawIngestRecorder.recordInbound(rawIngestConnectionId, message, receiveTsNs, receiveWallTs);
+        String clusterPayload = KalshiIngressEnvelope.wrap(message, receiveTsNs, receiveWallTs, rawIngestConnectionId, null);
         JSONParser parser = new JSONParser();
         try {
             JSONObject data = (JSONObject) parser.parse(message);
@@ -97,9 +105,9 @@ public class KalshiWebSocketClient extends WebSocketClient {
                     future.complete(null);
                 }
             }
-            cluster.writeToCluster(message);
+            cluster.writeToCluster(clusterPayload);
         } catch (Exception e) {
-            cluster.writeToCluster(message);
+            cluster.writeToCluster(clusterPayload);
         }
         
     }

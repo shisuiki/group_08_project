@@ -42,8 +42,7 @@ public record RecordingReplayConfig(
             Path.of(value(env, "RECORDING_REPLAY_ROOT", value(env, "STREAM_RECORDER_OUTPUT_ROOT", baseDir + "/recordings"))),
             value(env, "RECORDING_REPLAY_AERON_CHANNEL",
                 value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
-            resolveStreams(value(env, "RECORDING_REPLAY_STREAMS",
-                "canonical.trade,canonical.ticker,canonical.open_interest,canonical.orderbook.snapshot,canonical.orderbook.delta,derived.top_of_book,system.sequence_gaps")),
+            resolveStreams(value(env, "RECORDING_REPLAY_STREAMS", "all-normalized")),
             mode(value(env, "RECORDING_REPLAY_MODE", "as_fast_as_possible")),
             doubleValue(env, "RECORDING_REPLAY_SPEED_MULTIPLIER", 1.0),
             longValue(env, "RECORDING_REPLAY_FIXED_RATE_PER_SECOND", 0L),
@@ -115,6 +114,11 @@ public record RecordingReplayConfig(
     }
 
     private static List<StreamContract> resolveStreams(String raw) {
+        if (raw == null || raw.isBlank()
+            || "all".equalsIgnoreCase(raw.trim())
+            || "all-normalized".equalsIgnoreCase(raw.trim())) {
+            return StreamRegistry.normalizedStreams();
+        }
         List<StreamContract> resolved = new ArrayList<>();
         for (String streamName : csv(raw)) {
             Optional<StreamContract> contract = StreamRegistry.byName(streamName);

@@ -46,21 +46,21 @@ public class ESBClusterCommunicationOrchestrator {
     }
 
     private void addInternalChannelPublication(String channel) {
-        internalChannelPublication = aeron.addPublication(channel, StreamIDs.INTERNAL_IDX.getValue());
+        internalChannelPublication = aeron.addPublication(channel, StreamRegistry.INTERNAL_CANONICAL);
     }
 
     private void addInternalChannelSubscription(String channel) {
-        internalChannelSubscription = aeron.addSubscription(channel, StreamIDs.INTERNAL_IDX.getValue());
+        internalChannelSubscription = aeron.addSubscription(channel, StreamRegistry.INTERNAL_CANONICAL);
     }
 
     private void addExternalChannelPublications(String channel) {
-        for (StreamContract stream : StreamRegistry.all()) {
+        for (StreamContract stream : StreamRegistry.externalStreams()) {
             externalChannelPublications.put(stream.streamName(), aeron.addPublication(channel, stream.streamId()));
         }
     }
 
     private void addExternalChannelSubscriptions(String channel) {
-        for (StreamContract stream : StreamRegistry.all()) {
+        for (StreamContract stream : StreamRegistry.externalStreams()) {
             externalChannelSubscriptions.put(stream.streamName(), aeron.addSubscription(channel, stream.streamId()));
         }
     }
@@ -71,86 +71,6 @@ public class ESBClusterCommunicationOrchestrator {
 
     public Subscription getSubscription(String streamName) {
         return externalChannelSubscriptions.get(streamName);
-    }
-
-    /**
-     * Gets ConcurrentPublication object for trades channel
-     * @return ConcurrentPublication object
-     */
-    public ConcurrentPublication getTradesPublication() {
-        return externalChannelPublications.get("canonical.trade");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for top of book channel
-     * @return ConcurrentPublication object
-     */
-    public ConcurrentPublication getTopOfBookPublication() {
-        return externalChannelPublications.get("derived.top_of_book");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for book events channel
-     * @return ConcurrentPublication object
-     */
-    public ConcurrentPublication getBookEventsPublication() {
-        return externalChannelPublications.get("canonical.orderbook.delta");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for ticker channel
-     * @return ConcurrentPublication object
-     */
-    public ConcurrentPublication getTickerPublication() {
-        return externalChannelPublications.get("canonical.ticker");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for open interest channel
-     * @return ConcurrentPublication object
-     */
-    public ConcurrentPublication getOpenInterestPublication() {
-        return externalChannelPublications.get("canonical.open_interest");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for trades channel
-     * @return ConcurrentPublication object
-     */
-    public Subscription getTradesSubscription() {
-        return externalChannelSubscriptions.get("canonical.trade");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for top of book channel
-     * @return ConcurrentPublication object
-     */
-    public Subscription getTopOfBookSubscription() {
-        return externalChannelSubscriptions.get("derived.top_of_book");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for book events channel
-     * @return ConcurrentPublication object
-     */
-    public Subscription getBookEventsSubscription() {
-        return externalChannelSubscriptions.get("canonical.orderbook.delta");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for ticker channel
-     * @return ConcurrentPublication object
-     */
-    public Subscription getTickerSubscription() {
-        return externalChannelSubscriptions.get("canonical.ticker");
-    }
-
-    /**
-     * Gets ConcurrentPublication object for open interest channel
-     * @return ConcurrentPublication object
-     */
-    public Subscription getOpenInterestSubscription() {
-        return externalChannelSubscriptions.get("canonical.open_interest");
     }
 
     /**

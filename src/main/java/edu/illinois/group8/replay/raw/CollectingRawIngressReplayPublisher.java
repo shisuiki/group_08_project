@@ -7,8 +7,8 @@ public class CollectingRawIngressReplayPublisher implements RawIngressReplayPubl
     private final List<String> payloads = new ArrayList<>();
 
     @Override
-    public boolean publish(String rawPayload) {
-        payloads.add(rawPayload);
+    public boolean publish(RawReplayEvent event, String replayId) {
+        payloads.add(event.rawPayload());
         return true;
     }
 

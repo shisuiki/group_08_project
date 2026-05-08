@@ -1,6 +1,5 @@
 package edu.illinois.group8.config;
 
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -34,10 +33,6 @@ public record BackendConfig(
     String baseDir,
     int clusterPortBase,
     String aeronChannel,
-    Path journalRoot,
-    boolean legacyJournalEnabled,
-    Path rawRecordingRoot,
-    Path canonicalRecordingRoot,
     String recordingPartitionGranularity
 ) {
     public static final String PROFILE_LOCAL = "local";
@@ -82,10 +77,6 @@ public record BackendConfig(
             baseDir,
             intValue(env, properties, "CLUSTER_PORT_BASE", 9000),
             value(env, properties, "AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456"),
-            Path.of(value(env, properties, "BACKEND_JOURNAL_ROOT", baseDir + "/journal")),
-            booleanValue(env, properties, "BACKEND_LEGACY_JOURNAL_ENABLED", true),
-            optionalPath(env, properties, "BACKEND_RAW_RECORDING_ROOT"),
-            optionalPath(env, properties, "BACKEND_CANONICAL_RECORDING_ROOT"),
             value(env, properties, "BACKEND_RECORDING_PARTITION_GRANULARITY", "minute")
         );
     }
@@ -162,14 +153,6 @@ public record BackendConfig(
             || "all-open".equals(normalized);
     }
 
-    public Optional<Path> rawRecordingRootOptional() {
-        return Optional.ofNullable(rawRecordingRoot);
-    }
-
-    public Optional<Path> canonicalRecordingRootOptional() {
-        return Optional.ofNullable(canonicalRecordingRoot);
-    }
-
     private static String value(
         Map<String, String> env,
         java.util.Properties properties,
@@ -195,15 +178,6 @@ public record BackendConfig(
         } catch (NumberFormatException e) {
             throw new IllegalStateException(key + " must be an integer: " + value, e);
         }
-    }
-
-    private static Path optionalPath(
-        Map<String, String> env,
-        java.util.Properties properties,
-        String key
-    ) {
-        String value = value(env, properties, key, "");
-        return isBlank(value) ? null : Path.of(value);
     }
 
     private static boolean booleanValue(
@@ -249,7 +223,6 @@ public record BackendConfig(
         hostIp = Objects.requireNonNullElse(hostIp, "127.0.0.1");
         baseDir = Objects.requireNonNullElse(baseDir, "/app");
         aeronChannel = Objects.requireNonNullElse(aeronChannel, "aeron:udp?endpoint=0.0.0.0:40456");
-        journalRoot = Objects.requireNonNullElse(journalRoot, Path.of(baseDir, "journal"));
         recordingPartitionGranularity = Objects.requireNonNullElse(recordingPartitionGranularity, "minute");
     }
 }

@@ -63,14 +63,18 @@ public final class RawIngestRecorder implements AutoCloseable {
     }
 
     public void recordInbound(String connectionId, String rawPayload) {
+        recordInbound(connectionId, rawPayload, config.timestampSource().nowNanos(), Instant.now());
+    }
+
+    public void recordInbound(String connectionId, String rawPayload, long receiveTsNs, Instant receiveWallTs) {
         if (!config.enabled()) {
             return;
         }
         Record record = new Record(
             connectionId,
             sequence.incrementAndGet(),
-            config.timestampSource().nowNanos(),
-            Instant.now(),
+            receiveTsNs,
+            receiveWallTs,
             rawPayload
         );
         if (config.dropOnFull()) {

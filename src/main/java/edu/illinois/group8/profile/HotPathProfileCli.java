@@ -6,13 +6,8 @@ import edu.illinois.group8.esb.DataProcessor;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.CanonicalParseResult;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
-import edu.illinois.group8.persistence.EventJournal;
-import edu.illinois.group8.persistence.FileEventJournal;
-import edu.illinois.group8.persistence.NoopEventJournal;
 import edu.illinois.group8.publication.EventPublisher;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Locale;
 
 public final class HotPathProfileCli {
@@ -106,28 +101,17 @@ public final class HotPathProfileCli {
                         }
                     };
                 }
-                case PROCESSOR_NOOP -> processorOperation(new NoopEventJournal(), new ProfilingEventPublishers.BlackholePublisher());
-                case PROCESSOR_SERIALIZE -> processorOperation(new NoopEventJournal(), new ProfilingEventPublishers.SerializingPublisher());
-                case PROCESSOR_FILE_JOURNAL -> {
-                    Path root = config.journalRoot == null ? Files.createTempDirectory("kalshi-hotpath-profile-") : config.journalRoot;
-                    yield processorOperation(new FileEventJournal(root, new edu.illinois.group8.canonical.JsonCanonicalSerializer(), metrics),
-                        new ProfilingEventPublishers.BlackholePublisher());
-                }
-                case PROCESSOR_FULL_LOCAL -> {
-                    Path root = config.journalRoot == null ? Files.createTempDirectory("kalshi-hotpath-profile-") : config.journalRoot;
-                    yield processorOperation(new FileEventJournal(root, new edu.illinois.group8.canonical.JsonCanonicalSerializer(), metrics),
-                        new ProfilingEventPublishers.SerializingPublisher());
-                }
+                case PROCESSOR_NOOP -> processorOperation(new ProfilingEventPublishers.BlackholePublisher());
+                case PROCESSOR_SERIALIZE -> processorOperation(new ProfilingEventPublishers.SerializingPublisher());
             };
         }
 
-        private Operation processorOperation(EventJournal journal, EventPublisher publisher) {
+        private Operation processorOperation(EventPublisher publisher) {
             ProfilingEventPublishers.CountingPublisher countingPublisher = new ProfilingEventPublishers.CountingPublisher(publisher);
             DataProcessor processor = new DataProcessor(
                 parser,
                 new OrderBookStateManager(),
                 countingPublisher,
-                journal,
                 metrics
             );
             return new Operation() {
@@ -212,9 +196,7 @@ public final class HotPathProfileCli {
         PARSE_ONLY,
         PARSE_BOOK,
         PROCESSOR_NOOP,
-        PROCESSOR_SERIALIZE,
-        PROCESSOR_FILE_JOURNAL,
-        PROCESSOR_FULL_LOCAL
+        PROCESSOR_SERIALIZE
     }
 
     private static final class ProfileConfig {
@@ -223,7 +205,6 @@ public final class HotPathProfileCli {
         private int warmupIterations = 20_000;
         private int marketCount = 1;
         private long startTimestampMs = 1_700_000_000_000L;
-        private Path journalRoot;
         private boolean printMetrics;
 
         private static ProfileConfig parse(String[] args) {
@@ -239,8 +220,6 @@ public final class HotPathProfileCli {
                     config.warmupIterations = Integer.parseInt(arg.substring("--warmup=".length()));
                 } else if (arg.startsWith("--markets=")) {
                     config.marketCount = Integer.parseInt(arg.substring("--markets=".length()));
-                } else if (arg.startsWith("--journal-root=")) {
-                    config.journalRoot = Path.of(arg.substring("--journal-root=".length()));
                 } else if (arg.startsWith("--start-ts-ms=")) {
                     config.startTimestampMs = Long.parseLong(arg.substring("--start-ts-ms=".length()));
                 } else if (arg.equals("--print-metrics")) {
@@ -260,11 +239,10 @@ public final class HotPathProfileCli {
                 Usage: HotPathProfileCli [options]
 
                 Options:
-                  --mode=parse-only|parse-book|processor-noop|processor-serialize|processor-file-journal|processor-full-local
+                  --mode=parse-only|parse-book|processor-noop|processor-serialize
                   --iterations=N
                   --warmup=N
                   --markets=N
-                  --journal-root=/path
                   --start-ts-ms=N
                   --print-metrics
 

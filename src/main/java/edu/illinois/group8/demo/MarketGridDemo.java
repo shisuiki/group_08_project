@@ -1,11 +1,9 @@
 package edu.illinois.group8.demo;
 
-import edu.illinois.group8.cluster.StreamIDs;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
+import edu.illinois.group8.canonical.EventType;
 
-import io.aeron.Aeron;
 import io.aeron.Subscription;
-import io.aeron.driver.MediaDriver;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,7 +19,7 @@ public class MarketGridDemo implements Runnable {
 
     public MarketGridDemo(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this.communicationOrchestrator = communicationOrchestrator;
-        this.topOfBookSubscription = communicationOrchestrator.getTopOfBookSubscription();
+        this.topOfBookSubscription = communicationOrchestrator.getSubscription(EventType.TOP_OF_BOOK_UPDATE.streamName());
         objectMapper = new ObjectMapper();
     }
 

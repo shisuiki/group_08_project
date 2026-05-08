@@ -57,8 +57,8 @@ universe; Kalshi exposes MVE/combo markets through separate lifecycle semantics.
 subscribe/update acknowledgement.
 `BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED` is off by default. Kalshi `sid`
 values are scoped to an individual websocket connection, so source-sequence
-monitoring needs a connection-aware ingestion envelope before it can be enabled
-for sharded open-market capture without false positives.
+monitoring should only be enabled for feeds where per-connection sequence
+semantics are understood.
 `BACKEND_ORDERBOOK_DERIVED_ENABLED=false` disables derived top-of-book and book
 state gap generation while preserving the normalized canonical recorder streams.
 Use it for high-volume recorder soak tests when storage fidelity matters more
@@ -75,27 +75,24 @@ stream recorder. Enable:
 - `RAW_INGEST_RECORDER_ENABLED=true`
 - `RAW_INGEST_RECORDER_ROOT=/app/recordings/raw-ingest`
 - `RAW_INGEST_RECORDER_TIMESTAMP_SOURCE=ptp_system_clock`
-- `BACKEND_LEGACY_JOURNAL_ENABLED=false` to stop writing the old local
-  `/app/journal/raw` and `/app/journal/canonical` files during capture so the
-  EC2 root volume is not consumed by duplicate storage.
-- `BACKEND_RAW_RECORDING_ROOT=` unless the optional parser-side raw mirror is
-  needed.
-- `BACKEND_CANONICAL_RECORDING_ROOT=/app/recordings/producer-canonical`
+- `STREAM_RECORDER_STREAMS=all-normalized`
+- `STREAM_RECORDER_TIMESTAMP_SOURCE=ptp_system_clock`
 
 This produces the key storage views:
 
 - `raw-ingest`: exact inbound Kalshi websocket JSON as seen by `wsclient`, with
-  receive PTP timestamps, before cluster injection.
-- `producer-raw`: the parser's `RawSourceEvent` written by `FileEventJournal`
-  when the tickerplant processes the raw payload. This is configurable but
-  redundant when `raw-ingest` is enabled.
-- `producer-canonical`: normalized canonical events written by
-  `FileEventJournal` at production time.
+  receive PTP timestamps, before cluster injection. The websocket receive
+  timestamp is also carried through the ingress envelope into canonical event
+  metadata as `metadata.ingest_ts_ns`.
+- `canonical`: normalized stream records written by `TickerplantStreamRecorder`
+  after it consumes the external Aeron stream like any other tickerplant client.
+  Use this for e2e latency and stream-fidelity measurement.
+- `raw-rest`: exact REST responses recorded by historical backfill runs.
 
-The downstream `stream-recorder` remains useful for measuring what a real Aeron
-consumer observes from the distributed tickerplant streams, but it is a strict
-subset of injected raw traffic after normalization and should not be treated as
-the authoritative replay database.
+The downstream `stream-recorder` is the correct place to measure live
+end-to-end latency from websocket receipt to Aeron-client receipt. Raw replay
+remains the authoritative full-path replay source because it exercises parser
+and cluster ingress again.
 
 ```bash
 docker compose --env-file .env --profile cluster-live --profile observability stop \
@@ -106,7 +103,7 @@ docker compose --env-file .env --profile recording-capture up -d --build \
 
 For S3-backed whole-universe capture, set:
 
-- `S3_RECORDING_SUBTREES=canonical,raw-ingest,producer-canonical`
+- `S3_RECORDING_SUBTREES=canonical,raw-ingest,raw-rest`
 - `S3_DELETE_AFTER_UPLOAD=true`
 
 Keep `KALSHI_MARKET_DISCOVERY_MAX_MARKETS=0` for the whole discovered open
@@ -120,6 +117,18 @@ docker compose --env-file .env --profile raw-replay run --rm raw-ingress-replay 
 ```
 
 Use `--dry-run` to validate file ordering without publishing into the cluster.
+
+Historical REST backfill writes raw REST responses and parsed canonical events
+into the same storage-backed layout:
+
+```bash
+docker compose --env-file .env --profile historical-backfill run --rm historical-backfill
+```
+
+Set `HISTORICAL_BACKFILL_TICKERS` for explicit contracts, or let the service
+discover markets from `GET /markets` using `HISTORICAL_BACKFILL_MARKET_STATUS`,
+`HISTORICAL_BACKFILL_MVE_FILTER`, `HISTORICAL_BACKFILL_MAX_PAGES`, and
+`HISTORICAL_BACKFILL_MAX_TICKERS`.
 
 ## Failure Modes
 

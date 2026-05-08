@@ -74,9 +74,6 @@ public class RecordingEventReader {
         if (Files.isDirectory(recordingRoot.resolve("canonical"))) {
             return recordingRoot.resolve("canonical");
         }
-        if (Files.isDirectory(recordingRoot.resolve("producer-canonical"))) {
-            return recordingRoot.resolve("producer-canonical");
-        }
         return recordingRoot;
     }
 

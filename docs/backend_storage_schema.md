@@ -20,27 +20,12 @@ recordings/raw-ingest/
 Each line contains the exact inbound websocket payload plus receive timestamps,
 connection id, sequence, capture id, and payload hash.
 
-## Producer Canonical
-
-`producer-canonical` is written by `FileEventJournal` at production time after
-normalization.
-
-```text
-recordings/producer-canonical/
-  stream=<stream_name>/
-    date=yyyy-mm-dd/
-      hour=hh/
-        minute=mm/
-          events.ndjson
-```
-
-This is a producer-side normalized historical source for featureplant backfills,
-query APIs, backtests, and canonical research exports.
-
 ## Downstream Canonical
 
-`stream-recorder` can also persist what an Aeron client observes from the
-tickerplant:
+`canonical` is written by `TickerplantStreamRecorder`, which subscribes to the
+tickerplant exactly as a downstream Aeron client would. This is the normalized
+storage view used for consumer-latency measurement, stream-fidelity checks,
+featureplant replay, visualization, backtests, and research exports.
 
 ```text
 recordings/canonical/
@@ -51,8 +36,30 @@ recordings/canonical/
           events.ndjson
 ```
 
-Use this view for consumer latency and stream-fidelity checks. It is not the
-authoritative replay source because it is downstream of normalization.
+Each line contains the canonical event plus `recorder_metadata`, including the
+downstream consumer receive timestamp. When live websocket ingestion uses the
+ingress envelope, canonical event metadata also contains the raw websocket
+receive timestamp as `metadata.ingest_ts_ns`, allowing e2e latency measurement
+from websocket receipt to Aeron-client receipt.
+
+## Raw REST Backfill
+
+`raw-rest` is written by `HistoricalBackfillCli` when REST historical backfill
+is run. It keeps the raw REST response alongside the canonical events parsed
+from it, so backfill remains auditable.
+
+```text
+recordings/raw-rest/
+  endpoint=<rest_endpoint>/
+    date=yyyy-mm-dd/
+      hour=hh/
+        minute=mm/
+          responses.ndjson
+```
+
+`HistoricalBackfillCli` writes parsed REST canonical events into
+`recordings/canonical` by default, using the same stream/date/hour/minute
+layout as the downstream stream recorder.
 
 ## Replay
 

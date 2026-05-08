@@ -127,7 +127,7 @@ public class TickerplantStreamRecorder implements AutoCloseable {
         try {
             JsonNode recorded = writer.write(streamName, payload, receiveTsNs);
             totalEvents.incrementAndGet();
-            observeEventQuality(streamName, recorded, labels);
+            observeEventQuality(streamName, recorded, labels, receiveTsNs);
             remember(streamName, recorded);
         } catch (Exception e) {
             metrics.increment("stream_recorder_errors_total", labels);
@@ -136,7 +136,7 @@ public class TickerplantStreamRecorder implements AutoCloseable {
         }
     }
 
-    private void observeEventQuality(String streamName, JsonNode event, Map<String, String> baseLabels) {
+    private void observeEventQuality(String streamName, JsonNode event, Map<String, String> baseLabels, long consumerReceiveTsNs) {
         String eventType = event.path("event_type").asText("unknown");
         String schemaVersion = event.path("schema_version").asText("unknown");
         String source = event.path("metadata").path("source").asText("unknown");
@@ -166,6 +166,10 @@ public class TickerplantStreamRecorder implements AutoCloseable {
             long ageMs = Math.max(0L, System.currentTimeMillis() - eventTsMs);
             metrics.observe("backend_ws_message_age_ms", baseLabels, ageMs);
             metrics.observe("feature_module_lag_ms", baseLabels, ageMs);
+        }
+        long ingressReceiveTsNs = event.path("metadata").path("ingest_ts_ns").asLong(0L);
+        if (ingressReceiveTsNs > 0L && consumerReceiveTsNs >= ingressReceiveTsNs) {
+            metrics.observe("tickerplant_stream_recorder_e2e_latency_ns", labels, consumerReceiveTsNs - ingressReceiveTsNs);
         }
     }
 
