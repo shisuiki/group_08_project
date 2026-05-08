@@ -14,7 +14,20 @@ public record BackendConfig(
     String kalshiKeyPath,
     List<String> marketTickers,
     String marketSeriesTicker,
+    String marketSelectionMode,
+    String marketStatus,
+    String marketMveFilter,
+    int marketDiscoveryLimit,
+    int marketDiscoveryMaxMarkets,
     List<String> websocketChannels,
+    List<String> websocketGlobalChannels,
+    List<String> websocketFilteredChannels,
+    int orderbookSubscriptionChunkSize,
+    int orderbookMarketsPerConnection,
+    int subscriptionDelayMs,
+    int subscriptionAckTimeoutMs,
+    boolean sourceSequenceMonitorEnabled,
+    boolean orderBookDerivedEnabled,
     List<String> clusterAddresses,
     String nodeId,
     String hostIp,
@@ -22,13 +35,13 @@ public record BackendConfig(
     int clusterPortBase,
     String aeronChannel,
     Path journalRoot,
-    String databaseUrl,
-    String databaseUser,
-    String databasePassword
+    boolean legacyJournalEnabled,
+    Path rawRecordingRoot,
+    Path canonicalRecordingRoot,
+    String recordingPartitionGranularity
 ) {
     public static final String PROFILE_LOCAL = "local";
     public static final String PROFILE_DOCKER = "docker";
-    public static final String PROFILE_REPLAY = "replay";
     public static final String PROFILE_PRODUCTION = "production";
 
     public static BackendConfig fromEnvironment() {
@@ -49,7 +62,20 @@ public record BackendConfig(
             value(env, properties, "KALSHI_KEY_PATH", ""),
             csv(value(env, properties, "KALSHI_MARKET_TICKERS", "")),
             value(env, properties, "KALSHI_MARKET_SERIES_TICKER", ""),
+            value(env, properties, "KALSHI_MARKET_SELECTION_MODE", "configured"),
+            value(env, properties, "KALSHI_MARKET_STATUS", "open"),
+            value(env, properties, "KALSHI_MARKET_MVE_FILTER", ""),
+            intValue(env, properties, "KALSHI_MARKET_DISCOVERY_LIMIT", 1000),
+            intValue(env, properties, "KALSHI_MARKET_DISCOVERY_MAX_MARKETS", 0),
             csv(value(env, properties, "KALSHI_WS_CHANNELS", "orderbook_delta,trade,ticker,market_lifecycle_v2")),
+            csv(value(env, properties, "KALSHI_WS_GLOBAL_CHANNELS", "")),
+            csv(value(env, properties, "KALSHI_WS_FILTERED_CHANNELS", "")),
+            intValue(env, properties, "KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE", 100),
+            intValue(env, properties, "KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION", 10000),
+            intValue(env, properties, "KALSHI_WS_SUBSCRIPTION_DELAY_MS", 250),
+            intValue(env, properties, "KALSHI_WS_ACK_TIMEOUT_MS", 30000),
+            booleanValue(env, properties, "BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED", false),
+            booleanValue(env, properties, "BACKEND_ORDERBOOK_DERIVED_ENABLED", true),
             csv(value(env, properties, "CLUSTER_ADDRESSES", "127.0.0.1")),
             value(env, properties, "NODE_ID", ""),
             value(env, properties, "IP", "127.0.0.1"),
@@ -57,9 +83,10 @@ public record BackendConfig(
             intValue(env, properties, "CLUSTER_PORT_BASE", 9000),
             value(env, properties, "AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456"),
             Path.of(value(env, properties, "BACKEND_JOURNAL_ROOT", baseDir + "/journal")),
-            value(env, properties, "BACKEND_DATABASE_URL", ""),
-            value(env, properties, "BACKEND_DATABASE_USER", value(env, properties, "DB_USER", "")),
-            value(env, properties, "BACKEND_DATABASE_PASSWORD", value(env, properties, "DB_PASSWORD", ""))
+            booleanValue(env, properties, "BACKEND_LEGACY_JOURNAL_ENABLED", true),
+            optionalPath(env, properties, "BACKEND_RAW_RECORDING_ROOT"),
+            optionalPath(env, properties, "BACKEND_CANONICAL_RECORDING_ROOT"),
+            value(env, properties, "BACKEND_RECORDING_PARTITION_GRANULARITY", "minute")
         );
     }
 
@@ -74,8 +101,30 @@ public record BackendConfig(
         if (isBlank(kalshiKeyPath)) {
             errors.append("KALSHI_KEY_PATH is required for live ingestion. ");
         }
-        if (marketTickers.isEmpty() && isBlank(marketSeriesTicker)) {
+        if (!openMarketSelectionEnabled() && marketTickers.isEmpty() && isBlank(marketSeriesTicker)) {
             errors.append("Set KALSHI_MARKET_TICKERS or KALSHI_MARKET_SERIES_TICKER. ");
+        }
+        if (marketDiscoveryLimit < 1 || marketDiscoveryLimit > 1000) {
+            errors.append("KALSHI_MARKET_DISCOVERY_LIMIT must be between 1 and 1000. ");
+        }
+        String normalizedMveFilter = marketMveFilter.trim().toLowerCase();
+        if (!isBlank(marketMveFilter) && !"only".equals(normalizedMveFilter) && !"exclude".equals(normalizedMveFilter)) {
+            errors.append("KALSHI_MARKET_MVE_FILTER must be blank, only, or exclude. ");
+        }
+        if (marketDiscoveryMaxMarkets < 0) {
+            errors.append("KALSHI_MARKET_DISCOVERY_MAX_MARKETS must be zero or positive. ");
+        }
+        if (orderbookSubscriptionChunkSize < 1) {
+            errors.append("KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE must be positive. ");
+        }
+        if (orderbookMarketsPerConnection < orderbookSubscriptionChunkSize) {
+            errors.append("KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION must be at least KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE. ");
+        }
+        if (subscriptionDelayMs < 0) {
+            errors.append("KALSHI_WS_SUBSCRIPTION_DELAY_MS must be zero or positive. ");
+        }
+        if (subscriptionAckTimeoutMs < 1) {
+            errors.append("KALSHI_WS_ACK_TIMEOUT_MS must be positive. ");
         }
         if (clusterAddresses.isEmpty()) {
             errors.append("CLUSTER_ADDRESSES must contain at least one host. ");
@@ -101,16 +150,24 @@ public record BackendConfig(
         }
     }
 
-    public boolean isReplayProfile() {
-        return PROFILE_REPLAY.equalsIgnoreCase(profile);
-    }
-
     public boolean hasKalshiCredentials() {
         return !isBlank(kalshiKeyId) && !isBlank(kalshiKeyPath);
     }
 
-    public Optional<String> databaseUrlOptional() {
-        return Optional.ofNullable(databaseUrl).filter(v -> !v.isBlank());
+    public boolean openMarketSelectionEnabled() {
+        String normalized = marketSelectionMode.trim().toLowerCase();
+        return "open".equals(normalized)
+            || "open_markets".equals(normalized)
+            || "all_open".equals(normalized)
+            || "all-open".equals(normalized);
+    }
+
+    public Optional<Path> rawRecordingRootOptional() {
+        return Optional.ofNullable(rawRecordingRoot);
+    }
+
+    public Optional<Path> canonicalRecordingRootOptional() {
+        return Optional.ofNullable(canonicalRecordingRoot);
     }
 
     private static String value(
@@ -140,6 +197,25 @@ public record BackendConfig(
         }
     }
 
+    private static Path optionalPath(
+        Map<String, String> env,
+        java.util.Properties properties,
+        String key
+    ) {
+        String value = value(env, properties, key, "");
+        return isBlank(value) ? null : Path.of(value);
+    }
+
+    private static boolean booleanValue(
+        Map<String, String> env,
+        java.util.Properties properties,
+        String key,
+        boolean defaultValue
+    ) {
+        String value = value(env, properties, key, Boolean.toString(defaultValue));
+        return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value);
+    }
+
     private static List<String> csv(String raw) {
         if (isBlank(raw)) {
             return List.of();
@@ -162,15 +238,18 @@ public record BackendConfig(
         kalshiKeyPath = Objects.requireNonNullElse(kalshiKeyPath, "");
         marketTickers = List.copyOf(Objects.requireNonNullElse(marketTickers, List.of()));
         marketSeriesTicker = Objects.requireNonNullElse(marketSeriesTicker, "");
+        marketSelectionMode = Objects.requireNonNullElse(marketSelectionMode, "configured");
+        marketStatus = Objects.requireNonNullElse(marketStatus, "open");
+        marketMveFilter = Objects.requireNonNullElse(marketMveFilter, "").trim().toLowerCase();
         websocketChannels = List.copyOf(Objects.requireNonNullElse(websocketChannels, List.of()));
+        websocketGlobalChannels = List.copyOf(Objects.requireNonNullElse(websocketGlobalChannels, List.of()));
+        websocketFilteredChannels = List.copyOf(Objects.requireNonNullElse(websocketFilteredChannels, List.of()));
         clusterAddresses = List.copyOf(Objects.requireNonNullElse(clusterAddresses, List.of()));
         nodeId = Objects.requireNonNullElse(nodeId, "");
         hostIp = Objects.requireNonNullElse(hostIp, "127.0.0.1");
         baseDir = Objects.requireNonNullElse(baseDir, "/app");
         aeronChannel = Objects.requireNonNullElse(aeronChannel, "aeron:udp?endpoint=0.0.0.0:40456");
         journalRoot = Objects.requireNonNullElse(journalRoot, Path.of(baseDir, "journal"));
-        databaseUrl = Objects.requireNonNullElse(databaseUrl, "");
-        databaseUser = Objects.requireNonNullElse(databaseUser, "");
-        databasePassword = Objects.requireNonNullElse(databasePassword, "");
+        recordingPartitionGranularity = Objects.requireNonNullElse(recordingPartitionGranularity, "minute");
     }
 }

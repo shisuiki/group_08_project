@@ -24,10 +24,17 @@ public class AeronEventPublisher implements EventPublisher {
 
     @Override
     public boolean publish(CanonicalEvent event) {
+        long offerStartTsNs = System.nanoTime();
         byte[] bytes = serializer.toBytes(event);
         buffer.putBytes(0, bytes);
+        var labels = BackendMetrics.labels("service", "backend", "stream", event.streamName());
+        metrics.increment("backend_publication_offer_total", labels);
         long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, bytes.length);
+        long offerEndTsNs = System.nanoTime();
+        metrics.observe("backend_publication_latency_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
         if (result < 0L) {
+            metrics.increment("backend_publication_offer_failed_total", labels);
+            metrics.observe("backend_publication_backpressure_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
             metrics.increment("publication.offer_failed." + event.streamName());
             return false;
         }

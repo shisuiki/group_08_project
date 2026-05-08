@@ -1,42 +1,62 @@
 # Backend Storage Schema
 
-## Local Journal
+The durable storage path is file/object based. The hot path no longer writes to
+Redshift/Postgres and the old database writer packages have been removed.
 
-Local development and replay use newline-delimited JSON under `BACKEND_JOURNAL_ROOT`.
+## Raw Ingest
+
+`raw-ingest` is the source of truth for full replay. It is written by the
+websocket client before parsing or cluster injection.
 
 ```text
-journal/
-  raw/
-    yyyy-mm-dd.ndjson
-  canonical/
-    raw_kalshi_websocket/
-    canonical_trade/
-    canonical_orderbook_snapshot/
-    canonical_orderbook_delta/
-    canonical_ticker/
-    canonical_open_interest/
-    derived_top_of_book/
-    canonical_market_lifecycle/
-    system_parser_errors/
-    system_sequence_gaps/
+recordings/raw-ingest/
+  source=kalshi.websocket/
+    date=yyyy-mm-dd/
+      hour=hh/
+        minute=mm/
+          events.ndjson
 ```
 
-The writer is append-only and idempotent by `event_id`. On startup it scans existing `.ndjson` files and skips duplicate event ids.
+Each line contains the exact inbound websocket payload plus receive timestamps,
+connection id, sequence, capture id, and payload hash.
 
-## Warehouse Boundary
+## Producer Canonical
 
-The hot path no longer writes directly to Redshift/Postgres. Database-backed storage is optional and configured through:
+`producer-canonical` is written by `FileEventJournal` at production time after
+normalization.
 
-- `BACKEND_DATABASE_URL`
-- `BACKEND_DATABASE_USER`
-- `BACKEND_DATABASE_PASSWORD`
+```text
+recordings/producer-canonical/
+  stream=<stream_name>/
+    date=yyyy-mm-dd/
+      hour=hh/
+        minute=mm/
+          events.ndjson
+```
 
-The recommended deployment pattern is:
+This is the preferred historical source for frontend APIs, backtests, and
+canonical research exports.
 
-1. Journal raw and canonical events locally or to durable object storage.
-2. Batch-copy canonical partitions into analytical storage.
-3. Rebuild canonical partitions from raw events when parser schemas change.
+## Downstream Canonical
 
-## Backfill
+`stream-recorder` can also persist what an Aeron client observes from the
+tickerplant:
 
-Use `edu.illinois.group8.replay.ReplayCli` against a raw journal root to regenerate canonical output. The replay service marks output with `metadata.replay_id` and preserves original event timestamps.
+```text
+recordings/canonical/
+  stream=<stream_name>/
+    date=yyyy-mm-dd/
+      hour=hh/
+        minute=mm/
+          events.ndjson
+```
+
+Use this view for consumer latency and stream-fidelity checks. It is not the
+authoritative replay source because it is downstream of normalization.
+
+## Replay
+
+Use `edu.illinois.group8.replay.raw.RawIngressReplayCli` to replay raw
+websocket payloads through cluster ingress. Use
+`edu.illinois.group8.replay.recording.StorageBackedRecordingReplayCli` only for
+canonical stream/load testing.

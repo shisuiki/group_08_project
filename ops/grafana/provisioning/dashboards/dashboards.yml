@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Kalshi Integration
+    orgId: 1
+    folder: Kalshi
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards

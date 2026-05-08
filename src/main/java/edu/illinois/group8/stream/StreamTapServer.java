@@ -22,8 +22,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 
 public class StreamTapServer {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -31,6 +33,7 @@ public class StreamTapServer {
     private final String channel;
     private final int port;
     private final int maxEvents;
+    private final int idleSleepMillis;
     private final List<StreamContract> streams;
     private final ArrayDeque<Map<String, Object>> recentEvents = new ArrayDeque<>();
     private final Map<String, AtomicLong> countsByStream = new ConcurrentHashMap<>();
@@ -38,10 +41,11 @@ public class StreamTapServer {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final long startTimeMs = System.currentTimeMillis();
 
-    public StreamTapServer(String channel, int port, int maxEvents, List<StreamContract> streams) {
+    public StreamTapServer(String channel, int port, int maxEvents, int idleSleepMillis, List<StreamContract> streams) {
         this.channel = channel;
         this.port = port;
         this.maxEvents = maxEvents;
+        this.idleSleepMillis = idleSleepMillis;
         this.streams = List.copyOf(streams);
         for (StreamContract stream : streams) {
             countsByStream.put(stream.streamName(), new AtomicLong());
@@ -58,9 +62,10 @@ public class StreamTapServer {
             getenv("AERON_EXTERNAL_CHANNEL", getenv("AERON_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")));
         int port = Integer.parseInt(getenv("STREAM_TAP_PORT", "8080"));
         int maxEvents = Integer.parseInt(getenv("STREAM_TAP_MAX_EVENTS", "200"));
+        int idleSleepMillis = nonNegativeInt(getenv("STREAM_TAP_IDLE_SLEEP_MS", "1"), "STREAM_TAP_IDLE_SLEEP_MS");
         List<StreamContract> streams = resolveStreams(getenv("STREAM_TAP_STREAMS",
             "canonical.trade,canonical.ticker,canonical.open_interest,derived.top_of_book,system.sequence_gaps"));
-        return new StreamTapServer(channel, port, maxEvents, streams);
+        return new StreamTapServer(channel, port, maxEvents, idleSleepMillis, streams);
     }
 
     private static List<StreamContract> resolveStreams(String raw) {
@@ -85,6 +90,19 @@ public class StreamTapServer {
     private static String getenv(String key, String defaultValue) {
         String value = System.getenv(key);
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static int nonNegativeInt(String raw, String key) {
+        int value;
+        try {
+            value = Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(key + " must be an integer: " + raw, e);
+        }
+        if (value < 0) {
+            throw new IllegalArgumentException(key + " must be non-negative: " + value);
+        }
+        return value;
     }
 
     public void start() throws Exception {
@@ -117,7 +135,7 @@ public class StreamTapServer {
         }));
 
         System.out.println("StreamTap listening on :" + port + " channel=" + channel + " streams=" +
-            streams.stream().map(StreamContract::streamName).toList());
+            streams.stream().map(StreamContract::streamName).toList() + " idle_sleep_ms=" + idleSleepMillis);
         poller.join();
     }
 
@@ -135,9 +153,17 @@ public class StreamTapServer {
                 }, 10);
             }
             if (fragments == 0) {
-                Thread.onSpinWait();
+                idle();
             }
         }
+    }
+
+    private void idle() {
+        if (idleSleepMillis == 0) {
+            Thread.onSpinWait();
+            return;
+        }
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(idleSleepMillis));
     }
 
     private synchronized void record(String streamName, String payload) {

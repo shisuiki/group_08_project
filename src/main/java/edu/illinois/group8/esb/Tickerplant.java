@@ -53,8 +53,15 @@ public class Tickerplant implements Runnable {
                 metrics.increment("tickerplant.route_failed.unknown_stream." + streamName);
                 return false;
             }
+            var labels = BackendMetrics.labels("service", "tickerplant", "stream", streamName);
+            long offerStartTsNs = System.nanoTime();
+            metrics.increment("backend_publication_offer_total", labels);
             long result = publication.offer(buffer, offset, length);
+            long offerEndTsNs = System.nanoTime();
+            metrics.observe("backend_publication_latency_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
             if (result < 0L) {
+                metrics.increment("backend_publication_offer_failed_total", labels);
+                metrics.observe("backend_publication_backpressure_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
                 metrics.increment("tickerplant.route_failed.offer." + streamName);
                 return false;
             }

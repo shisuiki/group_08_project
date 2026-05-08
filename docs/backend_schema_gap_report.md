@@ -64,4 +64,4 @@ The old live parser used these fields:
 - Persist `RawSourceEvent` before parsing-derived canonical events.
 - Publish only stream names documented in `docs/backend_stream_contracts.md`.
 - Use `OrderBookStateManager` for snapshots/deltas and top-of-book generation.
-- Use replay from the raw journal for deterministic backfills and parser compatibility checks.
+- Use replay from `raw-ingest` recordings for deterministic backfills and parser compatibility checks.

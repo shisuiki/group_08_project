@@ -8,6 +8,7 @@ import edu.illinois.group8.parser.KalshiCanonicalParser;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 class OrderBookStateTest {
@@ -38,7 +39,7 @@ class OrderBookStateTest {
     }
 
     @Test
-    void missingSequenceProducesGapAndPausesMarket() {
+    void sourceSubscriptionSequenceSkipsDoNotPauseMarketBook() {
         OrderBookState state = new OrderBookState("M");
         state.applySnapshot(snapshot("""
             {"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
@@ -47,10 +48,9 @@ class OrderBookStateTest {
             {"type":"orderbook_delta","sid":2,"seq":4,"msg":{"market_ticker":"M","price_dollars":"0.4600","delta_fp":"1.00","side":"yes","ts_ms":1}}
             """));
 
-        SequenceGapEvent gap = assertInstanceOf(SequenceGapEvent.class, result.generatedEvents().get(0));
-        assertEquals(3L, gap.expectedSequence());
-        assertEquals(4L, gap.actualSequence());
-        assertEquals("out_of_order_delta", gap.reason());
+        TopOfBookUpdate top = assertInstanceOf(TopOfBookUpdate.class, result.generatedEvents().get(0));
+        assertEquals(460_000L, top.bidPriceMicros());
+        assertFalse(state.pausedForRecovery());
     }
 
     @Test

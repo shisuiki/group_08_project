@@ -55,7 +55,7 @@ public class ClientClusterOrchestrator {
         mediaDriver.close();
     }
 
-    public boolean writeToCluster(byte[] message) {
+    public synchronized boolean writeToCluster(byte[] message) {
         buf.putBytes(0, message);
         idleStrategy.reset();
         while (aeronCluster.offer(buf, 0, message.length) < 0) {
@@ -67,7 +67,7 @@ public class ClientClusterOrchestrator {
         return true;
     }
 
-    public boolean writeToCluster(String message) {
+    public synchronized boolean writeToCluster(String message) {
         buf.putBytes(0, message.getBytes());
         idleStrategy.reset();
         while (aeronCluster.offer(buf, 0, message.length()) < 0) {

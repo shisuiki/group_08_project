@@ -22,16 +22,16 @@ All events include:
 
 | Stream | ID | Schema | Ordering | Replay | Retention |
 | --- | ---: | ---: | --- | --- | --- |
-| `raw.kalshi.websocket` | 10 | 1 | Ingest order | Yes | Append-only local raw journal |
-| `canonical.trade` | 11 | 1 | Source order where available | Yes | Local canonical journal; optional warehouse |
-| `canonical.orderbook.snapshot` | 12 | 1 | Source subscription sequence | Yes | Local canonical journal |
-| `canonical.orderbook.delta` | 13 | 1 | Source subscription sequence | Yes | Local canonical journal |
-| `canonical.ticker` | 14 | 1 | Ingest/source order | Yes | Local canonical journal |
-| `canonical.open_interest` | 15 | 1 | Ingest/source order | Yes | Local canonical journal |
-| `derived.top_of_book` | 16 | 1 | Derived from orderbook sequence | Yes | Local canonical journal |
-| `canonical.market_lifecycle` | 17 | 1 | Ingest/source order | Yes | Local canonical journal |
-| `system.parser_errors` | 18 | 1 | Ingest order | Yes | Local canonical journal |
-| `system.sequence_gaps` | 19 | 1 | Source subscription sequence | Yes | Local canonical journal |
+| `raw.kalshi.websocket` | 10 | 1 | Ingest order | Yes | Raw ingest recording |
+| `canonical.trade` | 11 | 1 | Source order where available | Yes | Producer/downstream canonical recording |
+| `canonical.orderbook.snapshot` | 12 | 1 | Source subscription sequence | Yes | Producer/downstream canonical recording |
+| `canonical.orderbook.delta` | 13 | 1 | Source subscription sequence | Yes | Producer/downstream canonical recording |
+| `canonical.ticker` | 14 | 1 | Ingest/source order | Yes | Producer/downstream canonical recording |
+| `canonical.open_interest` | 15 | 1 | Ingest/source order | Yes | Producer/downstream canonical recording |
+| `derived.top_of_book` | 16 | 1 | Derived from orderbook sequence | Yes | Producer/downstream canonical recording |
+| `canonical.market_lifecycle` | 17 | 1 | Ingest/source order | Yes | Producer/downstream canonical recording |
+| `system.parser_errors` | 18 | 1 | Ingest order | Yes | Producer/downstream canonical recording |
+| `system.sequence_gaps` | 19 | 1 | Source subscription sequence | Yes | Producer/downstream canonical recording |
 
 The internal tickerplant bus uses stream ID 20 and routes canonical JSON by `stream_name`. No production route depends on a fixed JSON character offset.
 

@@ -55,13 +55,6 @@ public class OrderBookState {
             return new BookUpdateResult(generated);
         }
 
-        Long expectedSequence = expectedNextSequence();
-        if (expectedSequence != null && actualSequence != null && !expectedSequence.equals(actualSequence)) {
-            pausedForRecovery = true;
-            generated.add(sequenceGap(delta.eventId(), delta.metadata(), expectedSequence, actualSequence, "out_of_order_delta"));
-            return new BookUpdateResult(generated);
-        }
-
         applyLevelDelta(delta);
         if (actualSequence != null) {
             lastSequence = actualSequence;

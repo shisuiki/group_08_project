@@ -2,10 +2,12 @@ package edu.illinois.group8.utils;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -15,6 +17,11 @@ public abstract class WebSocketClient {
     private OutputStream outputStream;
     private BufferedReader reader;
     private Thread listenerThread;
+    private final AtomicBoolean closeCallbackSent = new AtomicBoolean(false);
+    private volatile boolean open;
+    private volatile boolean closed;
+    private volatile int closeCode = -1;
+    private volatile String closeReason = "";
 
     public WebSocketClient(String url) {
         try {
@@ -53,15 +60,23 @@ public abstract class WebSocketClient {
             writer.write("\r\n");
             writer.flush();
 
+            boolean accepted = false;
             String line;
-            while (!(line = reader.readLine()).isEmpty()) {
+            while ((line = reader.readLine()) != null && !line.isEmpty()) {
                 if (line.contains("101 Switching Protocols")) {
-                    onOpen();
+                    accepted = true;
                 }
             }
+            if (!accepted) {
+                throw new IOException("WebSocket handshake did not return 101 Switching Protocols");
+            }
 
+            open = true;
+            closed = false;
+            onOpen();
             startListening();
         } catch (IOException e) {
+            markClosedIfOpen(-1, e.getMessage());
             onError(e);
         }
     }
@@ -72,10 +87,15 @@ public abstract class WebSocketClient {
             try {
                 byte[] buffer = new byte[8192]; // Buffer for reading chunks of data
                 ByteArrayOutputStream messageBuffer = new ByteArrayOutputStream();
+                ByteArrayOutputStream fragmentedPayload = new ByteArrayOutputStream();
+                int fragmentedOpcode = -1;
 
                 while (true) {
                     int bytesRead = socket.getInputStream().read(buffer);
-                    if (bytesRead == -1) break; // End of stream
+                    if (bytesRead == -1) {
+                        markClosedIfOpen(-1, "input stream ended");
+                        break;
+                    }
 
                     messageBuffer.write(buffer, 0, bytesRead);
 
@@ -85,11 +105,11 @@ public abstract class WebSocketClient {
                         if (messageBytes.length < 2) break;
 
                         int b1 = messageBytes[0] & 0xFF;
+                        boolean fin = (b1 & 0x80) != 0;
                         int opcode = b1 & 0x0F;
 
-                        if (opcode != 1 && opcode != 8 && opcode != 9 && opcode != 10) {
-                            messageBuffer.reset();
-                            break;
+                        if (opcode != 0 && opcode != 1 && opcode != 8 && opcode != 9 && opcode != 10) {
+                            throw new IOException("Unsupported WebSocket opcode: " + opcode);
                         }
 
                         int b2 = messageBytes[1] & 0xFF;
@@ -133,15 +153,34 @@ public abstract class WebSocketClient {
                         }
 
                         if (opcode == 8) { // Close frame
-                            onClose();
+                            markClosedFromFrame(payloadData);
                             return;
                         } else if (opcode == 9) { // Ping frame
                             sendControlFrame(0xA, payloadData);
                         } else if (opcode == 10) { // Pong frame
                             // No-op. Receiving the frame is enough to keep the connection healthy.
                         } else if (opcode == 1) {
-                            String message = new String(payloadData, "UTF-8");
-                            onMessage(message);
+                            if (fin) {
+                                String message = new String(payloadData, StandardCharsets.UTF_8);
+                                onMessage(message);
+                            } else {
+                                fragmentedOpcode = opcode;
+                                fragmentedPayload.reset();
+                                fragmentedPayload.write(payloadData);
+                            }
+                        } else if (opcode == 0) {
+                            if (fragmentedOpcode == -1) {
+                                throw new IOException("Received WebSocket continuation frame without an initial frame");
+                            }
+                            fragmentedPayload.write(payloadData);
+                            if (fin) {
+                                if (fragmentedOpcode == 1) {
+                                    String message = fragmentedPayload.toString(StandardCharsets.UTF_8);
+                                    onMessage(message);
+                                }
+                                fragmentedPayload.reset();
+                                fragmentedOpcode = -1;
+                            }
                         }
 
                         messageBuffer.reset();
@@ -150,6 +189,7 @@ public abstract class WebSocketClient {
                     }
                 }
             } catch (IOException e) {
+                markClosedIfOpen(-1, e.getMessage());
                 onError(e);
             } finally {
                 try {
@@ -157,16 +197,19 @@ public abstract class WebSocketClient {
                 } catch (IOException e) {
                     onError(e);
                 }
-                onClose();
+                notifyClosed();
             }
         });
         listenerThread.start();
     }
 
-    public void sendMessage(String message) {
+    public synchronized boolean sendMessage(String message) {
+        if (!isOpen()) {
+            return false;
+        }
         try {
-            System.out.println("Sending " + message);
-            byte[] messageBytes = message.getBytes("UTF-8");
+            System.out.println("Sending " + summarizeMessage(message));
+            byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
             int messageLength = messageBytes.length;
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
@@ -201,9 +244,20 @@ public abstract class WebSocketClient {
             // Write the entire frame to the socket output stream
             this.outputStream.write(outputStream.toByteArray());
             this.outputStream.flush();
+            return true;
         } catch (IOException e) {
+            markClosedIfOpen(-1, e.getMessage());
             onError(e);
+            return false;
         }
+    }
+
+    private String summarizeMessage(String message) {
+        int maxLoggedChars = 1000;
+        if (message.length() <= maxLoggedChars) {
+            return message;
+        }
+        return message.substring(0, maxLoggedChars) + "... (" + message.length() + " chars)";
     }
 
     private void sendControlFrame(int opcode, byte[] payload) throws IOException {
@@ -228,11 +282,63 @@ public abstract class WebSocketClient {
 
     public void close() {
         try {
+            markClosedIfOpen(1000, "client close");
             socket.close();
-            listenerThread.interrupt();
-            onClose();
+            if (listenerThread != null) {
+                listenerThread.interrupt();
+            }
+            notifyClosed();
         } catch (IOException e) {
             onError(e);
+        }
+    }
+
+    public boolean isOpen() {
+        return open && !closed && socket != null && socket.isConnected() && !socket.isClosed();
+    }
+
+    public boolean isClosed() {
+        return closed || (socket != null && socket.isClosed());
+    }
+
+    public String closeDescription() {
+        if (closeCode >= 0 && closeReason != null && !closeReason.isBlank()) {
+            return closeCode + " " + closeReason;
+        }
+        if (closeCode >= 0) {
+            return Integer.toString(closeCode);
+        }
+        if (closeReason != null && !closeReason.isBlank()) {
+            return closeReason;
+        }
+        return "not closed";
+    }
+
+    private void markClosedFromFrame(byte[] payloadData) {
+        int code = -1;
+        String reason = "";
+        if (payloadData.length >= 2) {
+            code = ((payloadData[0] & 0xFF) << 8) | (payloadData[1] & 0xFF);
+            if (payloadData.length > 2) {
+                reason = new String(payloadData, 2, payloadData.length - 2, StandardCharsets.UTF_8);
+            }
+        }
+        markClosedIfOpen(code, reason);
+    }
+
+    private void markClosedIfOpen(int code, String reason) {
+        if (closed) {
+            return;
+        }
+        open = false;
+        closed = true;
+        closeCode = code;
+        closeReason = reason == null ? "" : reason;
+    }
+
+    private void notifyClosed() {
+        if (closeCallbackSent.compareAndSet(false, true)) {
+            onClose();
         }
     }
 

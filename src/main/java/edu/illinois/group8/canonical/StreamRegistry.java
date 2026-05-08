@@ -22,7 +22,7 @@ public final class StreamRegistry {
 
     static {
         register(EventType.RAW_SOURCE_EVENT, RAW_KALSHI_WEBSOCKET, "append-only local files plus optional Aeron", false);
-        register(EventType.MARKET_TRADE, CANONICAL_TRADE, "append-only local files plus optional warehouse", true);
+        register(EventType.MARKET_TRADE, CANONICAL_TRADE, "append-only local/S3 recordings", true);
         register(EventType.ORDER_BOOK_SNAPSHOT, CANONICAL_ORDERBOOK_SNAPSHOT, "append-only local files", true);
         register(EventType.ORDER_BOOK_DELTA, CANONICAL_ORDERBOOK_DELTA, "append-only local files", true);
         register(EventType.TICKER_UPDATE, CANONICAL_TICKER, "append-only local files", true);

@@ -11,7 +11,16 @@ services:
       AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+      BACKEND_LEGACY_JOURNAL_ENABLED: ${BACKEND_LEGACY_JOURNAL_ENABLED:-true}
       BACKEND_START_DEMO_CLIENT: ${BACKEND_START_DEMO_CLIENT:-false}
+      BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED: ${BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED:-false}
+      BACKEND_ORDERBOOK_DERIVED_ENABLED: ${BACKEND_ORDERBOOK_DERIVED_ENABLED:-true}
+      BACKEND_TIMESTAMP_SOURCE: ${BACKEND_TIMESTAMP_SOURCE:-system_nano}
+      BACKEND_RAW_RECORDING_ROOT: ${BACKEND_RAW_RECORDING_ROOT:-}
+      BACKEND_CANONICAL_RECORDING_ROOT: ${BACKEND_CANONICAL_RECORDING_ROOT:-}
+      BACKEND_RECORDING_PARTITION_GRANULARITY: ${BACKEND_RECORDING_PARTITION_GRANULARITY:-minute}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     networks:
       cluster_net:
         ipv4_address: ${CLUSTER_NODE0_IP:-172.20.0.2}
@@ -20,6 +29,40 @@ services:
       - "${NODE0_AERON_PORT:-40456}:40456"
     volumes:
       - ./journal:/app/journal
+      - ./recordings:/app/recordings
+    shm_size: "2gb"
+
+  node0-capture:
+    build: .
+    profiles: ["recording-capture"]
+    environment:
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      CLUSTER_ADDRESSES: ${CAPTURE_CLUSTER_ADDRESSES:-172.20.0.2}
+      BASE_DIR: /app
+      NODE_ID: "0"
+      CLUSTER_PORT_BASE: ${CLUSTER_PORT_BASE:-9000}
+      AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+      BACKEND_LEGACY_JOURNAL_ENABLED: ${BACKEND_LEGACY_JOURNAL_ENABLED:-true}
+      BACKEND_START_DEMO_CLIENT: ${BACKEND_START_DEMO_CLIENT:-false}
+      BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED: ${BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED:-false}
+      BACKEND_ORDERBOOK_DERIVED_ENABLED: ${BACKEND_ORDERBOOK_DERIVED_ENABLED:-true}
+      BACKEND_TIMESTAMP_SOURCE: ${BACKEND_TIMESTAMP_SOURCE:-system_nano}
+      BACKEND_RAW_RECORDING_ROOT: ${BACKEND_RAW_RECORDING_ROOT:-}
+      BACKEND_CANONICAL_RECORDING_ROOT: ${BACKEND_CANONICAL_RECORDING_ROOT:-}
+      BACKEND_RECORDING_PARTITION_GRANULARITY: ${BACKEND_RECORDING_PARTITION_GRANULARITY:-minute}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
+    networks:
+      cluster_net:
+        ipv4_address: ${CAPTURE_NODE0_IP:-172.20.0.2}
+    ports:
+      - "${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
+      - "${NODE0_AERON_PORT:-40456}:40456"
+    volumes:
+      - ./journal:/app/journal
+      - ./recordings:/app/recordings
     shm_size: "2gb"
 
   node1:
@@ -34,6 +77,15 @@ services:
       AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+      BACKEND_LEGACY_JOURNAL_ENABLED: ${BACKEND_LEGACY_JOURNAL_ENABLED:-true}
+      BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED: ${BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED:-false}
+      BACKEND_ORDERBOOK_DERIVED_ENABLED: ${BACKEND_ORDERBOOK_DERIVED_ENABLED:-true}
+      BACKEND_TIMESTAMP_SOURCE: ${BACKEND_TIMESTAMP_SOURCE:-system_nano}
+      BACKEND_RAW_RECORDING_ROOT: ${BACKEND_RAW_RECORDING_ROOT:-}
+      BACKEND_CANONICAL_RECORDING_ROOT: ${BACKEND_CANONICAL_RECORDING_ROOT:-}
+      BACKEND_RECORDING_PARTITION_GRANULARITY: ${BACKEND_RECORDING_PARTITION_GRANULARITY:-minute}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     networks:
       cluster_net:
         ipv4_address: ${CLUSTER_NODE1_IP:-172.20.0.3}
@@ -42,6 +94,7 @@ services:
       - "${NODE1_AERON_PORT:-40458}:40456"
     volumes:
       - ./journal:/app/journal
+      - ./recordings:/app/recordings
     shm_size: "2gb"
 
   node2:
@@ -56,6 +109,15 @@ services:
       AERON_INTERNAL_CHANNEL: ${AERON_INTERNAL_CHANNEL:-aeron:ipc}
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+      BACKEND_LEGACY_JOURNAL_ENABLED: ${BACKEND_LEGACY_JOURNAL_ENABLED:-true}
+      BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED: ${BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED:-false}
+      BACKEND_ORDERBOOK_DERIVED_ENABLED: ${BACKEND_ORDERBOOK_DERIVED_ENABLED:-true}
+      BACKEND_TIMESTAMP_SOURCE: ${BACKEND_TIMESTAMP_SOURCE:-system_nano}
+      BACKEND_RAW_RECORDING_ROOT: ${BACKEND_RAW_RECORDING_ROOT:-}
+      BACKEND_CANONICAL_RECORDING_ROOT: ${BACKEND_CANONICAL_RECORDING_ROOT:-}
+      BACKEND_RECORDING_PARTITION_GRANULARITY: ${BACKEND_RECORDING_PARTITION_GRANULARITY:-minute}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     networks:
       cluster_net:
         ipv4_address: ${CLUSTER_NODE2_IP:-172.20.0.4}
@@ -64,6 +126,7 @@ services:
       - "${NODE2_AERON_PORT:-40460}:40456"
     volumes:
       - ./journal:/app/journal
+      - ./recordings:/app/recordings
     shm_size: "2gb"
 
   wsclient:
@@ -80,35 +143,145 @@ services:
       BASE_DIR: /app
       IP: ${WSCLIENT_IP:-172.20.0.6}
       KALSHI_BASE_URL: ${KALSHI_BASE_URL:-https://api.elections.kalshi.com}
-      KALSHI_KEY_ID: ${KALSHI_KEY_ID:?Set KALSHI_KEY_ID for live ingestion}
+      KALSHI_KEY_ID: ${KALSHI_KEY_ID:-}
       KALSHI_KEY_PATH: ${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}
       KALSHI_MARKET_TICKERS: ${KALSHI_MARKET_TICKERS:-}
       KALSHI_MARKET_SERIES_TICKER: ${KALSHI_MARKET_SERIES_TICKER:-}
+      KALSHI_MARKET_SELECTION_MODE: ${KALSHI_MARKET_SELECTION_MODE:-configured}
+      KALSHI_MARKET_STATUS: ${KALSHI_MARKET_STATUS:-open}
+      KALSHI_MARKET_MVE_FILTER: ${KALSHI_MARKET_MVE_FILTER:-}
+      KALSHI_MARKET_DISCOVERY_LIMIT: ${KALSHI_MARKET_DISCOVERY_LIMIT:-1000}
+      KALSHI_MARKET_DISCOVERY_MAX_MARKETS: ${KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-0}
       KALSHI_WS_CHANNELS: ${KALSHI_WS_CHANNELS:-orderbook_delta,trade,ticker,market_lifecycle_v2}
+      KALSHI_WS_GLOBAL_CHANNELS: ${KALSHI_WS_GLOBAL_CHANNELS:-}
+      KALSHI_WS_FILTERED_CHANNELS: ${KALSHI_WS_FILTERED_CHANNELS:-}
+      KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE: ${KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE:-100}
+      KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION: ${KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION:-10000}
+      KALSHI_WS_SUBSCRIPTION_DELAY_MS: ${KALSHI_WS_SUBSCRIPTION_DELAY_MS:-250}
+      KALSHI_WS_ACK_TIMEOUT_MS: ${KALSHI_WS_ACK_TIMEOUT_MS:-30000}
       WSCLIENT_START_DELAY_SECONDS: ${WSCLIENT_START_DELAY_SECONDS:-20}
+      RAW_INGEST_RECORDER_ENABLED: ${RAW_INGEST_RECORDER_ENABLED:-false}
+      RAW_INGEST_RECORDER_ROOT: ${RAW_INGEST_RECORDER_ROOT:-/app/recordings/raw-ingest}
+      RAW_INGEST_RECORDER_SOURCE: ${RAW_INGEST_RECORDER_SOURCE:-kalshi.websocket}
+      RAW_INGEST_RECORDER_CAPTURE_ID: ${RAW_INGEST_RECORDER_CAPTURE_ID:-live}
+      RAW_INGEST_RECORDER_QUEUE_CAPACITY: ${RAW_INGEST_RECORDER_QUEUE_CAPACITY:-250000}
+      RAW_INGEST_RECORDER_DROP_ON_FULL: ${RAW_INGEST_RECORDER_DROP_ON_FULL:-true}
+      RAW_INGEST_RECORDER_PARTITION_GRANULARITY: ${RAW_INGEST_RECORDER_PARTITION_GRANULARITY:-minute}
+      RAW_INGEST_RECORDER_TIMESTAMP_SOURCE: ${RAW_INGEST_RECORDER_TIMESTAMP_SOURCE:-system_nano}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     networks:
       cluster_net:
         ipv4_address: ${WSCLIENT_IP:-172.20.0.6}
     volumes:
-      - ${KALSHI_KEY_HOST_PATH:?Set KALSHI_KEY_HOST_PATH to your private key file}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
+      - ${KALSHI_KEY_HOST_PATH:-./secrets/kalshi_private_key}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
+      - ./recordings:/app/recordings
     shm_size: "2gb"
     command: >
       sh -c "sleep $${WSCLIENT_START_DELAY_SECONDS:-20}; java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
 
-  replay:
+  wsclient-capture:
     build: .
-    profiles: ["replay"]
+    profiles: ["recording-capture"]
+    depends_on:
+      - node0-capture
+    restart: unless-stopped
+    environment:
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      CLUSTER_ADDRESSES: ${CAPTURE_CLUSTER_ADDRESSES:-172.20.0.2}
+      BASE_DIR: /app
+      IP: ${WSCLIENT_CAPTURE_IP:-172.20.0.6}
+      KALSHI_BASE_URL: ${KALSHI_BASE_URL:-https://api.elections.kalshi.com}
+      KALSHI_KEY_ID: ${KALSHI_KEY_ID:-}
+      KALSHI_KEY_PATH: ${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}
+      KALSHI_MARKET_TICKERS: ${KALSHI_MARKET_TICKERS:-}
+      KALSHI_MARKET_SERIES_TICKER: ${KALSHI_MARKET_SERIES_TICKER:-}
+      KALSHI_MARKET_SELECTION_MODE: ${KALSHI_MARKET_SELECTION_MODE:-configured}
+      KALSHI_MARKET_STATUS: ${KALSHI_MARKET_STATUS:-open}
+      KALSHI_MARKET_MVE_FILTER: ${KALSHI_MARKET_MVE_FILTER:-}
+      KALSHI_MARKET_DISCOVERY_LIMIT: ${KALSHI_MARKET_DISCOVERY_LIMIT:-1000}
+      KALSHI_MARKET_DISCOVERY_MAX_MARKETS: ${KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-0}
+      KALSHI_WS_CHANNELS: ${KALSHI_WS_CHANNELS:-orderbook_delta,trade,ticker,market_lifecycle_v2}
+      KALSHI_WS_GLOBAL_CHANNELS: ${KALSHI_WS_GLOBAL_CHANNELS:-}
+      KALSHI_WS_FILTERED_CHANNELS: ${KALSHI_WS_FILTERED_CHANNELS:-}
+      KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE: ${KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE:-100}
+      KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION: ${KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION:-10000}
+      KALSHI_WS_SUBSCRIPTION_DELAY_MS: ${KALSHI_WS_SUBSCRIPTION_DELAY_MS:-250}
+      KALSHI_WS_ACK_TIMEOUT_MS: ${KALSHI_WS_ACK_TIMEOUT_MS:-30000}
+      WSCLIENT_START_DELAY_SECONDS: ${WSCLIENT_START_DELAY_SECONDS:-20}
+      RAW_INGEST_RECORDER_ENABLED: ${RAW_INGEST_RECORDER_ENABLED:-false}
+      RAW_INGEST_RECORDER_ROOT: ${RAW_INGEST_RECORDER_ROOT:-/app/recordings/raw-ingest}
+      RAW_INGEST_RECORDER_SOURCE: ${RAW_INGEST_RECORDER_SOURCE:-kalshi.websocket}
+      RAW_INGEST_RECORDER_CAPTURE_ID: ${RAW_INGEST_RECORDER_CAPTURE_ID:-live}
+      RAW_INGEST_RECORDER_QUEUE_CAPACITY: ${RAW_INGEST_RECORDER_QUEUE_CAPACITY:-250000}
+      RAW_INGEST_RECORDER_DROP_ON_FULL: ${RAW_INGEST_RECORDER_DROP_ON_FULL:-true}
+      RAW_INGEST_RECORDER_PARTITION_GRANULARITY: ${RAW_INGEST_RECORDER_PARTITION_GRANULARITY:-minute}
+      RAW_INGEST_RECORDER_TIMESTAMP_SOURCE: ${RAW_INGEST_RECORDER_TIMESTAMP_SOURCE:-system_nano}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
+    networks:
+      cluster_net:
+        ipv4_address: ${WSCLIENT_CAPTURE_IP:-172.20.0.6}
+    volumes:
+      - ${KALSHI_KEY_HOST_PATH:-./secrets/kalshi_private_key}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
+      - ./recordings:/app/recordings
+    shm_size: "2gb"
+    command: >
+      sh -c "sleep $${WSCLIENT_START_DELAY_SECONDS:-20}; java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
+
+  raw-ingress-replay:
+    build: .
+    profiles: ["raw-replay"]
     environment:
       BACKEND_PROFILE: replay
-      BACKEND_JOURNAL_ROOT: ${BACKEND_JOURNAL_ROOT:-/app/journal}
+      CLUSTER_ADDRESSES: ${CAPTURE_CLUSTER_ADDRESSES:-172.20.0.2}
+      IP: ${RAW_REPLAY_IP:-172.20.0.11}
+      BASE_DIR: /app
+      RAW_REPLAY_ROOT: ${RAW_REPLAY_ROOT:-/app/recordings/raw-ingest}
+      RAW_REPLAY_MODE: ${RAW_REPLAY_MODE:-as-fast-as-possible}
+      RAW_REPLAY_FIXED_RATE_PER_SECOND: ${RAW_REPLAY_FIXED_RATE_PER_SECOND:-0}
+      RAW_REPLAY_SPEED_MULTIPLIER: ${RAW_REPLAY_SPEED_MULTIPLIER:-1.0}
+      RAW_REPLAY_MAX_EVENTS: ${RAW_REPLAY_MAX_EVENTS:-0}
+      RAW_REPLAY_DRY_RUN: ${RAW_REPLAY_DRY_RUN:-false}
+      RAW_REPLAY_ID: ${RAW_REPLAY_ID:-}
+    networks:
+      cluster_net:
+        ipv4_address: ${RAW_REPLAY_IP:-172.20.0.11}
     volumes:
-      - ./journal:/app/journal
+      - ./recordings:/app/recordings:ro
+    shm_size: "512mb"
     command: >
-      sh -c "java -cp /app/app.jar edu.illinois.group8.replay.ReplayCli --journal-root=/app/journal"
+      sh -c "java -cp /app/app.jar edu.illinois.group8.replay.raw.RawIngressReplayCli"
+
+  recording-replay:
+    build: .
+    profiles: ["storage-replay"]
+    environment:
+      BASE_DIR: /app
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      RECORDING_REPLAY_ROOT: ${RECORDING_REPLAY_ROOT:-/app/recordings}
+      RECORDING_REPLAY_AERON_CHANNEL: ${RECORDING_REPLAY_AERON_CHANNEL:-}
+      RECORDING_REPLAY_STREAMS: ${RECORDING_REPLAY_STREAMS:-canonical.trade,canonical.ticker,canonical.open_interest,canonical.orderbook.snapshot,canonical.orderbook.delta,canonical.market_lifecycle,system.parser_errors,derived.top_of_book,system.sequence_gaps}
+      RECORDING_REPLAY_MODE: ${RECORDING_REPLAY_MODE:-fixed-rate}
+      RECORDING_REPLAY_FIXED_RATE_PER_SECOND: ${RECORDING_REPLAY_FIXED_RATE_PER_SECOND:-50000}
+      RECORDING_REPLAY_SPEED_MULTIPLIER: ${RECORDING_REPLAY_SPEED_MULTIPLIER:-1.0}
+      RECORDING_REPLAY_MAX_EVENTS: ${RECORDING_REPLAY_MAX_EVENTS:-0}
+      RECORDING_REPLAY_LOOP_COUNT: ${RECORDING_REPLAY_LOOP_COUNT:-1}
+      RECORDING_REPLAY_ID: ${RECORDING_REPLAY_ID:-}
+      RECORDING_REPLAY_ANNOTATE: ${RECORDING_REPLAY_ANNOTATE:-false}
+      RECORDING_REPLAY_DRY_RUN: ${RECORDING_REPLAY_DRY_RUN:-false}
+    networks:
+      cluster_net:
+        ipv4_address: ${RECORDING_REPLAY_IP:-172.20.0.10}
+    volumes:
+      - ./recordings:/app/recordings:ro
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.replay.recording.StorageBackedRecordingReplayCli"
 
   streamtap:
     build: .
-    profiles: ["cluster-live"]
+    profiles: ["cluster-live", "frontend-integration"]
     restart: unless-stopped
     environment:
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
@@ -116,6 +289,7 @@ services:
       STREAM_TAP_PORT: ${STREAM_TAP_PORT:-8080}
       STREAM_TAP_STREAMS: ${STREAM_TAP_STREAMS:-canonical.trade,canonical.ticker,canonical.open_interest,derived.top_of_book,system.sequence_gaps}
       STREAM_TAP_MAX_EVENTS: ${STREAM_TAP_MAX_EVENTS:-200}
+      STREAM_TAP_IDLE_SLEEP_MS: ${STREAM_TAP_IDLE_SLEEP_MS:-1}
     networks:
       cluster_net:
         ipv4_address: ${STREAM_TAP_IP:-172.20.0.7}
@@ -124,6 +298,145 @@ services:
     shm_size: "512mb"
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.stream.StreamTapServer"
+
+  stream-recorder:
+    build: .
+    profiles: ["cluster-live", "frontend-integration", "recording-capture"]
+    restart: unless-stopped
+    environment:
+      BASE_DIR: /app
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      STREAM_RECORDER_AERON_CHANNEL: ${STREAM_RECORDER_AERON_CHANNEL:-}
+      STREAM_RECORDER_PORT: ${STREAM_RECORDER_PORT:-8092}
+      STREAM_RECORDER_OUTPUT_ROOT: ${STREAM_RECORDER_OUTPUT_ROOT:-/app/recordings}
+      STREAM_RECORDER_STREAMS: ${STREAM_RECORDER_STREAMS:-canonical.trade,canonical.ticker,canonical.open_interest,canonical.orderbook.snapshot,canonical.orderbook.delta,canonical.market_lifecycle,system.parser_errors,derived.top_of_book,system.sequence_gaps}
+      STREAM_RECORDER_RECENT_EVENTS: ${STREAM_RECORDER_RECENT_EVENTS:-200}
+      STREAM_RECORDER_TIMESTAMP_SOURCE: ${STREAM_RECORDER_TIMESTAMP_SOURCE:-system_nano}
+      STREAM_RECORDER_PARTITION_GRANULARITY: ${STREAM_RECORDER_PARTITION_GRANULARITY:-hour}
+      STREAM_RECORDER_IDLE_SLEEP_MS: ${STREAM_RECORDER_IDLE_SLEEP_MS:-1}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
+    networks:
+      cluster_net:
+        ipv4_address: ${STREAM_RECORDER_IP:-172.20.0.9}
+    ports:
+      - "127.0.0.1:${STREAM_RECORDER_HOST_PORT:-8092}:${STREAM_RECORDER_PORT:-8092}"
+    volumes:
+      - ./recordings:/app/recordings
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.recorder.TickerplantStreamRecorder"
+
+  s3-recording-sync:
+    build:
+      context: .
+      dockerfile: ops/docker/s3-recording-sync.Dockerfile
+    image: group_08_project-s3-recording-sync
+    profiles: ["cluster-live", "frontend-integration", "recording-capture"]
+    depends_on:
+      - stream-recorder
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/app/scripts/s3-recording-sync.sh"]
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      S3_RECORDING_BUCKET: ${S3_RECORDING_BUCKET:-}
+      S3_RECORDING_PREFIX: ${S3_RECORDING_PREFIX:-kalshi-normalized/}
+      S3_RECORDING_SUBTREES: ${S3_RECORDING_SUBTREES:-canonical,raw-ingest,producer-canonical}
+      S3_RECORDING_ROOT: /app/recordings
+      S3_UPLOAD_INTERVAL_SECONDS: ${S3_UPLOAD_INTERVAL_SECONDS:-60}
+      S3_UPLOAD_MIN_AGE_SECONDS: ${S3_UPLOAD_MIN_AGE_SECONDS:-120}
+      S3_DELETE_AFTER_UPLOAD: ${S3_DELETE_AFTER_UPLOAD:-false}
+    volumes:
+      - ./recordings:/app/recordings
+      - ./scripts:/app/scripts:ro
+
+  frontend-adapter:
+    build: .
+    profiles: ["cluster-live", "frontend-integration"]
+    depends_on:
+      - stream-recorder
+    restart: unless-stopped
+    environment:
+      BASE_DIR: /app
+      BACKEND_JOURNAL_ROOT: ${FRONTEND_ADAPTER_HISTORY_ROOT:-/app/recordings/producer-canonical}
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      FRONTEND_ADAPTER_AERON_CHANNEL: ${FRONTEND_ADAPTER_AERON_CHANNEL:-}
+      FRONTEND_ADAPTER_ENABLE_STREAM: ${FRONTEND_ADAPTER_ENABLE_STREAM:-false}
+      FRONTEND_ADAPTER_SEED_JOURNAL: ${FRONTEND_ADAPTER_SEED_JOURNAL:-true}
+      FRONTEND_ADAPTER_ENABLE_STORAGE_TAIL: ${FRONTEND_ADAPTER_ENABLE_STORAGE_TAIL:-true}
+      FRONTEND_ADAPTER_STORAGE_POLL_INTERVAL_MS: ${FRONTEND_ADAPTER_STORAGE_POLL_INTERVAL_MS:-1000}
+      FRONTEND_ADAPTER_PORT: ${FRONTEND_ADAPTER_PORT:-8090}
+      FRONTEND_ADAPTER_STREAMS: ${FRONTEND_ADAPTER_STREAMS:-canonical.trade,canonical.ticker,canonical.open_interest,canonical.orderbook.snapshot,canonical.orderbook.delta,canonical.market_lifecycle,system.parser_errors,derived.top_of_book,system.sequence_gaps}
+      FRONTEND_ADAPTER_MAX_INDEXED_EVENTS: ${FRONTEND_ADAPTER_MAX_INDEXED_EVENTS:-200000}
+      FRONTEND_ADAPTER_AUTH_TOKEN: ${FRONTEND_ADAPTER_AUTH_TOKEN:-}
+      FRONTEND_ADAPTER_TIMESTAMP_SOURCE: ${FRONTEND_ADAPTER_TIMESTAMP_SOURCE:-system_nano}
+      EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
+      ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
+    networks:
+      cluster_net:
+        ipv4_address: ${FRONTEND_ADAPTER_IP:-172.20.0.8}
+    ports:
+      - "${FRONTEND_ADAPTER_BIND_ADDR:-127.0.0.1}:${FRONTEND_ADAPTER_HOST_PORT:-8090}:${FRONTEND_ADAPTER_PORT:-8090}"
+    volumes:
+      - ./recordings:/app/recordings:ro
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.integration.IntegrationGatewayServer"
+
+  chart-demo:
+    image: nginx:1.27-alpine
+    profiles: ["frontend-integration"]
+    depends_on:
+      - frontend-adapter
+    ports:
+      - "${CHART_DEMO_BIND_ADDR:-127.0.0.1}:${CHART_DEMO_HOST_PORT:-8091}:80"
+    volumes:
+      - ./frontend/tradingview-lightweight:/usr/share/nginx/html:ro
+
+  frontend-public-proxy:
+    image: nginx:1.27-alpine
+    profiles: ["frontend-integration"]
+    depends_on:
+      - frontend-adapter
+    ports:
+      - "${FRONTEND_PUBLIC_PROXY_BIND_ADDR:-127.0.0.1}:${FRONTEND_PUBLIC_PROXY_HOST_PORT:-8093}:80"
+    volumes:
+      - ./frontend/tradingview-lightweight:/usr/share/nginx/html:ro
+      - ./ops/nginx/frontend-public-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - cluster_net
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["frontend-integration"]
+    depends_on:
+      - frontend-adapter
+      - stream-recorder
+      - streamtap
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - cluster_net
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    profiles: ["frontend-integration"]
+    depends_on:
+      - prometheus
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3000}:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - cluster_net
 
 networks:
   cluster_net:
