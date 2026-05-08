@@ -27,15 +27,16 @@ The current codebase has expanded that simple path:
   websocket payloads, `raw-rest` for REST backfill responses, and downstream
   `canonical` recorder output for normalized Aeron-consumer observation and
   backfilled canonical history.
-- New current modules not shown in the old diagram include stream recording,
-  storage-backed replay, source-agnostic featureplant templates, stream tap
-  inspection, Prometheus/Grafana, and hot-path profiling.
+- New current modules not shown in the old diagram include ingress envelopes,
+  raw-ingest replay, REST historical backfill with raw REST capture, stream
+  recording, source-agnostic featureplant templates,
+  stream tap inspection, Prometheus/Grafana, and hot-path profiling.
 
 Plan status from the markdowns:
 
 | Plan | Current state | Where remaining planned modules belong |
 | --- | --- | --- |
-| `01_core_backend_implementation_plan.md` | Mostly represented in code: config, canonical events, parser, order book state, stream registry, file/object recording, replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket heartbeat reliability. |
+| `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket heartbeat reliability. |
 | `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, recording-backed and Aeron-backed sources, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
 | `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer`, live chart demo, and research CSV gateway path have been removed. | Frontend visualization, backtesting, and research export should attach to the same feature/query boundary used for historical replay, not directly to live tickerplant streams. |
 | `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
@@ -146,10 +147,11 @@ flowchart LR
   KALSHI["Kalshi API<br/>REST + WebSocket"]:::source
 
   subgraph Ingestion["Live Ingestion"]
-    CFG["BackendConfig<br/>env-driven profiles, channels,<br/>recording roots, cluster endpoints"]:::current
+    CFG["BackendConfig<br/>env-driven Kalshi selection,<br/>WS channels, cluster endpoints"]:::current
     KS["KalshiSystem<br/>configured or open-market capture<br/>chunked subscriptions + WS sharding"]:::current
     KW["KalshiWrapper<br/>REST market discovery"]:::current
     KWS["KalshiWebSocketClient shards<br/>custom WS client<br/>subscribe/update acknowledgements"]:::current
+    RAWCFG["RawIngestRecorderConfig<br/>RAW_INGEST_RECORDER_* root/enabled"]:::current
     RAWREC["RawIngestRecorder<br/>optional exact inbound WS payload capture"]:::optional
     RAWSTORE["recordings/raw-ingest<br/>source/date/hour/minute NDJSON"]:::storage
     ENVELOPE["KalshiIngressEnvelope<br/>raw payload + receive timestamp<br/>connection/replay metadata"]:::current
@@ -161,17 +163,18 @@ flowchart LR
   KS --> KW
   KW --> KWS
   KALSHI -->|WS market data| KWS
+  RAWCFG --> RAWREC
   KWS -.->|recordInbound when enabled| RAWREC
   RAWREC -.-> RAWSTORE
   KWS -->|enveloped raw Kalshi JSON| ENVELOPE
   ENVELOPE --> CCO
 
   subgraph RawReplay["Raw Ingress Replay"]
-    RAWREPLAY["RawIngressReplayCli / Service<br/>replays raw payloads to cluster ingress"]:::current
+    RAWREPLAY["RawIngressReplayCli / Service<br/>selects raw events from Timescale/S3 source of truth<br/>replays raw payloads to ingress"]:::current
   end
 
   RAWSTORE --> RAWREPLAY
-  RAWREPLAY --> CCO
+  RAWREPLAY -->|adds replay_id metadata| ENVELOPE
 
   subgraph ESB["Aeron Cluster / ESB Runtime"]
     CM["ClusterMain<br/>node0-node2 profiles"]:::bus
@@ -211,12 +214,12 @@ flowchart LR
     TAP["StreamTapServer<br/>/events /health /metrics"]:::current
     RECORDER["TickerplantStreamRecorder<br/>records normalized streams"]:::current
     CANONREC["recordings/canonical<br/>consumer-side Aeron validation copy"]:::storage
+    HBCFG["HistoricalBackfillConfig<br/>REST scope + canonical/raw-rest roots"]:::current
     RESTBACKFILL["HistoricalBackfillCli<br/>KalshiWrapper + KalshiRestParser<br/>REST markets/trades/orderbook/candles"]:::current
     RAWREST["recordings/raw-rest<br/>raw REST response capture"]:::storage
-    REPLAY["StorageBackedRecordingReplay<br/>republish recorded canonical streams"]:::current
     S3SYNC["s3-recording-sync<br/>uploads canonical, raw-ingest,<br/>raw-rest subtrees"]:::optional
     MON["Prometheus + Grafana<br/>scrapes stream-recorder and streamtap"]:::external
-    PROF["HotPathProfileCli<br/>synthetic parser/book/journal profiling"]:::current
+    PROF["HotPathProfileCli<br/>synthetic parser/book/processor profiling"]:::current
   end
 
   EXT --> CLIENTS
@@ -224,11 +227,10 @@ flowchart LR
   EXT --> TAP
   EXT --> RECORDER
   RECORDER --> CANONREC
+  HBCFG --> RESTBACKFILL
   KALSHI -->|historical REST| RESTBACKFILL
   RESTBACKFILL --> RAWREST
   RESTBACKFILL --> CANONREC
-  CANONREC --> REPLAY
-  REPLAY -->|republish stored stream events| EXT
   RAWSTORE --> S3SYNC
   CANONREC --> S3SYNC
   RAWREST --> S3SYNC
@@ -265,20 +267,25 @@ flowchart LR
     KALSHI2["Kalshi REST/WS"]:::external
     CORE["Core backend<br/>KalshiSystem + ESBClusteredService + DataProcessor"]:::current
     CANON["Canonical tickerplant streams<br/>raw.*, canonical.*, derived.top_of_book, system.*"]:::current
-    RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + stream-recorder"]:::current
-    REPLAY2["Replay services<br/>raw-ingest replay + storage-backed replay"]:::current
+    RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + recordings/canonical"]:::current
+    REPLAY2["RawIngressReplayCli<br/>Timescale/S3 raw selection + ingress injection"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
+    RESTBACK2["HistoricalBackfillCli<br/>current raw-rest + canonical backfill"]:::current
     CURFEATURE["FeaturePlantService skeleton<br/>Aeron/recording sources + stdout/buffer sinks"]:::current
     CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
   end
 
   KALSHI2 --> CORE
   CORE --> CANON
-  CORE --> RAWSTORE
+  CORE -->|raw-ingest capture| RAWSTORE
+  CANON -->|stream-recorder canonical copy| RAWSTORE
   RAWSTORE --> REPLAY2
+  REPLAY2 -->|raw replay into ingress| CORE
   KALSHI2 --> RESTHELPERS
+  RESTHELPERS --> RESTBACK2
+  RESTBACK2 --> RAWSTORE
   CANON --> CURFEATURE
-  RAWSTORE --> CURFEATURE
+  RAWSTORE -->|recordings/canonical| CURFEATURE
   CANON --> CURMON
   RAWSTORE --> CURMON
 
@@ -311,8 +318,7 @@ flowchart LR
   end
 
   CANON -->|live tickerplant source| FSRC
-  RAWSTORE -->|historical canonical source| FSRC
-  REPLAY2 -->|deterministic replay inputs| FSRC
+  RAWSTORE -->|recordings/canonical source| FSRC
   FSRC --> FPSVC
   METASTORE -->|market metadata| FPSVC
   FPSVC --> STATE
@@ -338,7 +344,7 @@ flowchart LR
 
   FAPI --> FE2
   FSTORE --> RESEARCH
-  REPLAY2 --> REPLAYCTRL
+  FAPI --> REPLAYCTRL
   REPLAYCTRL --> FE2
   FE2 --> CHART2
   FAPI --> RESEARCH

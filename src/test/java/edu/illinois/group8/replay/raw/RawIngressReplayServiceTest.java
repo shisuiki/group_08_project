@@ -29,16 +29,32 @@ class RawIngressReplayServiceTest {
             """, StandardCharsets.UTF_8);
 
         RawIngressReplayConfig config = new RawIngressReplayConfig(
+            "local-ndjson",
             tempDir,
+            "",
+            "",
+            "",
+            "raw_ingest_events",
+            "raw_payload",
+            "receive_ts_ns",
+            "connection_id",
+            "sequence",
+            "raw_event_id",
+            "market_ticker",
             RawReplayMode.AS_FAST_AS_POSSIBLE,
             1.0,
             0L,
             0L,
+            null,
+            null,
+            java.util.List.of(),
+            java.util.List.of(),
+            false,
             false,
             "test-raw-replay"
         );
         CollectingRawIngressReplayPublisher publisher = new CollectingRawIngressReplayPublisher();
-        RawIngressReplaySummary summary = new RawIngressReplayService(new RawRecordingReader(tempDir), new BackendMetrics())
+        RawIngressReplaySummary summary = new RawIngressReplayService(new LocalNdjsonRawReplaySource(tempDir), new BackendMetrics())
             .replay(config, publisher);
 
         assertEquals(2L, summary.sourceEventsLoaded());

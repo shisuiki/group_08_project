@@ -67,6 +67,12 @@ jobs:
       RAW_INGEST_RECORDER_DROP_ON_FULL: ${{ vars.RAW_INGEST_RECORDER_DROP_ON_FULL || 'true' }}
       RAW_INGEST_RECORDER_PARTITION_GRANULARITY: ${{ vars.RAW_INGEST_RECORDER_PARTITION_GRANULARITY || 'minute' }}
       RAW_INGEST_RECORDER_TIMESTAMP_SOURCE: ${{ vars.RAW_INGEST_RECORDER_TIMESTAMP_SOURCE || 'system_nano' }}
+      RAW_REPLAY_SOURCE: ${{ vars.RAW_REPLAY_SOURCE || 'timescale' }}
+      RAW_REPLAY_DATABASE_URL: ${{ vars.RAW_REPLAY_DATABASE_URL }}
+      RAW_REPLAY_DATABASE_USER: ${{ vars.RAW_REPLAY_DATABASE_USER }}
+      RAW_REPLAY_DATABASE_PASSWORD: ${{ secrets.RAW_REPLAY_DATABASE_PASSWORD }}
+      RAW_REPLAY_TABLE: ${{ vars.RAW_REPLAY_TABLE || 'raw_ingest_events' }}
+      RAW_REPLAY_REQUIRE_BOUNDED_SELECTION: ${{ vars.RAW_REPLAY_REQUIRE_BOUNDED_SELECTION || 'true' }}
       AERON_EXTERNAL_CHANNEL: ${{ vars.AERON_EXTERNAL_CHANNEL || 'aeron:udp?endpoint=224.0.1.1:40456' }}
       STREAM_TAP_HOST_PORT: ${{ vars.STREAM_TAP_HOST_PORT || '8080' }}
       STREAM_TAP_STREAMS: ${{ vars.STREAM_TAP_STREAMS || 'canonical.trade,canonical.ticker,canonical.open_interest,derived.top_of_book,system.sequence_gaps' }}
@@ -226,6 +232,12 @@ jobs:
           RAW_INGEST_RECORDER_DROP_ON_FULL=$RAW_INGEST_RECORDER_DROP_ON_FULL
           RAW_INGEST_RECORDER_PARTITION_GRANULARITY=$RAW_INGEST_RECORDER_PARTITION_GRANULARITY
           RAW_INGEST_RECORDER_TIMESTAMP_SOURCE=$RAW_INGEST_RECORDER_TIMESTAMP_SOURCE
+          RAW_REPLAY_SOURCE=$RAW_REPLAY_SOURCE
+          RAW_REPLAY_DATABASE_URL=$RAW_REPLAY_DATABASE_URL
+          RAW_REPLAY_DATABASE_USER=$RAW_REPLAY_DATABASE_USER
+          RAW_REPLAY_DATABASE_PASSWORD=$RAW_REPLAY_DATABASE_PASSWORD
+          RAW_REPLAY_TABLE=$RAW_REPLAY_TABLE
+          RAW_REPLAY_REQUIRE_BOUNDED_SELECTION=$RAW_REPLAY_REQUIRE_BOUNDED_SELECTION
           AERON_INTERNAL_CHANNEL=aeron:ipc
           AERON_EXTERNAL_CHANNEL=$AERON_EXTERNAL_CHANNEL
           STREAM_TAP_HOST_PORT=$STREAM_TAP_HOST_PORT
@@ -284,7 +296,7 @@ jobs:
 
       - name: Deploy Docker Compose stack
         run: |
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile cluster-live --profile recording-capture --profile observability --profile featureplant --profile storage-replay --profile raw-replay --profile historical-backfill down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile cluster-live --profile recording-capture --profile observability --profile featureplant --profile raw-replay --profile historical-backfill down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
 
       - name: Show service status
         run: |

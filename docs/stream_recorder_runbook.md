@@ -62,9 +62,10 @@ The recorder annotates each stored event with `recorder_metadata`:
 - `storage_commit_wall_ts`
 - `storage_commit_ts_ns`
 
-Recorded canonical storage can be replayed with
-`edu.illinois.group8.replay.recording.StorageBackedRecordingReplayCli`; see
-`docs/storage_backed_replay_runbook.md`.
+Recorded canonical storage is historical input for featureplant, visualization,
+backtesting, and research export. Full end-to-end replay uses
+`edu.illinois.group8.replay.raw.RawIngressReplayCli` against the raw
+source-of-truth store.
 
 ## Verification
 

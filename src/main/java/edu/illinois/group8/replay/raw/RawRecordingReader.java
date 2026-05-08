@@ -48,8 +48,8 @@ public class RawRecordingReader {
         }
         events.sort(Comparator
             .comparing((RawReplayEvent event) -> event.receiveTsNs() == null ? Long.MAX_VALUE : event.receiveTsNs())
-            .thenComparing(event -> event.sourceFile().toString())
-            .thenComparingLong(RawReplayEvent::sourceLine));
+            .thenComparing(RawReplayEvent::sourceName)
+            .thenComparing(RawReplayEvent::sourcePosition));
         if (maxEvents > 0L && events.size() > maxEvents) {
             return List.copyOf(events.subList(0, (int) maxEvents));
         }
@@ -96,8 +96,10 @@ public class RawRecordingReader {
                 receiveTsNs,
                 node.path("connection_id").asText(""),
                 node.path("sequence").asLong(0L),
-                file,
-                lineNumber
+                rawEventId(node, rawPayload.asText()),
+                marketTicker(node, rawPayload.asText()),
+                "local-ndjson",
+                file + ":" + lineNumber
             );
         } catch (IOException e) {
             throw new IllegalStateException("Malformed raw recording event in " + file + ":" + lineNumber, e);
@@ -107,5 +109,35 @@ public class RawRecordingReader {
     private static Long number(JsonNode node, String field) {
         JsonNode value = node.path(field);
         return value.isNumber() ? value.asLong() : null;
+    }
+
+    private String rawEventId(JsonNode node, String rawPayload) {
+        String explicit = text(node, "raw_event_id");
+        if (!explicit.isBlank()) {
+            return explicit;
+        }
+        String payloadHash = text(node, "payload_sha256");
+        if (!payloadHash.isBlank()) {
+            return "raw_" + payloadHash.substring(0, Math.min(24, payloadHash.length()));
+        }
+        return "";
+    }
+
+    private String marketTicker(JsonNode node, String rawPayload) {
+        String explicit = text(node, "market_ticker");
+        if (!explicit.isBlank()) {
+            return explicit;
+        }
+        try {
+            JsonNode payload = mapper.readTree(rawPayload);
+            return payload.path("msg").path("market_ticker").asText("");
+        } catch (IOException ignored) {
+            return "";
+        }
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isTextual() ? value.asText() : "";
     }
 }

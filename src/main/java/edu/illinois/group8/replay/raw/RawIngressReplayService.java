@@ -5,16 +5,16 @@ import edu.illinois.group8.metrics.BackendMetrics;
 import java.util.List;
 
 public class RawIngressReplayService {
-    private final RawRecordingReader reader;
+    private final RawReplaySource source;
     private final BackendMetrics metrics;
 
-    public RawIngressReplayService(RawRecordingReader reader, BackendMetrics metrics) {
-        this.reader = reader;
+    public RawIngressReplayService(RawReplaySource source, BackendMetrics metrics) {
+        this.source = source;
         this.metrics = metrics;
     }
 
     public RawIngressReplaySummary replay(RawIngressReplayConfig config, RawIngressReplayPublisher publisher) {
-        List<RawReplayEvent> events = reader.read(config.maxEvents());
+        List<RawReplayEvent> events = source.read(config.selection());
         long attempted = 0L;
         long published = 0L;
         long failures = 0L;

@@ -2,26 +2,29 @@
 
 ## Replay
 
-Raw replay reads the `raw-ingest` source-of-truth capture and injects the
-original websocket payloads back into cluster ingress.
+Raw replay selects exact raw websocket payloads from the canonical raw
+source-of-truth store and injects them back into cluster ingress. In production
+that store is TimescaleDB loaded from the S3-backed raw recordings.
 
 ```bash
 java -cp target/kalshi-project-1.0-SNAPSHOT.jar \
   edu.illinois.group8.replay.raw.RawIngressReplayCli \
-  --root=recordings/raw-ingest \
+  --source=timescale \
+  --db-url=jdbc:postgresql://storage-node:5432/kalshi \
+  --start-receive-ts-ns=1780000000000000000 \
+  --end-receive-ts-ns=1780000060000000000 \
   --dry-run
 ```
 
-Canonical storage replay is for tickerplant stream/load testing, not full
-end-to-end parser replay:
+For local fixtures only, use the explicit local adapter:
 
 ```bash
 java -cp target/kalshi-project-1.0-SNAPSHOT.jar \
-  edu.illinois.group8.replay.recording.StorageBackedRecordingReplayCli \
-  --root=recordings \
-  --mode=fixed-rate \
-  --fixed-rate=50000 \
-  --loop-count=10
+  edu.illinois.group8.replay.raw.RawIngressReplayCli \
+  --source=local-ndjson \
+  --local-root=recordings/raw-ingest \
+  --max-events=100 \
+  --dry-run
 ```
 
 ## Live Startup
@@ -109,14 +112,20 @@ For S3-backed whole-universe capture, set:
 Keep `KALSHI_MARKET_DISCOVERY_MAX_MARKETS=0` for the whole discovered open
 market universe. Set it to a positive count only for bounded smoke tests.
 
-Raw replay injects recorded websocket payloads back into Aeron cluster ingress:
+Raw replay injects selected websocket payloads back into Aeron cluster ingress.
+Provide a bounded selection by time, market ticker, raw event id, or max-event
+limit:
 
 ```bash
 docker compose --env-file .env --profile raw-replay run --rm raw-ingress-replay \
-  --root=/app/recordings/raw-ingest --mode=original-timestamps --speed=10
+  --source=timescale \
+  --start-receive-ts-ns=1780000000000000000 \
+  --end-receive-ts-ns=1780000060000000000 \
+  --mode=original-timestamps \
+  --speed=10
 ```
 
-Use `--dry-run` to validate file ordering without publishing into the cluster.
+Use `--dry-run` to validate selection/order without publishing into the cluster.
 
 Historical REST backfill writes raw REST responses and parsed canonical events
 into the same storage-backed layout:

@@ -90,10 +90,9 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 1. Copy `.env.example` to `.env`.
 2. For live ingestion, set `KALSHI_KEY_ID`, `KALSHI_KEY_HOST_PATH`, and either `KALSHI_MARKET_TICKERS`, `KALSHI_MARKET_SERIES_TICKER`, or `KALSHI_MARKET_SELECTION_MODE=open_markets`.
 3. Run a single local node with `docker compose --profile single-node-local up --build`, or the three-node live stack with `docker compose --profile cluster-live up --build`.
-4. Raw replay can run in dry-run mode with `docker compose --profile raw-replay run --rm -e RAW_REPLAY_DRY_RUN=true raw-ingress-replay`.
+4. Raw replay can run in dry-run mode from the raw source-of-truth store with `docker compose --profile raw-replay run --rm -e RAW_REPLAY_DRY_RUN=true -e RAW_REPLAY_MAX_EVENTS=100 raw-ingress-replay`.
 5. Observability is available with `docker compose --profile observability up --build`.
-6. Stream-recorder backed replay/load tests are available with `docker compose --profile storage-replay up --build recording-replay`.
-7. Featureplant templates can run over recorded history with `docker compose --profile featureplant run --rm featureplant`.
+6. Featureplant templates can run over recorded history with `docker compose --profile featureplant run --rm featureplant`.
 
 Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 

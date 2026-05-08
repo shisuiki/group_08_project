@@ -20,6 +20,20 @@ recordings/raw-ingest/
 Each line contains the exact inbound websocket payload plus receive timestamps,
 connection id, sequence, capture id, and payload hash.
 
+When raw recordings are loaded into TimescaleDB for replay, `RawIngressReplayCli`
+expects a row shape equivalent to:
+
+- `raw_payload`
+- `receive_ts_ns`
+- `connection_id`
+- `sequence`
+- `raw_event_id`
+- `market_ticker`
+
+The table and column names are configurable through `RAW_REPLAY_TABLE` and
+`RAW_REPLAY_*_COLUMN` settings, but replay selection should stay anchored to
+receive timestamp, market ticker, or raw event id.
+
 ## Downstream Canonical
 
 `canonical` is written by `TickerplantStreamRecorder`, which subscribes to the
@@ -64,6 +78,7 @@ layout as the downstream stream recorder.
 ## Replay
 
 Use `edu.illinois.group8.replay.raw.RawIngressReplayCli` to replay raw
-websocket payloads through cluster ingress. Use
-`edu.illinois.group8.replay.recording.StorageBackedRecordingReplayCli` only for
-canonical stream/load testing.
+websocket payloads through cluster ingress. Production replay selects exact raw
+events from the canonical raw source-of-truth store, usually TimescaleDB loaded
+from S3-backed raw recordings. The local NDJSON adapter remains available only
+for development fixtures with `RAW_REPLAY_SOURCE=local-ndjson`.
