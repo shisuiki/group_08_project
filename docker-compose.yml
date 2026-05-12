@@ -387,6 +387,34 @@ services:
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.feature.FeaturePlantCli"
 
+  frontend-adapter:
+    build: .
+    profiles: ["frontend-integration"]
+    environment:
+      BASE_DIR: /app
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      FRONTEND_ADAPTER_HOST: ${FRONTEND_ADAPTER_HOST:-0.0.0.0}
+      FRONTEND_ADAPTER_PORT: ${FRONTEND_ADAPTER_PORT:-8090}
+      FRONTEND_ADAPTER_SOURCE: ${FRONTEND_ADAPTER_SOURCE:-recording}
+      FRONTEND_ADAPTER_RECORDING_ROOT: ${FRONTEND_ADAPTER_RECORDING_ROOT:-/app/recordings}
+      FRONTEND_ADAPTER_AERON_CHANNEL: ${FRONTEND_ADAPTER_AERON_CHANNEL:-}
+      FRONTEND_ADAPTER_STREAMS: ${FRONTEND_ADAPTER_STREAMS:-canonical.trade,canonical.ticker,derived.top_of_book}
+      FRONTEND_ADAPTER_MODULES: ${FRONTEND_ADAPTER_MODULES:-bbo,ticker_snapshot,trade_tape}
+      FRONTEND_ADAPTER_MAX_FEATURES_PER_MARKET: ${FRONTEND_ADAPTER_MAX_FEATURES_PER_MARKET:-10000}
+      FRONTEND_ADAPTER_MAX_SYMBOLS_INDEXED: ${FRONTEND_ADAPTER_MAX_SYMBOLS_INDEXED:-5000}
+      FRONTEND_ADAPTER_FRAGMENT_LIMIT: ${FRONTEND_ADAPTER_FRAGMENT_LIMIT:-64}
+      FRONTEND_ADAPTER_IDLE_SLEEP_MS: ${FRONTEND_ADAPTER_IDLE_SLEEP_MS:-1}
+      FRONTEND_ADAPTER_RECORDING_MAX_EVENTS: ${FRONTEND_ADAPTER_RECORDING_MAX_EVENTS:-0}
+    networks:
+      - cluster_net
+    ports:
+      - "127.0.0.1:${FRONTEND_ADAPTER_HOST_PORT:-8090}:8090"
+    volumes:
+      - ./recordings:/app/recordings:ro
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.frontend.FrontendAdapterMain"
+
   prometheus:
     image: prom/prometheus:v2.55.1
     profiles: ["observability"]
