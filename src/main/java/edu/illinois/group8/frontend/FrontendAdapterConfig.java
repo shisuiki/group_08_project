@@ -1,0 +1,129 @@
+package edu.illinois.group8.frontend;
+
+import edu.illinois.group8.canonical.StreamContract;
+import edu.illinois.group8.canonical.StreamRegistry;
+
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+
+public record FrontendAdapterConfig(
+    String host,
+    int port,
+    SourceMode sourceMode,
+    String aeronChannel,
+    Path recordingRoot,
+    List<StreamContract> streams,
+    List<String> moduleNames,
+    int maxFeaturesPerMarket,
+    int maxSymbolsIndexed,
+    int fragmentLimit,
+    int idleSleepMillis,
+    long recordingMaxEvents
+) {
+    public enum SourceMode {
+        AERON, RECORDING;
+
+        public static SourceMode parse(String raw) {
+            if (raw == null) {
+                return RECORDING;
+            }
+            return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+                case "aeron", "live", "tickerplant" -> AERON;
+                case "recording", "history", "storage" -> RECORDING;
+                default -> throw new IllegalArgumentException("Unknown FRONTEND_ADAPTER_SOURCE: " + raw);
+            };
+        }
+    }
+
+    public FrontendAdapterConfig {
+        host = host == null || host.isBlank() ? "127.0.0.1" : host;
+        if (port < 0 || port > 65535) {
+            throw new IllegalArgumentException("FRONTEND_ADAPTER_PORT out of range: " + port);
+        }
+        if (sourceMode == null) {
+            throw new IllegalArgumentException("sourceMode is required");
+        }
+        streams = List.copyOf(streams);
+        moduleNames = List.copyOf(moduleNames);
+        if (maxFeaturesPerMarket < 1) {
+            throw new IllegalArgumentException("maxFeaturesPerMarket must be positive");
+        }
+        if (maxSymbolsIndexed < 1) {
+            throw new IllegalArgumentException("maxSymbolsIndexed must be positive");
+        }
+        if (fragmentLimit < 1) {
+            throw new IllegalArgumentException("fragmentLimit must be positive");
+        }
+        if (idleSleepMillis < 0) {
+            throw new IllegalArgumentException("idleSleepMillis must be non-negative");
+        }
+    }
+
+    public static FrontendAdapterConfig fromEnvironment() {
+        return from(System.getenv());
+    }
+
+    public static FrontendAdapterConfig from(Map<String, String> env) {
+        String baseDir = value(env, "BASE_DIR", "/app");
+        SourceMode sourceMode = SourceMode.parse(value(env, "FRONTEND_ADAPTER_SOURCE", "recording"));
+        return new FrontendAdapterConfig(
+            value(env, "FRONTEND_ADAPTER_HOST", "127.0.0.1"),
+            intValue(env, "FRONTEND_ADAPTER_PORT", 8090),
+            sourceMode,
+            value(env, "FRONTEND_ADAPTER_AERON_CHANNEL",
+                value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
+            Path.of(value(env, "FRONTEND_ADAPTER_RECORDING_ROOT", baseDir + "/recordings")),
+            resolveStreams(value(env, "FRONTEND_ADAPTER_STREAMS",
+                "canonical.trade,canonical.ticker,derived.top_of_book")),
+            csv(value(env, "FRONTEND_ADAPTER_MODULES", "bbo,ticker_snapshot,trade_tape")),
+            intValue(env, "FRONTEND_ADAPTER_MAX_FEATURES_PER_MARKET", 10_000),
+            intValue(env, "FRONTEND_ADAPTER_MAX_SYMBOLS_INDEXED", 5_000),
+            intValue(env, "FRONTEND_ADAPTER_FRAGMENT_LIMIT", 64),
+            intValue(env, "FRONTEND_ADAPTER_IDLE_SLEEP_MS", 1),
+            longValue(env, "FRONTEND_ADAPTER_RECORDING_MAX_EVENTS", 0L)
+        );
+    }
+
+    private static List<StreamContract> resolveStreams(String raw) {
+        List<StreamContract> resolved = new java.util.ArrayList<>();
+        for (String streamName : csv(raw)) {
+            Optional<StreamContract> stream = StreamRegistry.byName(streamName);
+            if (stream.isEmpty()) {
+                throw new IllegalArgumentException("Unknown frontend-adapter stream: " + streamName);
+            }
+            resolved.add(stream.get());
+        }
+        if (resolved.isEmpty()) {
+            throw new IllegalArgumentException("FRONTEND_ADAPTER_STREAMS must include at least one stream.");
+        }
+        return List.copyOf(resolved);
+    }
+
+    private static List<String> csv(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(raw.split(","))
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
+            .distinct()
+            .toList();
+    }
+
+    private static String value(Map<String, String> env, String key, String defaultValue) {
+        String value = env.get(key);
+        return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static int intValue(Map<String, String> env, String key, int defaultValue) {
+        return Integer.parseInt(value(env, key, Integer.toString(defaultValue)));
+    }
+
+    private static long longValue(Map<String, String> env, String key, long defaultValue) {
+        return Long.parseLong(value(env, key, Long.toString(defaultValue)));
+    }
+}

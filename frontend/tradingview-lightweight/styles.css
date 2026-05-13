@@ -1,0 +1,120 @@
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: #0e1116;
+    color: #d9e0e8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    height: 100%;
+}
+
+header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #1f2630;
+    background: #11161d;
+}
+
+header h1 {
+    font-size: 14px;
+    margin: 0 0 8px 0;
+    letter-spacing: 0.04em;
+    color: #9aa6b2;
+    text-transform: uppercase;
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+}
+
+.controls label {
+    display: inline-flex;
+    flex-direction: column;
+    font-size: 11px;
+    color: #7e8a98;
+    gap: 2px;
+}
+
+.controls input,
+.controls select {
+    background: #1a2029;
+    color: #e7eef6;
+    border: 1px solid #2a3340;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 13px;
+    min-width: 120px;
+}
+
+.controls button {
+    align-self: flex-end;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.controls button:hover { background: #1d4ed8; }
+.controls button:active { background: #1e40af; }
+
+main {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    height: calc(100vh - 130px);
+}
+
+#chart-container {
+    position: relative;
+    border-right: 1px solid #1f2630;
+}
+
+#live-panel {
+    padding: 12px 16px;
+    overflow-y: auto;
+    background: #11161d;
+}
+
+#live-panel h2 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: #9aa6b2;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#live-panel dl {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    row-gap: 6px;
+    margin: 0;
+    font-size: 13px;
+}
+
+#live-panel dt {
+    color: #7e8a98;
+    margin: 0;
+}
+
+#live-panel dd {
+    margin: 0;
+    color: #e7eef6;
+    font-variant-numeric: tabular-nums;
+}
+
+footer {
+    border-top: 1px solid #1f2630;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: #7e8a98;
+    background: #11161d;
+    min-height: 28px;
+}
+
+footer.error { color: #f87171; }
+footer.ok { color: #4ade80; }

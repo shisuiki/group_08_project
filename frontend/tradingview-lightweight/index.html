@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kalshi Frontend Adapter — TradingView Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Kalshi Frontend Adapter Demo</h1>
+        <div class="controls">
+            <label>
+                Adapter URL
+                <input id="adapter-url" type="text" value="http://127.0.0.1:8090" size="28" />
+            </label>
+            <label>
+                Symbol
+                <select id="symbol-select">
+                    <option value="">(loading...)</option>
+                </select>
+            </label>
+            <label>
+                Resolution
+                <select id="resolution-select">
+                    <option value="">(loading...)</option>
+                </select>
+            </label>
+            <label>
+                Lookback
+                <select id="lookback-select">
+                    <option value="900">15 min</option>
+                    <option value="3600" selected>1 h</option>
+                    <option value="21600">6 h</option>
+                    <option value="86400">24 h</option>
+                </select>
+            </label>
+            <button id="refresh-symbols" type="button">Reload Symbols</button>
+            <button id="load-history" type="button">Load</button>
+        </div>
+    </header>
+
+    <main>
+        <section id="chart-container" aria-label="candlestick chart"></section>
+
+        <aside id="live-panel">
+            <h2>Live BBO</h2>
+            <dl>
+                <dt>Symbol</dt><dd id="live-symbol">—</dd>
+                <dt>Bid</dt><dd id="live-bid">—</dd>
+                <dt>Ask</dt><dd id="live-ask">—</dd>
+                <dt>Midpoint</dt><dd id="live-midpoint">—</dd>
+                <dt>Event ts</dt><dd id="live-ts">—</dd>
+                <dt>Last update</dt><dd id="live-updated">—</dd>
+            </dl>
+        </aside>
+    </main>
+
+    <footer>
+        <span id="status-line" role="status">Idle</span>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
