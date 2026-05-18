@@ -1,5 +1,7 @@
 package edu.illinois.group8.cluster;
 
+import edu.illinois.group8.metrics.BackendMetrics;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -16,12 +18,36 @@ import io.aeron.driver.ThreadingMode;
  * Used for communication with the Aeron Cluster's ingress channels.
  */
 public class ClientClusterOrchestrator {
-    private final MediaDriver mediaDriver;
-    private final AeronCluster aeronCluster;
-    private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
+    static final int DEFAULT_MAX_OFFER_ATTEMPTS = 3;
+    static final String OFFER_FAILED_COUNTER = "cluster_ingress_offer_failed_total";
+    static final String DROPPED_COUNTER = "cluster_ingress_dropped_total";
+
+    private final IngressClient ingressClient;
+    private final IdleStrategy idleStrategy;
     private final MutableDirectBuffer buf = new ExpandableArrayBuffer();
+    private final int maxOfferAttempts;
+    private final BackendMetrics metrics;
 
     public ClientClusterOrchestrator(List<String> hostnames, String ip) {
+        this(connectCluster(hostnames, ip), new BackoffIdleStrategy(), DEFAULT_MAX_OFFER_ATTEMPTS, new BackendMetrics());
+    }
+
+    ClientClusterOrchestrator(
+        IngressClient ingressClient,
+        IdleStrategy idleStrategy,
+        int maxOfferAttempts,
+        BackendMetrics metrics
+    ) {
+        if (maxOfferAttempts <= 0) {
+            throw new IllegalArgumentException("maxOfferAttempts must be positive.");
+        }
+        this.ingressClient = ingressClient;
+        this.idleStrategy = idleStrategy;
+        this.maxOfferAttempts = maxOfferAttempts;
+        this.metrics = metrics;
+    }
+
+    private static IngressClient connectCluster(List<String> hostnames, String ip) {
         if (hostnames == null || hostnames.isEmpty()) {
             throw new IllegalArgumentException("At least one cluster hostname is required.");
         }
@@ -33,50 +59,102 @@ public class ClientClusterOrchestrator {
         String ingressEndpoints = sb.toString();
 
 
-        mediaDriver = MediaDriver.launchEmbedded(
+        MediaDriver mediaDriver = MediaDriver.launchEmbedded(
             new MediaDriver.Context()
                 .threadingMode(ThreadingMode.SHARED)
                 .dirDeleteOnStart(true)
                 .dirDeleteOnShutdown(true));
 
-        aeronCluster = AeronCluster.connect(
-            new AeronCluster.Context()
-                .messageTimeoutNs(TimeUnit.SECONDS.toNanos(10))
-                .egressListener((clusterSessionId, timestamp, buffer, offset, length, header)->{})
-                .ingressChannel("aeron:udp?endpoint="+hostnames.get(0)+":9002|term_length=64k")
-                .aeronDirectoryName(mediaDriver.aeronDirectoryName())
-                .egressChannel("aeron:udp?endpoint="+ip+":0|term_length=64k")
-                .ingressEndpoints(ingressEndpoints)
-        );
+        try {
+            AeronCluster aeronCluster = AeronCluster.connect(
+                new AeronCluster.Context()
+                    .messageTimeoutNs(TimeUnit.SECONDS.toNanos(10))
+                    .egressListener((clusterSessionId, timestamp, buffer, offset, length, header)->{})
+                    .ingressChannel("aeron:udp?endpoint="+hostnames.get(0)+":9002|term_length=64k")
+                    .aeronDirectoryName(mediaDriver.aeronDirectoryName())
+                    .egressChannel("aeron:udp?endpoint="+ip+":0|term_length=64k")
+                    .ingressEndpoints(ingressEndpoints)
+            );
+            return new AeronClusterIngressClient(mediaDriver, aeronCluster);
+        } catch (RuntimeException e) {
+            mediaDriver.close();
+            throw e;
+        }
     }
 
     public void close() {
-        aeronCluster.close();
-        mediaDriver.close();
+        ingressClient.close();
     }
 
     public synchronized boolean writeToCluster(byte[] message) {
         buf.putBytes(0, message);
-        idleStrategy.reset();
-        while (aeronCluster.offer(buf, 0, message.length) < 0) {
-            if (Thread.currentThread().isInterrupted()) {
-                return false;
-            }
-            idleStrategy.idle(aeronCluster.pollEgress());
-        }
-        return true;
+        return offerBounded(message.length);
     }
 
     public synchronized boolean writeToCluster(String message) {
-        buf.putBytes(0, message.getBytes());
+        byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
+        buf.putBytes(0, bytes);
+        return offerBounded(bytes.length);
+    }
+
+    private boolean offerBounded(int length) {
         idleStrategy.reset();
-        while (aeronCluster.offer(buf, 0, message.length()) < 0) {
+        for (int attempt = 0; attempt < maxOfferAttempts; attempt++) {
             if (Thread.currentThread().isInterrupted()) {
+                metrics.increment(DROPPED_COUNTER);
+                Thread.currentThread().interrupt();
                 return false;
             }
-            idleStrategy.idle(aeronCluster.pollEgress());
+            long result = ingressClient.offer(buf, 0, length);
+            if (result >= 0L) {
+                return true;
+            }
+            metrics.increment(OFFER_FAILED_COUNTER);
+            if (Thread.currentThread().isInterrupted()) {
+                metrics.increment(DROPPED_COUNTER);
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            if (attempt + 1 < maxOfferAttempts) {
+                idleStrategy.idle(ingressClient.pollEgress());
+            }
         }
-        return true;
+        metrics.increment(DROPPED_COUNTER);
+        return false;
+    }
+
+    interface IngressClient {
+        long offer(MutableDirectBuffer buffer, int offset, int length);
+
+        int pollEgress();
+
+        void close();
+    }
+
+    private static final class AeronClusterIngressClient implements IngressClient {
+        private final MediaDriver mediaDriver;
+        private final AeronCluster aeronCluster;
+
+        private AeronClusterIngressClient(MediaDriver mediaDriver, AeronCluster aeronCluster) {
+            this.mediaDriver = mediaDriver;
+            this.aeronCluster = aeronCluster;
+        }
+
+        @Override
+        public long offer(MutableDirectBuffer buffer, int offset, int length) {
+            return aeronCluster.offer(buffer, offset, length);
+        }
+
+        @Override
+        public int pollEgress() {
+            return aeronCluster.pollEgress();
+        }
+
+        @Override
+        public void close() {
+            aeronCluster.close();
+            mediaDriver.close();
+        }
     }
 
 }
