@@ -1,5 +1,6 @@
 package edu.illinois.group8;
 
+import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.config.BackendConfig;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.AsyncDbWriter;
@@ -120,6 +121,11 @@ class KalshiSystemTest {
 
         @Override
         public DbOfferResult offerCanonical(CanonicalDbEvent event) {
+            throw new UnsupportedOperationException("canonical writes are out of scope");
+        }
+
+        @Override
+        public DbOfferResult offerCanonicalEvent(CanonicalEvent event) {
             throw new UnsupportedOperationException("canonical writes are out of scope");
         }
 

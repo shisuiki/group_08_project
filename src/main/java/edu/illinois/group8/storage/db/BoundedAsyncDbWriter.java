@@ -1,5 +1,6 @@
 package edu.illinois.group8.storage.db;
 
+import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.metrics.BackendMetrics;
 
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
 
     private final AcceptedEventStore store;
     private final RawWsDbEventMapper rawMapper;
+    private final CanonicalDbEventMapper canonicalMapper;
     private final BlockingQueue<WriteRequest> queue;
     private final int queueCapacity;
     private final int batchSize;
@@ -61,6 +63,17 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
         BackendMetrics metrics,
         RawWsDbEventMapper rawMapper
     ) {
+        this(store, queueCapacity, batchSize, metrics, rawMapper, new CanonicalDbEventMapper());
+    }
+
+    BoundedAsyncDbWriter(
+        AcceptedEventStore store,
+        int queueCapacity,
+        int batchSize,
+        BackendMetrics metrics,
+        RawWsDbEventMapper rawMapper,
+        CanonicalDbEventMapper canonicalMapper
+    ) {
         if (queueCapacity <= 0) {
             throw new IllegalArgumentException("queueCapacity must be positive.");
         }
@@ -69,6 +82,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
         }
         this.store = Objects.requireNonNull(store, "store");
         this.rawMapper = Objects.requireNonNull(rawMapper, "rawMapper");
+        this.canonicalMapper = Objects.requireNonNull(canonicalMapper, "canonicalMapper");
         this.queueCapacity = queueCapacity;
         this.batchSize = batchSize;
         this.metrics = Objects.requireNonNull(metrics, "metrics");
@@ -102,11 +116,21 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     @Override
     public DbOfferResult offerCanonical(CanonicalDbEvent event) {
         Objects.requireNonNull(event, "event");
+        return offerCanonicalRequest(new CanonicalWrite(event));
+    }
+
+    @Override
+    public DbOfferResult offerCanonicalEvent(CanonicalEvent event) {
+        Objects.requireNonNull(event, "event");
+        return offerCanonicalRequest(new CanonicalEventWrite(event));
+    }
+
+    private DbOfferResult offerCanonicalRequest(WriteRequest request) {
         synchronized (lifecycleLock) {
             if (!accepting.get()) {
                 return DbOfferResult.DISABLED;
             }
-            if (!queue.offer(new CanonicalWrite(event))) {
+            if (!queue.offer(request)) {
                 canonicalDropped.incrementAndGet();
                 metrics.increment(CANONICAL_DROPPED_COUNTER);
                 updateQueueDepthGauge();
@@ -173,19 +197,22 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
 
     private void writeRequests(List<WriteRequest> requests) {
         List<RawWsDbEventInput> rawInputs = new ArrayList<>();
-        List<CanonicalDbEvent> canonicalEvents = new ArrayList<>();
+        List<CanonicalDbEvent> mappedCanonicalEvents = new ArrayList<>();
+        List<CanonicalEvent> canonicalEvents = new ArrayList<>();
         for (WriteRequest request : requests) {
             if (request instanceof RawWrite rawWrite) {
                 rawInputs.add(rawWrite.input());
             } else if (request instanceof CanonicalWrite canonicalWrite) {
-                canonicalEvents.add(canonicalWrite.event());
+                mappedCanonicalEvents.add(canonicalWrite.event());
+            } else if (request instanceof CanonicalEventWrite canonicalEventWrite) {
+                canonicalEvents.add(canonicalEventWrite.event());
             }
         }
         if (!rawInputs.isEmpty()) {
             writeRawBatch(rawInputs);
         }
-        if (!canonicalEvents.isEmpty()) {
-            writeCanonicalBatch(canonicalEvents);
+        if (!mappedCanonicalEvents.isEmpty() || !canonicalEvents.isEmpty()) {
+            writeCanonicalBatch(mappedCanonicalEvents, canonicalEvents);
         }
     }
 
@@ -203,11 +230,35 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
         }
     }
 
-    private void writeCanonicalBatch(List<CanonicalDbEvent> canonicalEvents) {
+    private void writeCanonicalBatch(
+        List<CanonicalDbEvent> mappedCanonicalEvents,
+        List<CanonicalEvent> canonicalEvents
+    ) {
+        if (!mappedCanonicalEvents.isEmpty()) {
+            writeMappedCanonicalBatch(mappedCanonicalEvents);
+        }
+        if (!canonicalEvents.isEmpty()) {
+            writeCanonicalEventBatch(canonicalEvents);
+        }
+    }
+
+    private void writeMappedCanonicalBatch(List<CanonicalDbEvent> canonicalEvents) {
         try {
             store.insertCanonicalBatch(List.copyOf(canonicalEvents));
             canonicalWritten.addAndGet(canonicalEvents.size());
             metrics.add(CANONICAL_WRITTEN_COUNTER, canonicalEvents.size());
+        } catch (Exception e) {
+            countFailedBatch(e);
+        }
+    }
+
+    private void writeCanonicalEventBatch(List<CanonicalEvent> canonicalEvents) {
+        try {
+            List<CanonicalDbEvent> dbEvents = new ArrayList<>(canonicalEvents.size());
+            for (CanonicalEvent canonicalEvent : canonicalEvents) {
+                dbEvents.add(canonicalMapper.toDbEvent(canonicalEvent));
+            }
+            writeMappedCanonicalBatch(dbEvents);
         } catch (Exception e) {
             countFailedBatch(e);
         }
@@ -230,5 +281,8 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     }
 
     private record CanonicalWrite(CanonicalDbEvent event) implements WriteRequest {
+    }
+
+    private record CanonicalEventWrite(CanonicalEvent event) implements WriteRequest {
     }
 }

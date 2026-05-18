@@ -1,5 +1,7 @@
 package edu.illinois.group8.storage.db;
 
+import edu.illinois.group8.canonical.CanonicalEvent;
+
 public final class DisabledAsyncDbWriter implements AsyncDbWriter {
     static final DisabledAsyncDbWriter INSTANCE = new DisabledAsyncDbWriter();
 
@@ -13,6 +15,11 @@ public final class DisabledAsyncDbWriter implements AsyncDbWriter {
 
     @Override
     public DbOfferResult offerCanonical(CanonicalDbEvent event) {
+        return DbOfferResult.DISABLED;
+    }
+
+    @Override
+    public DbOfferResult offerCanonicalEvent(CanonicalEvent event) {
         return DbOfferResult.DISABLED;
     }
 

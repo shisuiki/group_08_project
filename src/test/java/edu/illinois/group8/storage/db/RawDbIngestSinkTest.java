@@ -1,5 +1,7 @@
 package edu.illinois.group8.storage.db;
 
+import edu.illinois.group8.canonical.CanonicalEvent;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -118,6 +120,11 @@ class RawDbIngestSinkTest {
 
         @Override
         public DbOfferResult offerCanonical(CanonicalDbEvent event) {
+            throw new UnsupportedOperationException("canonical writes are out of scope");
+        }
+
+        @Override
+        public DbOfferResult offerCanonicalEvent(CanonicalEvent event) {
             throw new UnsupportedOperationException("canonical writes are out of scope");
         }
 
