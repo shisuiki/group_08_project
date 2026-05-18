@@ -10,6 +10,42 @@ mvn package -DskipTests
 
 If Maven is not installed locally, use the Maven Docker image or a temporary Maven distribution. The profiling CLI is packaged into the normal shaded jar.
 
+## Baseline Script
+
+Use the baseline script to build the shaded jar and run all four modes in a
+fixed order:
+
+```bash
+scripts/hot-path-baseline.sh
+```
+
+By default, the script writes raw profiler stdout to:
+
+```text
+target/hotpath-baselines/<timestamp>/
+```
+
+It creates one file per mode plus `summary.txt`, which records the timestamp,
+git commit, parameters, and output paths. Outputs under `target/` are ignored by
+Git.
+
+Configuration:
+
+- `HOTPATH_ITERATIONS`: measured messages per mode, default `100000`.
+- `HOTPATH_WARMUP`: warmup messages per mode, default `20000`.
+- `HOTPATH_MARKETS`: synthetic market count, default `1`.
+- `HOTPATH_OUTPUT_DIR`: output directory, default `target/hotpath-baselines/<timestamp>`.
+- `HOTPATH_PRINT_METRICS`: set to `true` to pass `--print-metrics`.
+
+For a quick smoke run:
+
+```bash
+HOTPATH_ITERATIONS=1000 \
+HOTPATH_WARMUP=100 \
+HOTPATH_OUTPUT_DIR=target/hotpath-baselines/test \
+scripts/hot-path-baseline.sh
+```
+
 ## Modes
 
 Run the profiler with:
