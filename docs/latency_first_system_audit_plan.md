@@ -40,13 +40,12 @@ Kalshi WebSocket
 
 ## Findings
 
-- [High] `ClientClusterOrchestrator.writeToCluster` blocks the WebSocket receive
-  path.
+- [High, resolved] `ClientClusterOrchestrator.writeToCluster` no longer retries
+  cluster ingress by default on the WebSocket receive path.
   Impact: cluster ingress backpressure stalls live ingestion.
-  Evidence: `writeToCluster` is `synchronized` and loops until
-  `aeronCluster.offer` succeeds.
-  Fix: bounded offer budget; on failure drop and count. Prefer one ingress
-  client per WebSocket shard or a non-shared buffer.
+  Status: live ingress now defaults to one Aeron offer and drops/counts on
+  failure. Prefer one ingress client per WebSocket shard or a non-shared buffer
+  as the next bottleneck reduction.
 
 - [High] The same message is parsed/copied too many times.
   Impact: avoidable latency and allocation.
@@ -148,11 +147,12 @@ Verification:
 
 Deliverables:
 
-- Replace unbounded `writeToCluster` wait with bounded offer budget.
-- Add `cluster_ingress_offer_failed_total`.
-- Add `cluster_ingress_dropped_total`.
-- Remove shared synchronized ingress bottleneck or use one ingress client per
-  WebSocket shard.
+- Landed: replace unbounded `writeToCluster` wait with default single-offer
+  drop-first ingress.
+- Landed: add `cluster_ingress_offer_failed_total`.
+- Landed: add `cluster_ingress_dropped_total`.
+- Remaining: remove shared synchronized ingress bottleneck or use one ingress
+  client per WebSocket shard.
 
 Verification:
 
@@ -311,17 +311,16 @@ Verification:
 
 Ranked by expected impact:
 
-1. Bounded Aeron offer with drop metrics instead of blocking.
-2. One ingress client per WebSocket shard.
-3. Remove JSON envelope double parse.
-4. Header-based tickerplant routing.
-5. Precomputed metric keys and sampled latency metrics.
-6. Fixed-point parser instead of `BigDecimal`.
-7. Primitive price-level order book.
-8. Binary canonical serialization for internal streams.
-9. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
+1. One ingress client per WebSocket shard.
+2. Remove JSON envelope double parse.
+3. Header-based tickerplant routing.
+4. Precomputed metric keys and sampled latency metrics.
+5. Fixed-point parser instead of `BigDecimal`.
+6. Primitive price-level order book.
+7. Binary canonical serialization for internal streams.
+8. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
    tickerplant, and DB writer.
-10. GC tuning only after allocation reductions are measured.
+9. GC tuning only after allocation reductions are measured.
 
 Do not start with GC flags, S3, or DB tuning. Current code-level allocation and
 blocking points are more obvious and cheaper to fix first.
@@ -348,7 +347,7 @@ Smallest useful slice:
 
 1. Add Maven Wrapper.
 2. Add perf baseline script for `HotPathProfileCli`.
-3. Change ingress publish to bounded non-blocking offer with drop metrics.
+3. Land default single-offer/drop-first ingress with drop metrics.
 4. Add `AsyncDbWriter` skeleton with bounded queue and drop metrics.
 5. Add DB migrations for `raw_ws_events` and `canonical_events`.
 6. Add tests for duplicate insert and queue overflow.

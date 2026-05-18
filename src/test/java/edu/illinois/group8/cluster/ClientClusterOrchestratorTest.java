@@ -13,40 +13,84 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientClusterOrchestratorTest {
     @Test
+    void defaultMaxOfferAttemptsIsDropFirst() {
+        assertEquals(1, ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS);
+    }
+
+    @Test
     void writeToClusterSucceedsImmediately() {
         BackendMetrics metrics = new BackendMetrics();
         FakeIngressClient ingressClient = new FakeIngressClient(1L);
-        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, metrics, 3);
+        RecordingIdleStrategy idleStrategy = new RecordingIdleStrategy();
+        ClientClusterOrchestrator orchestrator = orchestrator(
+            ingressClient,
+            idleStrategy,
+            metrics,
+            ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
+        );
 
         assertTrue(orchestrator.writeToCluster("ok".getBytes(StandardCharsets.UTF_8)));
 
         assertEquals(1, ingressClient.offerCalls);
+        assertEquals(0, ingressClient.pollEgressCalls);
+        assertEquals(0, idleStrategy.idleCalls);
+        assertEquals(0, idleStrategy.resetCalls);
         assertEquals(0L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
         assertEquals(0L, metrics.get(ClientClusterOrchestrator.DROPPED_COUNTER));
     }
 
     @Test
-    void writeToClusterDropsAfterBoundedFailures() {
+    void defaultWriteToClusterDropsAfterSingleOfferFailure() {
         BackendMetrics metrics = new BackendMetrics();
         FakeIngressClient ingressClient = new FakeIngressClient(-1L);
-        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, metrics, 3);
+        RecordingIdleStrategy idleStrategy = new RecordingIdleStrategy();
+        ClientClusterOrchestrator orchestrator = orchestrator(
+            ingressClient,
+            idleStrategy,
+            metrics,
+            ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
+        );
 
         assertFalse(orchestrator.writeToCluster("drop".getBytes(StandardCharsets.UTF_8)));
 
-        assertEquals(3, ingressClient.offerCalls);
-        assertEquals(3L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
+        assertEquals(1, ingressClient.offerCalls);
+        assertEquals(0, ingressClient.pollEgressCalls);
+        assertEquals(0, idleStrategy.idleCalls);
+        assertEquals(0, idleStrategy.resetCalls);
+        assertEquals(1L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
         assertEquals(1L, metrics.get(ClientClusterOrchestrator.DROPPED_COUNTER));
     }
 
     @Test
-    void continuousOfferFailureStopsAtFixedAttemptCount() {
+    void explicitBoundedRetryCanSucceedAfterPollingEgress() {
+        BackendMetrics metrics = new BackendMetrics();
+        FakeIngressClient ingressClient = new FakeIngressClient(-1L, 1L);
+        RecordingIdleStrategy idleStrategy = new RecordingIdleStrategy();
+        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, idleStrategy, metrics, 3);
+
+        assertTrue(orchestrator.writeToCluster("retry".getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals(2, ingressClient.offerCalls);
+        assertEquals(1, ingressClient.pollEgressCalls);
+        assertEquals(1, idleStrategy.idleCalls);
+        assertEquals(1, idleStrategy.resetCalls);
+        assertEquals(1L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
+        assertEquals(0L, metrics.get(ClientClusterOrchestrator.DROPPED_COUNTER));
+    }
+
+    @Test
+    void explicitBoundedRetryStopsAtFixedAttemptCount() {
         BackendMetrics metrics = new BackendMetrics();
         FakeIngressClient ingressClient = new FakeIngressClient(-1L);
-        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, metrics, 5);
+        RecordingIdleStrategy idleStrategy = new RecordingIdleStrategy();
+        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, idleStrategy, metrics, 5);
 
         assertFalse(orchestrator.writeToCluster("bounded".getBytes(StandardCharsets.UTF_8)));
 
         assertEquals(5, ingressClient.offerCalls);
+        assertEquals(4, ingressClient.pollEgressCalls);
+        assertEquals(4, idleStrategy.idleCalls);
+        assertEquals(1, idleStrategy.resetCalls);
         assertEquals(5L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
         assertEquals(1L, metrics.get(ClientClusterOrchestrator.DROPPED_COUNTER));
     }
@@ -55,7 +99,11 @@ class ClientClusterOrchestratorTest {
     void writeToClusterStringUsesUtf8ByteLength() {
         BackendMetrics metrics = new BackendMetrics();
         FakeIngressClient ingressClient = new FakeIngressClient(1L);
-        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, metrics, 3);
+        ClientClusterOrchestrator orchestrator = orchestrator(
+            ingressClient,
+            metrics,
+            ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
+        );
         String message = "é汉";
         byte[] expected = message.getBytes(StandardCharsets.UTF_8);
 
@@ -70,7 +118,13 @@ class ClientClusterOrchestratorTest {
         BackendMetrics metrics = new BackendMetrics();
         FakeIngressClient ingressClient = new FakeIngressClient(-1L);
         ingressClient.interruptAfterOffer = true;
-        ClientClusterOrchestrator orchestrator = orchestrator(ingressClient, metrics, 3);
+        RecordingIdleStrategy idleStrategy = new RecordingIdleStrategy();
+        ClientClusterOrchestrator orchestrator = orchestrator(
+            ingressClient,
+            idleStrategy,
+            metrics,
+            ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
+        );
 
         try {
             assertFalse(orchestrator.writeToCluster("interrupt".getBytes(StandardCharsets.UTF_8)));
@@ -79,7 +133,37 @@ class ClientClusterOrchestratorTest {
             Thread.interrupted();
         }
         assertEquals(1, ingressClient.offerCalls);
+        assertEquals(0, ingressClient.pollEgressCalls);
+        assertEquals(0, idleStrategy.idleCalls);
+        assertEquals(0, idleStrategy.resetCalls);
         assertEquals(1L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
+        assertEquals(1L, metrics.get(ClientClusterOrchestrator.DROPPED_COUNTER));
+    }
+
+    @Test
+    void alreadyInterruptedCallerDropsWithoutOfferingAndPreservesInterruptFlag() {
+        BackendMetrics metrics = new BackendMetrics();
+        FakeIngressClient ingressClient = new FakeIngressClient(1L);
+        RecordingIdleStrategy idleStrategy = new RecordingIdleStrategy();
+        ClientClusterOrchestrator orchestrator = orchestrator(
+            ingressClient,
+            idleStrategy,
+            metrics,
+            ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
+        );
+
+        Thread.currentThread().interrupt();
+        try {
+            assertFalse(orchestrator.writeToCluster("already-interrupted".getBytes(StandardCharsets.UTF_8)));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        assertEquals(0, ingressClient.offerCalls);
+        assertEquals(0, ingressClient.pollEgressCalls);
+        assertEquals(0, idleStrategy.idleCalls);
+        assertEquals(0, idleStrategy.resetCalls);
+        assertEquals(0L, metrics.get(ClientClusterOrchestrator.OFFER_FAILED_COUNTER));
         assertEquals(1L, metrics.get(ClientClusterOrchestrator.DROPPED_COUNTER));
     }
 
@@ -88,7 +172,16 @@ class ClientClusterOrchestratorTest {
         BackendMetrics metrics,
         int maxOfferAttempts
     ) {
-        return new ClientClusterOrchestrator(ingressClient, new NoopIdleStrategy(), maxOfferAttempts, metrics);
+        return orchestrator(ingressClient, new RecordingIdleStrategy(), metrics, maxOfferAttempts);
+    }
+
+    private static ClientClusterOrchestrator orchestrator(
+        FakeIngressClient ingressClient,
+        IdleStrategy idleStrategy,
+        BackendMetrics metrics,
+        int maxOfferAttempts
+    ) {
+        return new ClientClusterOrchestrator(ingressClient, idleStrategy, maxOfferAttempts, metrics);
     }
 
     private static final class FakeIngressClient implements ClientClusterOrchestrator.IngressClient {
@@ -126,17 +219,23 @@ class ClientClusterOrchestratorTest {
         }
     }
 
-    private static final class NoopIdleStrategy implements IdleStrategy {
+    private static final class RecordingIdleStrategy implements IdleStrategy {
+        private int idleCalls;
+        private int resetCalls;
+
         @Override
         public void idle(int workCount) {
+            idleCalls++;
         }
 
         @Override
         public void idle() {
+            idleCalls++;
         }
 
         @Override
         public void reset() {
+            resetCalls++;
         }
     }
 }

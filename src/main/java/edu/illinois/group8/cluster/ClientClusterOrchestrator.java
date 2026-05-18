@@ -18,7 +18,7 @@ import io.aeron.driver.ThreadingMode;
  * Used for communication with the Aeron Cluster's ingress channels.
  */
 public class ClientClusterOrchestrator {
-    static final int DEFAULT_MAX_OFFER_ATTEMPTS = 3;
+    static final int DEFAULT_MAX_OFFER_ATTEMPTS = 1;
     static final String OFFER_FAILED_COUNTER = "cluster_ingress_offer_failed_total";
     static final String DROPPED_COUNTER = "cluster_ingress_dropped_total";
 
@@ -98,7 +98,9 @@ public class ClientClusterOrchestrator {
     }
 
     private boolean offerBounded(int length) {
-        idleStrategy.reset();
+        if (maxOfferAttempts > 1) {
+            idleStrategy.reset();
+        }
         for (int attempt = 0; attempt < maxOfferAttempts; attempt++) {
             if (Thread.currentThread().isInterrupted()) {
                 metrics.increment(DROPPED_COUNTER);
