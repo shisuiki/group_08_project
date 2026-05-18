@@ -87,7 +87,7 @@ Authoritative normalized event log.
 Required columns:
 
 - `event_id text primary key`
-- `raw_event_id text references raw_ws_events(raw_event_id)`
+- `raw_event_id text`
 - `replay_id text`
 - `stream_name text not null`
 - `event_type text not null`
@@ -105,6 +105,11 @@ Indexes:
 - `(market_ticker, event_ts_ms)`
 - `(raw_event_id)`
 - `(replay_id)`
+
+`raw_event_id` is nullable linking metadata, not a foreign key. The DB writer is
+asynchronous and best-effort, so raw and canonical queues may drop independently
+or commit out of order. Enforcing an FK would turn a permitted gap or race into
+a canonical insert failure.
 
 ### `stream_offsets`
 
@@ -356,7 +361,7 @@ Exit criteria:
 
 Deliverables:
 
-- SQL migrations under `db/migrations`
+- SQL migrations under `src/main/resources/db/migration`
 - Docker Compose `timescaledb` service
 - migration runner script or Flyway/Liquibase plugin
 - tests for uniqueness and basic inserts
@@ -364,7 +369,8 @@ Deliverables:
 Exit criteria:
 
 - empty DB can be created from repo
-- `raw_ws_events`, `canonical_events`, and `latest_market_state` exist
+- V001 creates `raw_ws_events` and `canonical_events`
+- `latest_market_state` exists in a later migration
 - CI validates migrations
 
 ### Phase 2: Storage Interfaces
@@ -526,8 +532,8 @@ Add:
 
 ## Recommended First Batch
 
-1. Add DB migrations for `raw_ws_events`, `canonical_events`, and
-   `latest_market_state`.
+1. Add V001 migration for `raw_ws_events` and `canonical_events`.
+   Add `latest_market_state` in a later migration.
 2. Add Docker Compose TimescaleDB profile.
 3. Add `AsyncDbWriter` with bounded queues and batch insert.
 4. Add idempotency tests for raw/canonical inserts.
