@@ -48,8 +48,12 @@ Current core promise:
 Current code differs from the diagram:
 
 - Redshift/data warehouse writer is removed.
-- Durable storage is file/object based: `raw-ingest`, `canonical`, `raw-rest`.
-- Timescale/Postgres is only an optional raw replay source today.
+- Durable storage is mixed: live raw websocket accepted rows are DB-primary
+  through the async writer, and the canonical DB sink is wired in
+  `DataProcessor` / cluster runtime.
+- NDJSON/S3 remains for recording-capture, offline replay, debug, import, and
+  export workflows, not the live source of truth.
+- DB readers plus feature/frontend DB defaults remain migration work.
 - Current code adds raw replay, REST backfill, stream recorder, featureplant,
   frontend adapter, stream tap, Prometheus/Grafana, and profiling.
 
@@ -104,9 +108,12 @@ Internal tickerplant bus:
 
 ## Storage And Database
 
-Current source of truth is recording files, not a database.
+Live raw websocket accepted rows are DB-primary via the async writer, and
+canonical DB writes are wired in `DataProcessor` / cluster runtime. Recording
+files remain capture/offline/debug/import/export artifacts, not the live source
+of truth.
 
-Current durable layouts:
+Current recording/export layouts:
 
 ```text
 recordings/raw-ingest/source=kalshi.websocket/date=yyyy-mm-dd/hour=hh/minute=mm/events.ndjson
@@ -116,17 +123,21 @@ recordings/raw-rest/endpoint=<rest_endpoint>/date=yyyy-mm-dd/hour=hh/minute=mm/r
 
 Current database status:
 
-- Redshift/Postgres hot-path writers are removed.
-- Timescale/Postgres support exists only as a raw replay reader.
-- No complete DB migrations are present.
-- No canonical query schema is present.
+- Redshift hot-path writer is removed.
+- Postgres/Timescale support includes live raw writes, canonical DB sink
+  wiring, and raw replay reader support.
+- DB schema/runtime wiring exists for raw/canonical paths, but DB readers and
+  feature/frontend defaults are still migration work.
+- No canonical query reader path is present.
 - No persistent feature store schema is present.
 - No S3-to-Timescale loader is implemented in this repo.
 
-Planned database direction:
+Remaining database migration work:
 
-- Treat S3/file recordings as immutable event lake.
-- Load raw/canonical recordings into query stores such as TimescaleDB.
+- Keep S3/file recordings as recording-capture/offline/debug/import/export
+  artifacts.
+- Finish DB reader/query migration for raw/canonical data already written to
+  Timescale/Postgres, with import/export paths for recordings.
 - Add versioned feature storage behind FeaturePlant.
 - Add query APIs over feature/canonical storage.
 
@@ -169,12 +180,12 @@ Legend:
 | Order book state/top-of-book | current | no robust recovery after restart/gaps |
 | Source sequence monitor | current-basic | optional; semantics caveated in docs |
 | Tickerplant routing | current | JSON `stream_name` routing |
-| Raw websocket recording | current | `raw-ingest` source-of-truth files |
-| Canonical stream recording | current | downstream Aeron consumer recording |
+| Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
+| Canonical stream recording | current | canonical DB sink wired in `DataProcessor`/cluster runtime; downstream Aeron recording remains capture/offline/debug/export |
 | Raw REST recording | current | historical backfill audit trail |
 | S3 recording sync | current-basic | sidecar/script present |
 | Object-store loader/query backfill | planned | no full loader/query path |
-| Raw ingress replay | current-basic | local NDJSON and Timescale reader |
+| Raw ingress replay | current-basic | local NDJSON import/debug path and Timescale reader; live raw ingest is DB-primary |
 | Historical REST backfill | current-basic | writes raw-rest and canonical |
 | FeaturePlant runtime | skeleton | source + module dispatch exists |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
@@ -185,7 +196,7 @@ Legend:
 | Feature/query API | planned | `/features`, `/bars`, WS features absent |
 | Frontend adapter | current-demo | HTTP polling datafeed demo |
 | Replay viewer controls | planned | pause/resume/seek/speed absent |
-| Research CSV export | current-basic | recording source only |
+| Research CSV export | current-basic | recording/export path; DB-backed readers remain migration work |
 | Semantic parser/schema | planned | absent |
 | Ontology/chain builder | planned | absent |
 | Constraint engine | planned | absent |
@@ -325,6 +336,7 @@ Do not demo as completed:
 5. Add CI gates: `mvn test`, `mvn package`, Docker build, compose config.
 6. Add health smoke checks for frontend adapter, streamtap, recorder.
 7. Default HTTP admin endpoints to localhost or add auth.
-8. Define DB roadmap: recording lake -> loader -> Timescale schema -> query API.
+8. Define remaining DB migration: DB readers/query API, feature/frontend DB
+   defaults, and recording import/export boundaries.
 9. Decide whether to split Maven modules or at least enforce package boundaries.
 10. Mark semantic/pricing/arb modules as future work only.

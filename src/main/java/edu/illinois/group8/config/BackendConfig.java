@@ -32,8 +32,7 @@ public record BackendConfig(
     String hostIp,
     String baseDir,
     int clusterPortBase,
-    String aeronChannel,
-    String recordingPartitionGranularity
+    String aeronChannel
 ) {
     public static final String PROFILE_LOCAL = "local";
     public static final String PROFILE_DOCKER = "docker";
@@ -76,8 +75,7 @@ public record BackendConfig(
             value(env, properties, "IP", "127.0.0.1"),
             baseDir,
             intValue(env, properties, "CLUSTER_PORT_BASE", 9000),
-            value(env, properties, "AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456"),
-            value(env, properties, "BACKEND_RECORDING_PARTITION_GRANULARITY", "minute")
+            value(env, properties, "AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456")
         );
     }
 
@@ -223,6 +221,5 @@ public record BackendConfig(
         hostIp = Objects.requireNonNullElse(hostIp, "127.0.0.1");
         baseDir = Objects.requireNonNullElse(baseDir, "/app");
         aeronChannel = Objects.requireNonNullElse(aeronChannel, "aeron:udp?endpoint=0.0.0.0:40456");
-        recordingPartitionGranularity = Objects.requireNonNullElse(recordingPartitionGranularity, "minute");
     }
 }
