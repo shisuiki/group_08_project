@@ -10,7 +10,7 @@ as the target for the next migration step, but the live canonical writer from
 
 For new live ingestion, `raw_ws_events` is the primary replay/audit table. It
 stores the exact websocket payload string with receive timestamps, connection
-id, sequence, source, capture id, payload hash, and ingest status.
+id, connection sequence, source, capture id, payload hash, and ingest status.
 
 The legacy/capture NDJSON layout is:
 
@@ -33,7 +33,7 @@ When raw inputs are selected from TimescaleDB for replay,
 - `raw_payload`
 - `receive_ts_ns`
 - `connection_id`
-- `sequence`
+- `connection_sequence`
 - `raw_event_id`
 - `market_ticker`
 

@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 public record RawIngressReplayConfig(
@@ -32,16 +33,19 @@ public record RawIngressReplayConfig(
     boolean dryRun,
     String replayId
 ) {
+    public static final String DEFAULT_RAW_TABLE = "raw_ws_events";
+    public static final String DEFAULT_SEQUENCE_COLUMN = "connection_sequence";
+
     public RawIngressReplayConfig {
         source = blankToDefault(source, "timescale");
         databaseUrl = blankToDefault(databaseUrl, "");
         databaseUser = blankToDefault(databaseUser, "");
         databasePassword = blankToDefault(databasePassword, "");
-        rawTable = blankToDefault(rawTable, "raw_ingest_events");
+        rawTable = blankToDefault(rawTable, DEFAULT_RAW_TABLE);
         rawPayloadColumn = blankToDefault(rawPayloadColumn, "raw_payload");
         receiveTsNsColumn = blankToDefault(receiveTsNsColumn, "receive_ts_ns");
         connectionIdColumn = blankToDefault(connectionIdColumn, "connection_id");
-        sequenceColumn = blankToDefault(sequenceColumn, "sequence");
+        sequenceColumn = blankToDefault(sequenceColumn, DEFAULT_SEQUENCE_COLUMN);
         rawEventIdColumn = blankToDefault(rawEventIdColumn, "raw_event_id");
         marketTickerColumn = blankToDefault(marketTickerColumn, "market_ticker");
         mode = mode == null ? RawReplayMode.AS_FAST_AS_POSSIBLE : mode;
@@ -54,7 +58,11 @@ public record RawIngressReplayConfig(
     }
 
     public static RawIngressReplayConfig fromEnvironment() {
-        Map<String, String> env = System.getenv();
+        return from(System.getenv());
+    }
+
+    static RawIngressReplayConfig from(Map<String, String> env) {
+        Objects.requireNonNull(env, "env");
         String baseDir = value(env, "BASE_DIR", "/app");
         return new RawIngressReplayConfig(
             value(env, "RAW_REPLAY_SOURCE", "timescale"),
@@ -62,11 +70,11 @@ public record RawIngressReplayConfig(
             firstValue(env, "", "RAW_REPLAY_DATABASE_URL", "RAW_REPLAY_DB_URL", "TIMESCALEDB_URL"),
             firstValue(env, "", "RAW_REPLAY_DATABASE_USER", "RAW_REPLAY_DB_USER", "TIMESCALEDB_USER"),
             firstValue(env, "", "RAW_REPLAY_DATABASE_PASSWORD", "RAW_REPLAY_DB_PASSWORD", "TIMESCALEDB_PASSWORD"),
-            value(env, "RAW_REPLAY_TABLE", "raw_ingest_events"),
+            value(env, "RAW_REPLAY_TABLE", DEFAULT_RAW_TABLE),
             value(env, "RAW_REPLAY_RAW_PAYLOAD_COLUMN", "raw_payload"),
             value(env, "RAW_REPLAY_RECEIVE_TS_NS_COLUMN", "receive_ts_ns"),
             value(env, "RAW_REPLAY_CONNECTION_ID_COLUMN", "connection_id"),
-            value(env, "RAW_REPLAY_SEQUENCE_COLUMN", "sequence"),
+            value(env, "RAW_REPLAY_SEQUENCE_COLUMN", DEFAULT_SEQUENCE_COLUMN),
             value(env, "RAW_REPLAY_RAW_EVENT_ID_COLUMN", "raw_event_id"),
             value(env, "RAW_REPLAY_MARKET_TICKER_COLUMN", "market_ticker"),
             mode(value(env, "RAW_REPLAY_MODE", "as-fast-as-possible")),
@@ -224,7 +232,8 @@ public record RawIngressReplayConfig(
               --db-url=jdbc:postgresql://host:5432/db
               --db-user=user
               --db-password=password
-              --table=raw_ingest_events
+              --table=raw_ws_events
+              --sequence-column=connection_sequence
               --local-root=/path/to/raw-ingest
 
             Exact selection:
