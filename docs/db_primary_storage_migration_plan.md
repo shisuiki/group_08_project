@@ -527,6 +527,8 @@ Add:
 4. Should raw payload be stored as JSONB only, text only, or both?
 5. Should feature store be normalized columns, JSONB, or hybrid?
 6. Should S3 archive export be retained at all after DB migration?
+7. Should the store API report inserted versus duplicate rows, or should duplicate
+   accounting stay in the later JDBC integration layer?
 
 ## Recommended First Batch
 
