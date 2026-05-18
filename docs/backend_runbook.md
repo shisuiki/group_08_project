@@ -2,9 +2,9 @@
 
 ## Replay
 
-Raw replay selects exact raw websocket payloads from the canonical raw
-source-of-truth store and injects them back into cluster ingress. In production
-that store is TimescaleDB loaded from the S3-backed raw recordings.
+Raw replay selects exact raw websocket payloads from DB/Timescale raw ingest
+and injects them back into cluster ingress. S3-backed NDJSON remains a legacy
+archive/import/debug source, not the default production replay store.
 
 ```bash
 java -cp target/kalshi-project-1.0-SNAPSHOT.jar \
@@ -45,6 +45,11 @@ cp .env.example .env
 docker compose --profile cluster-live up --build
 ```
 
+`cluster-live` starts the live cluster, websocket client, and stream tap. It
+does not start the NDJSON stream recorder or S3 sync sidecar, and the live
+`wsclient` does not mount the raw file recorder path. DB raw ingest is the live
+raw storage path.
+
 For whole-open-market capture, set `KALSHI_MARKET_SELECTION_MODE=open_markets`.
 The client pages through Kalshi `GET /markets?status=open`, subscribes `ticker`,
 `trade`, and `market_lifecycle_v2` without market filters, and chunks
@@ -63,17 +68,17 @@ values are scoped to an individual websocket connection, so source-sequence
 monitoring should only be enabled for feeds where per-connection sequence
 semantics are understood.
 `BACKEND_ORDERBOOK_DERIVED_ENABLED=false` disables derived top-of-book and book
-state gap generation while preserving the normalized canonical recorder streams.
+state gap generation while preserving the normalized canonical public streams.
 Use it for high-volume recorder soak tests when storage fidelity matters more
 than live derived book analytics.
 
-For EC2 recorder-only soak tests, use the `recording-capture` compose profile.
-It starts a single Aeron cluster member, `wsclient-capture`, the stream recorder,
-and the S3 sync sidecar without stream tap, Prometheus, Grafana, or downstream
+For EC2 recorder-only soak tests or export soaks, use the explicit
+`recording-capture` compose profile. It starts a single Aeron cluster member,
+`wsclient-capture`, the raw file recorder wiring, the stream recorder, and the
+S3 sync sidecar without stream tap, Prometheus, Grafana, or downstream
 feature/query modules.
 
-The source-of-truth replay log is the raw websocket capture, not the downstream
-stream recorder. Enable:
+For `recording-capture`, enable:
 
 - `RAW_INGEST_RECORDER_ENABLED=true`
 - `RAW_INGEST_RECORDER_ROOT=/app/recordings/raw-ingest`
@@ -81,7 +86,7 @@ stream recorder. Enable:
 - `STREAM_RECORDER_STREAMS=all-normalized`
 - `STREAM_RECORDER_TIMESTAMP_SOURCE=ptp_system_clock`
 
-This produces the key storage views:
+This produces the key NDJSON capture views:
 
 - `raw-ingest`: exact inbound Kalshi websocket JSON as seen by `wsclient`, with
   receive PTP timestamps, before cluster injection. The websocket receive
@@ -92,10 +97,10 @@ This produces the key storage views:
   Use this for e2e latency and stream-fidelity measurement.
 - `raw-rest`: exact REST responses recorded by historical backfill runs.
 
-The downstream `stream-recorder` is the correct place to measure live
-end-to-end latency from websocket receipt to Aeron-client receipt. Raw replay
-remains the authoritative full-path replay source because it exercises parser
-and cluster ingress again.
+The downstream `stream-recorder` is the correct place to measure
+recording-capture end-to-end latency from websocket receipt to Aeron-client
+receipt. DB raw ingest remains the authoritative full-path replay source for
+new live captures because replay exercises parser and cluster ingress again.
 
 ```bash
 docker compose --env-file .env --profile cluster-live --profile observability stop \
@@ -104,7 +109,7 @@ docker compose --env-file .env --profile recording-capture up -d --build \
   node0-capture stream-recorder s3-recording-sync wsclient-capture
 ```
 
-For S3-backed whole-universe capture, set:
+For `recording-capture` S3-backed whole-universe archive/export, set:
 
 - `S3_RECORDING_SUBTREES=canonical,raw-ingest,raw-rest`
 - `S3_DELETE_AFTER_UPLOAD=true`
@@ -173,9 +178,20 @@ Actions:
 - Compare the raw payload against `docs/backend_schema_gap_report.md`.
 - Add or update a parser fixture before changing parser behavior.
 
-### S3 Recording Outage
+### DB Writer Backlog Or Drop
 
-Symptoms: `s3-recording-sync` upload failures or local disk growth.
+Symptoms: DB writer queue metrics show sustained backlog or dropped raw input.
+
+Actions:
+
+- Keep cluster ingress running while sizing queue capacity and DB throughput.
+- Check `DB_WRITER_*` settings and database connectivity.
+- Use bounded raw replay from DB once the writer is healthy.
+
+### Recording-Capture S3 Outage
+
+Symptoms: `s3-recording-sync` upload failures or local disk growth in the
+`recording-capture` profile.
 
 Actions:
 
@@ -195,6 +211,8 @@ Actions:
 
 ## Graceful Shutdown
 
-Use container stop or process interruption. The raw-ingest and canonical
-recorders write one event per line and close file handles per append, so
-completed lines are durable without a separate flush command.
+Use container stop or process interruption. DB committed rows are the primary
+durability boundary for live storage. In `recording-capture` or local NDJSON
+debug runs, the raw-ingest and canonical recorders write one event per line and
+close file handles per append, so completed lines are durable without a
+separate flush command.

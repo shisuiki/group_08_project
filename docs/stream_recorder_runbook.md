@@ -6,12 +6,17 @@
 /app/recordings/canonical/stream=<stream_name>/date=<utc-date>/hour=<hh>/events.ndjson
 ```
 
-Set `STREAM_RECORDER_PARTITION_GRANULARITY=minute` to add a `minute=<mm>` partition between `hour=<hh>` and `events.ndjson`. That is the better setting for S3-backed query stores because active files become stable and uploadable within roughly one minute instead of waiting for an hour boundary.
+Set `STREAM_RECORDER_PARTITION_GRANULARITY=minute` to add a `minute=<mm>` partition between `hour=<hh>` and `events.ndjson`. That is the better setting for S3-backed archive/export runs because active files become stable and uploadable within roughly one minute instead of waiting for an hour boundary.
 
-Featureplant and query/export modules can use this directory as a historical
-source. In live capture, it reflects what a real Aeron consumer observed. In
-REST backfill, `HistoricalBackfillCli` writes parsed canonical events into the
-same layout.
+`stream-recorder` is not part of the default `cluster-live` profile. Start it
+explicitly with `recording-capture` for recorder soak/export runs, or with
+`observability` when Prometheus needs recorder metrics.
+
+DB/Timescale is the default historical source for live data. Featureplant and
+query/export modules may still use this directory for legacy archive/import or
+debug workflows. In recording capture, it reflects what a real Aeron consumer
+observed. In REST backfill, `HistoricalBackfillCli` can write parsed canonical
+events into the same layout.
 
 ## Configuration
 
@@ -32,8 +37,9 @@ same layout.
 
 The stream recorder is intentionally downstream from the normalized tickerplant
 streams. It measures and archives what any Aeron consumer sees. It is not the
-authoritative raw replay source; use `raw-ingest` recordings for end-to-end
-replay through cluster ingress.
+authoritative raw replay source; use DB/Timescale raw ingest for new live
+end-to-end replay through cluster ingress. `raw-ingest` files are retained for
+capture, legacy import, local fixtures, and debug.
 - `S3_UPLOAD_INTERVAL_SECONDS`: default `60`.
 - `S3_UPLOAD_MIN_AGE_SECONDS`: default `120`; avoids uploading actively written files.
 
@@ -44,7 +50,8 @@ s3://<bucket>/<prefix>/canonical/stream=canonical.trade/date=2026-05-03/hour=10/
 s3://<bucket>/<prefix>/canonical/stream=canonical.trade/date=2026-05-03/hour=10/minute=15/events.ndjson.gz
 ```
 
-S3 should be treated as the durable event lake. Query stores such as TimescaleDB should load from this bucket instead of subscribing directly to the tickerplant.
+S3 should be treated as optional cold archive/export for recorder profiles.
+TimescaleDB is the primary live query, audit, and replay store.
 
 ## Endpoints
 
@@ -63,9 +70,10 @@ The recorder annotates each stored event with `recorder_metadata`:
 - `storage_commit_ts_ns`
 
 Recorded canonical storage is historical input for featureplant, visualization,
-backtesting, and research export. Full end-to-end replay uses
-`edu.illinois.group8.replay.raw.RawIngressReplayCli` against the raw
-source-of-truth store.
+backtesting, and research export when those workflows explicitly choose NDJSON.
+Full end-to-end replay defaults to `edu.illinois.group8.replay.raw.RawIngressReplayCli`
+against DB/Timescale raw ingest; local NDJSON replay is explicit
+fixture/import/debug mode.
 
 ## Verification
 

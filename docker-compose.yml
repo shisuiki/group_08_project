@@ -180,14 +180,6 @@ services:
       DB_WRITER_BATCH_SIZE: ${DB_WRITER_BATCH_SIZE:-500}
       DB_WRITER_RAW_SOURCE: ${DB_WRITER_RAW_SOURCE:-kalshi.websocket}
       DB_WRITER_RAW_CAPTURE_ID: ${DB_WRITER_RAW_CAPTURE_ID:-live}
-      RAW_INGEST_RECORDER_ENABLED: ${RAW_INGEST_RECORDER_ENABLED:-false}
-      RAW_INGEST_RECORDER_ROOT: ${RAW_INGEST_RECORDER_ROOT:-/app/recordings/raw-ingest}
-      RAW_INGEST_RECORDER_SOURCE: ${RAW_INGEST_RECORDER_SOURCE:-kalshi.websocket}
-      RAW_INGEST_RECORDER_CAPTURE_ID: ${RAW_INGEST_RECORDER_CAPTURE_ID:-live}
-      RAW_INGEST_RECORDER_QUEUE_CAPACITY: ${RAW_INGEST_RECORDER_QUEUE_CAPACITY:-250000}
-      RAW_INGEST_RECORDER_DROP_ON_FULL: ${RAW_INGEST_RECORDER_DROP_ON_FULL:-true}
-      RAW_INGEST_RECORDER_PARTITION_GRANULARITY: ${RAW_INGEST_RECORDER_PARTITION_GRANULARITY:-minute}
-      RAW_INGEST_RECORDER_TIMESTAMP_SOURCE: ${RAW_INGEST_RECORDER_TIMESTAMP_SOURCE:-system_nano}
       EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
       ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     networks:
@@ -195,7 +187,6 @@ services:
         ipv4_address: ${WSCLIENT_IP:-172.20.0.6}
     volumes:
       - ${KALSHI_KEY_HOST_PATH:-./secrets/kalshi_private_key}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
-      - ./recordings:/app/recordings
     shm_size: "2gb"
     command: >
       sh -c "sleep $${WSCLIENT_START_DELAY_SECONDS:-20}; java -cp /app/app.jar edu.illinois.group8.KalshiSystem"
@@ -362,7 +353,7 @@ services:
 
   stream-recorder:
     build: .
-    profiles: ["cluster-live", "recording-capture", "observability"]
+    profiles: ["recording-capture", "observability"]
     restart: unless-stopped
     environment:
       BASE_DIR: /app
@@ -393,7 +384,7 @@ services:
       context: .
       dockerfile: ops/docker/s3-recording-sync.Dockerfile
     image: group_08_project-s3-recording-sync
-    profiles: ["cluster-live", "recording-capture"]
+    profiles: ["recording-capture"]
     depends_on:
       - stream-recorder
     restart: unless-stopped

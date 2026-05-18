@@ -1,12 +1,17 @@
 # Backend Storage Schema
 
-The durable storage path is file/object based. The hot path no longer writes to
-Redshift/Postgres and the old database writer packages have been removed.
+New live storage is DB-primary. The async DB writer stores accepted raw
+websocket input in `raw_ws_events` and canonical market data in
+`canonical_events`. File layouts under `recordings/` remain for
+`recording-capture`, legacy archive/import, local fixtures, and debug exports.
 
 ## Raw Ingest
 
-`raw-ingest` is the source of truth for full replay. It is written by the
-websocket client before parsing or cluster injection.
+For new live ingestion, `raw_ws_events` is the primary replay/audit table. It
+stores the exact websocket payload string with receive timestamps, connection
+id, sequence, source, capture id, payload hash, and ingest status.
+
+The legacy/capture NDJSON layout is:
 
 ```text
 recordings/raw-ingest/
@@ -18,10 +23,11 @@ recordings/raw-ingest/
 ```
 
 Each line contains the exact inbound websocket payload plus receive timestamps,
-connection id, sequence, capture id, and payload hash.
+connection id, sequence, capture id, and payload hash. This file layout is not
+the `cluster-live` source of truth.
 
-When raw recordings are loaded into TimescaleDB for replay, `RawIngressReplayCli`
-expects a row shape equivalent to:
+When raw inputs are selected from TimescaleDB for replay,
+`RawIngressReplayCli` expects a row shape equivalent to:
 
 - `raw_payload`
 - `receive_ts_ns`
@@ -36,10 +42,14 @@ receive timestamp, market ticker, or raw event id.
 
 ## Downstream Canonical
 
-`canonical` is written by `TickerplantStreamRecorder`, which subscribes to the
-tickerplant exactly as a downstream Aeron client would. This is the normalized
-storage view used for consumer-latency measurement, stream-fidelity checks,
-featureplant replay, visualization, backtests, and research exports.
+For new live ingestion, `canonical_events` is the primary normalized DB table
+for readers that need durable canonical market data.
+
+`recordings/canonical` is written by `TickerplantStreamRecorder`, which
+subscribes to the tickerplant exactly as a downstream Aeron client would. This
+NDJSON view is used for recording-capture archives, consumer-latency
+measurement, stream-fidelity checks, import/debug workflows, and retained
+legacy feature/research exports.
 
 ```text
 recordings/canonical/
@@ -78,7 +88,7 @@ layout as the downstream stream recorder.
 ## Replay
 
 Use `edu.illinois.group8.replay.raw.RawIngressReplayCli` to replay raw
-websocket payloads through cluster ingress. Production replay selects exact raw
-events from the canonical raw source-of-truth store, usually TimescaleDB loaded
-from S3-backed raw recordings. The local NDJSON adapter remains available only
-for development fixtures with `RAW_REPLAY_SOURCE=local-ndjson`.
+websocket payloads through cluster ingress. Production replay defaults to exact
+raw events from DB/Timescale raw ingest. S3-backed NDJSON is an archive/import
+source, and the local NDJSON adapter remains available only for fixtures,
+imports, and debug with `RAW_REPLAY_SOURCE=local-ndjson`.

@@ -421,6 +421,7 @@ Failure tests:
 Exit criteria:
 
 - live publication is not blocked by DB
+- `cluster-live` no longer starts the NDJSON/S3 recorder path by default
 - dropped DB writes are visible in metrics
 - duplicate raw writes produce one DB row
 
