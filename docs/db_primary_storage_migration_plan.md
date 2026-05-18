@@ -534,6 +534,11 @@ DB writer configuration is parsed in one place and defaults to disabled:
 - `DB_WRITER_QUEUE_CAPACITY` default `250000`
 - `DB_WRITER_BATCH_SIZE` default `500`
 
+These settings are plumbed through `.env.example`, Docker Compose, and the EC2
+deploy workflow. EC2 deployments read `DB_WRITER_DATABASE_PASSWORD` from the
+optional GitHub secret of the same name. The writer remains disabled unless
+`DB_WRITER_ENABLED=true`.
+
 ## Open Decisions
 
 1. What queue capacity is acceptable before DB writes are dropped?
