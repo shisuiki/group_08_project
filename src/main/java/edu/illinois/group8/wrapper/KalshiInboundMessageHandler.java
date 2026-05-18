@@ -52,6 +52,9 @@ final class KalshiInboundMessageHandler {
     }
 
     private void handleAck(String rawPayload) {
+        if (!ackCallbacks.shouldParseInboundAcks()) {
+            return;
+        }
         try {
             JSONObject data = (JSONObject) new JSONParser().parse(rawPayload);
             String type = (String) data.get("type");
@@ -95,6 +98,10 @@ final class KalshiInboundMessageHandler {
     }
 
     interface AckCallbacks {
+        default boolean shouldParseInboundAcks() {
+            return true;
+        }
+
         void onError(Long id, Long code, String message);
 
         void onSubscribed(Long id, Long sid);

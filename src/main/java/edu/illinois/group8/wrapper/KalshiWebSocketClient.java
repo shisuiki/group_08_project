@@ -299,6 +299,11 @@ public class KalshiWebSocketClient extends WebSocketClient {
 
     private final class KalshiAckCallbacks implements KalshiInboundMessageHandler.AckCallbacks {
         @Override
+        public boolean shouldParseInboundAcks() {
+            return !subscriptionAcks.isEmpty() || !updateAcks.isEmpty();
+        }
+
+        @Override
         public void onError(Long id, Long code, String message) {
             System.out.println("Received Kalshi error code " + code + ": " + message);
             completeAckExceptionally(id, "Kalshi error code " + code + ": " + message);

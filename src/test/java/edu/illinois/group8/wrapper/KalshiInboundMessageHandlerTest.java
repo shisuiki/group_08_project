@@ -56,6 +56,23 @@ class KalshiInboundMessageHandlerTest {
     }
 
     @Test
+    void disabledAckParsingStillRunsClusterAndSideChannelsWithoutAckCallbacks() {
+        RecordingDeps deps = new RecordingDeps();
+        deps.shouldParseInboundAcks = false;
+        KalshiInboundMessageHandler handler = deps.handler();
+
+        handler.handleInbound("{\"type\":\"subscribed\",\"id\":17,\"msg\":{\"sid\":44}}", RECEIVE_TS_NS, RECEIVE_WALL_TS);
+        handler.handleInbound("{\"type\":\"ok\",\"id\":18}", RECEIVE_TS_NS, RECEIVE_WALL_TS);
+        handler.handleInbound("{bad", RECEIVE_TS_NS, RECEIVE_WALL_TS);
+
+        assertEquals(List.of("cluster", "raw", "rawDb", "cluster", "raw", "rawDb", "cluster", "raw", "rawDb"), deps.order);
+        assertEquals(3, deps.clusterPayloads.size());
+        assertEquals(0, deps.subscribedCallbacks.size());
+        assertEquals(0, deps.okCallbacks.size());
+        assertEquals(0, deps.errorCallbacks.size());
+    }
+
+    @Test
     void rawDbRecorderExceptionDoesNotEscapeOrBlockAckCallbacks() {
         RecordingDeps deps = new RecordingDeps();
         deps.throwRawDb = true;
@@ -172,6 +189,7 @@ class KalshiInboundMessageHandlerTest {
         private final List<ErrorCallback> errorCallbacks = new ArrayList<>();
         private boolean throwRaw;
         private boolean throwRawDb;
+        private boolean shouldParseInboundAcks = true;
 
         private KalshiInboundMessageHandler handler() {
             return handler((rawPayload, receiveTsNs, receiveWallTs) -> {
@@ -201,6 +219,11 @@ class KalshiInboundMessageHandlerTest {
                 },
                 rawDbRecorder,
                 new KalshiInboundMessageHandler.AckCallbacks() {
+                    @Override
+                    public boolean shouldParseInboundAcks() {
+                        return RecordingDeps.this.shouldParseInboundAcks;
+                    }
+
                     @Override
                     public void onError(Long id, Long code, String message) {
                         order.add("error");
