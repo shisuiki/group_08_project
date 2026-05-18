@@ -188,10 +188,10 @@ class AsyncDbWriterTest {
             );
 
             assertEventually(
-                () -> writer.stats().failedBatches() == 1L,
+                () -> writer.stats().failedBatches() == 1L
+                    && metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER) == 1L,
                 "failed store batch should be counted by the worker"
             );
-            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER));
             assertEquals(0L, writer.stats().rawWritten());
         }
     }
@@ -207,10 +207,10 @@ class AsyncDbWriterTest {
             );
 
             assertEventually(
-                () -> writer.stats().failedBatches() == 1L,
+                () -> writer.stats().failedBatches() == 1L
+                    && metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER) == 1L,
                 "failed mapper batch should be counted by the worker"
             );
-            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER));
             assertEquals(0L, writer.stats().rawWritten());
             assertEquals(0, store.rawInsertCalls);
         }
@@ -226,10 +226,11 @@ class AsyncDbWriterTest {
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("canonical-after-raw-failure")));
 
             assertEventually(
-                () -> writer.stats().failedBatches() == 1L && writer.stats().canonicalWritten() == 1L,
+                () -> writer.stats().failedBatches() == 1L
+                    && writer.stats().canonicalWritten() == 1L
+                    && metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER) == 1L,
                 "raw mapper failure should not prevent canonical writes from the worker"
             );
-            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER));
             assertEquals(
                 List.of("canonical-after-raw-failure"),
                 store.canonicalEvents.stream().map(CanonicalDbEvent::eventId).toList()
@@ -254,14 +255,15 @@ class AsyncDbWriterTest {
             store.releaseRaw.countDown();
 
             assertEventually(
-                () -> writer.stats().failedBatches() == 1L && writer.stats().canonicalWritten() == 1L,
+                () -> writer.stats().failedBatches() == 1L
+                    && writer.stats().canonicalWritten() == 1L
+                    && metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER) == 1L,
                 "canonical mapper failure should not prevent pre-mapped canonical writes"
             );
             assertEquals(
                 List.of("mapped-canonical-ok"),
                 store.canonicalEvents.stream().map(CanonicalDbEvent::eventId).toList()
             );
-            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER));
             assertEquals(1L, metrics.get(BoundedAsyncDbWriter.CANONICAL_WRITTEN_COUNTER));
         }
     }
