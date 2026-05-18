@@ -69,7 +69,7 @@ Required columns:
 - `source_channel text`
 - `source_sequence bigint`
 - `payload_sha256 text not null`
-- `raw_payload jsonb not null`
+- `raw_payload text not null`
 - `ingest_status text not null default 'stored'`
 - `created_at timestamptz not null default now()`
 
@@ -79,6 +79,10 @@ Indexes:
 - `(market_ticker, receive_ts_ns)`
 - `(connection_id, connection_sequence)`
 - unique `(payload_sha256, receive_ts_ns, connection_id, connection_sequence)`
+
+`raw_payload` stores the exact websocket payload string as text so audit rows can
+preserve malformed or non-JSON input. Parsed metadata lives in dedicated columns;
+canonical event payloads remain JSONB.
 
 ### `canonical_events`
 
@@ -535,10 +539,9 @@ DB writer configuration is parsed in one place and defaults to disabled:
 1. What queue capacity is acceptable before DB writes are dropped?
 2. Should DB writer drop newest or oldest events when full?
 3. Is replay allowed to update latest state in any mode?
-4. Should raw payload be stored as JSONB only, text only, or both?
-5. Should feature store be normalized columns, JSONB, or hybrid?
-6. Should S3 archive export be retained at all after DB migration?
-7. Should the store API report inserted versus duplicate rows, or should duplicate
+4. Should feature store be normalized columns, JSONB, or hybrid?
+5. Should S3 archive export be retained at all after DB migration?
+6. Should the store API report inserted versus duplicate rows, or should duplicate
    accounting stay in the later JDBC integration layer?
 
 ## Recommended First Batch

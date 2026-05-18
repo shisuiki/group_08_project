@@ -26,7 +26,7 @@ public final class JdbcAcceptedEventStore implements AcceptedEventStore {
             payload_sha256,
             raw_payload,
             ingest_status
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict do nothing
         """;
 

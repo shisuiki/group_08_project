@@ -38,6 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcAcceptedEventStoreTest {
+    private static final String MALFORMED_RAW_PAYLOAD = "{bad";
+
     @Test
     void emptyBatchesDoNotOpenConnection() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();
@@ -50,11 +52,12 @@ class JdbcAcceptedEventStoreTest {
     }
 
     @Test
-    void sqlConstantsUsePostgresJsonbAndConflictIgnore() {
+    void sqlConstantsUseRawTextCanonicalJsonbAndConflictIgnore() {
         String rawSql = JdbcAcceptedEventStore.RAW_INSERT_SQL.toLowerCase(Locale.ROOT);
         String canonicalSql = JdbcAcceptedEventStore.CANONICAL_INSERT_SQL.toLowerCase(Locale.ROOT);
 
-        assertTrue(rawSql.contains("?::jsonb"));
+        assertFalse(rawSql.contains("?::jsonb"));
+        assertTrue(rawSql.contains("raw_payload"));
         assertTrue(rawSql.contains("on conflict do nothing"));
         assertTrue(canonicalSql.contains("?::jsonb"));
         assertTrue(canonicalSql.contains("on conflict do nothing"));
@@ -77,7 +80,7 @@ class JdbcAcceptedEventStoreTest {
             "ticker",
             null,
             "sha256",
-            "{\"type\":\"ticker\"}",
+            MALFORMED_RAW_PAYLOAD,
             " "
         );
 
@@ -92,7 +95,7 @@ class JdbcAcceptedEventStoreTest {
         assertEquals("raw-1", row.get(1));
         assertInstanceOf(OffsetDateTime.class, row.get(7));
         assertEquals(new SqlNull(Types.BIGINT), row.get(10));
-        assertEquals("{\"type\":\"ticker\"}", row.get(12));
+        assertEquals(MALFORMED_RAW_PAYLOAD, row.get(12));
         assertEquals("stored", row.get(13));
     }
 
@@ -212,6 +215,10 @@ class JdbcAcceptedEventStoreTest {
                     countById(connection, "select count(*) from raw_ws_events where raw_event_id = ?", rawEvent.rawEventId())
                 );
                 assertEquals(
+                    MALFORMED_RAW_PAYLOAD,
+                    stringById(connection, "select raw_payload from raw_ws_events where raw_event_id = ?", rawEvent.rawEventId())
+                );
+                assertEquals(
                     1L,
                     countById(
                         connection,
@@ -248,7 +255,7 @@ class JdbcAcceptedEventStoreTest {
             "ticker",
             3L,
             "sha256-" + rawEventId,
-            "{\"type\":\"ticker\"}",
+            MALFORMED_RAW_PAYLOAD,
             null
         );
     }
@@ -315,22 +322,38 @@ class JdbcAcceptedEventStoreTest {
     }
 
     private static void applyMigration(Connection connection) throws Exception {
-        String migration;
-        try (InputStream inputStream = Objects.requireNonNull(
-            JdbcAcceptedEventStoreTest.class.getClassLoader()
-                .getResourceAsStream("db/migration/V001__accepted_event_storage.sql"),
-            "migration resource"
+        for (String resource : List.of(
+            "db/migration/V001__accepted_event_storage.sql",
+            "db/migration/V002__raw_payload_text.sql"
         )) {
-            migration = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        for (String statementSql : migration.split(";")) {
-            String trimmed = statementSql.trim();
-            if (trimmed.isEmpty()) {
+            String migration;
+            try (InputStream inputStream = Objects.requireNonNull(
+                JdbcAcceptedEventStoreTest.class.getClassLoader().getResourceAsStream(resource),
+                "migration resource " + resource
+            )) {
+                migration = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (resource.contains("V002__raw_payload_text")) {
+                executeMigrationStatement(connection, migration);
                 continue;
             }
-            try (Statement statement = connection.createStatement()) {
-                statement.execute(trimmed);
+            for (String statementSql : migration.split(";")) {
+                String trimmed = statementSql.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                executeMigrationStatement(connection, trimmed);
             }
+        }
+    }
+
+    private static void executeMigrationStatement(Connection connection, String statementSql) throws SQLException {
+        String trimmed = statementSql.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(trimmed);
         }
     }
 
@@ -360,6 +383,16 @@ class JdbcAcceptedEventStoreTest {
             try (ResultSet resultSet = statement.executeQuery()) {
                 assertTrue(resultSet.next());
                 return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private static String stringById(Connection connection, String sql, String id) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertTrue(resultSet.next());
+                return resultSet.getString(1);
             }
         }
     }

@@ -10,7 +10,7 @@ create table if not exists raw_ws_events (
     source_channel text,
     source_sequence bigint,
     payload_sha256 text not null,
-    raw_payload jsonb not null,
+    raw_payload text not null,
     ingest_status text not null default 'stored',
     created_at timestamptz not null default now()
 );
