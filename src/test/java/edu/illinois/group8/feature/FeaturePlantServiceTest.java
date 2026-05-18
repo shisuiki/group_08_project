@@ -2,6 +2,9 @@ package edu.illinois.group8.feature;
 
 import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.CanonicalDbEventReader;
+import edu.illinois.group8.storage.db.CanonicalDbReadEvent;
+import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -60,6 +63,44 @@ class FeaturePlantServiceTest {
         assertEquals("feature.b", buffer.snapshot().get(0).featureName());
     }
 
+    @Test
+    void runsFeatureModulesFromDbCanonicalSource() {
+        DbCanonicalEnvelopeSource source = new DbCanonicalEnvelopeSource(
+            new OneShotDbReader(List.of(new CanonicalDbReadEvent(
+                1L,
+                "b1",
+                null,
+                null,
+                "derived.top_of_book",
+                "top_of_book_update",
+                1,
+                "M",
+                1700000000000L,
+                123L,
+                456L,
+                """
+                    {"event_id":"b1","event_type":"top_of_book_update","schema_version":1,"stream_name":"derived.top_of_book","metadata":{"source":"kalshi","market_ticker":"M","event_ts_ms":1700000000000},"bid_price_micros":440000,"bid_quantity_micros":1000000,"ask_price_micros":470000,"ask_quantity_micros":2000000,"crossed":false}
+                    """.trim()
+            ))),
+            List.of(StreamRegistry.byName("derived.top_of_book").orElseThrow()),
+            0L,
+            false,
+            ""
+        );
+        CollectingFeatureOutputSink sink = new CollectingFeatureOutputSink();
+
+        try (FeaturePlantService service = new FeaturePlantService(
+            source,
+            List.of(new BestBidOfferFeatureModule()),
+            sink
+        )) {
+            assertEquals(1L, service.runUntilExhausted(10));
+        }
+
+        assertEquals(List.of("feature.bbo"), sink.outputs().stream().map(FeatureOutput::featureName).toList());
+        assertEquals(30000L, sink.outputs().get(0).values().get("spread_micros"));
+    }
+
     private void write(String streamName, String payload) throws Exception {
         Path file = tempDir
             .resolve("canonical")
@@ -71,5 +112,23 @@ class FeaturePlantServiceTest {
         Files.writeString(file, payload.trim() + "\n",
             java.nio.file.StandardOpenOption.CREATE,
             java.nio.file.StandardOpenOption.APPEND);
+    }
+
+    private static final class OneShotDbReader implements CanonicalDbEventReader {
+        private final List<CanonicalDbReadEvent> events;
+        private boolean consumed;
+
+        private OneShotDbReader(List<CanonicalDbReadEvent> events) {
+            this.events = List.copyOf(events);
+        }
+
+        @Override
+        public List<CanonicalDbReadEvent> read(CanonicalDbReadRequest request) {
+            if (consumed) {
+                return List.of();
+            }
+            consumed = true;
+            return events;
+        }
     }
 }

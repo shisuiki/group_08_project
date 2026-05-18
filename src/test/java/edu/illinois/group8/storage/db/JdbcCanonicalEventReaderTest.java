@@ -23,6 +23,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class JdbcCanonicalEventReaderTest {
     @Test
+    void implementsCanonicalDbEventReaderContract() {
+        JdbcCanonicalEventReader reader = new JdbcCanonicalEventReader(() -> {
+            throw new SQLException("unused");
+        });
+
+        assertInstanceOf(CanonicalDbEventReader.class, reader);
+    }
+
+    @Test
     void defaultReadUsesCommitCursorOrderExcludesReplayAndMapsRows() {
         RecordingJdbc jdbc = new RecordingJdbc(List.of(row(
             "canonical_commit_seq", 43L,

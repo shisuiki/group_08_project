@@ -1,7 +1,6 @@
 package edu.illinois.group8.storage.db;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
@@ -56,13 +55,7 @@ public final class JdbcAcceptedEventStore implements AcceptedEventStore {
     }
 
     public static JdbcAcceptedEventStore fromDriverManager(String url, String user, String password) {
-        Objects.requireNonNull(url, "url");
-        return new JdbcAcceptedEventStore(() -> {
-            if (user == null || user.isBlank()) {
-                return DriverManager.getConnection(url);
-            }
-            return DriverManager.getConnection(url, user, password);
-        });
+        return new JdbcAcceptedEventStore(JdbcConnectionFactories.fromDriverManager(url, user, password));
     }
 
     @Override

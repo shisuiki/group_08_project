@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-public final class JdbcCanonicalEventReader {
+public final class JdbcCanonicalEventReader implements CanonicalDbEventReader {
     private static final String TABLE_NAME = "canonical_events";
     private static final String SELECT_COLUMNS = """
         select
@@ -33,6 +33,7 @@ public final class JdbcCanonicalEventReader {
         this.connectionFactory = Objects.requireNonNull(connectionFactory, "connectionFactory");
     }
 
+    @Override
     public List<CanonicalDbReadEvent> read(CanonicalDbReadRequest request) {
         CanonicalDbReadRequest normalized = request == null ? CanonicalDbReadRequest.fromStart() : request;
         List<Object> bindings = new ArrayList<>();

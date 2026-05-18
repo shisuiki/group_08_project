@@ -5,7 +5,11 @@ ingestion, durable raw replay, or frontend APIs. It consumes canonical envelopes
 through `CanonicalEnvelopeSource`, so the same feature module can run against:
 
 - live tickerplant streams through `AeronCanonicalEnvelopeSource`;
-- historical canonical recordings through `RecordingCanonicalEnvelopeSource`.
+- historical canonical recordings through `RecordingCanonicalEnvelopeSource`;
+- committed canonical DB rows through optional `DbCanonicalEnvelopeSource`.
+
+The default source remains `recording`; DB reads are opt-in with
+`FEATUREPLANT_SOURCE=db` or `--source=db`.
 
 Downstream visualization, backtesting, and research export modules should attach
 to `FeatureOutputSink` or a persistent feature store built behind that sink. They
@@ -42,6 +46,26 @@ docker compose --profile featureplant run --rm featureplant \
 `RecordingCanonicalEnvelopeSource` reads `recordings/canonical`, which may
 contain downstream stream-recorder records, REST historical backfill records, or
 both.
+
+## Database Run
+
+```bash
+docker compose --profile featureplant run --rm \
+  -e FEATUREPLANT_SOURCE=db \
+  -e FEATUREPLANT_DB_URL='jdbc:postgresql://db:5432/kalshi' \
+  -e FEATUREPLANT_DB_USER=kalshi \
+  -e FEATUREPLANT_STREAMS=canonical.trade,canonical.ticker,derived.top_of_book \
+  -e FEATUREPLANT_MODULES=bbo,ticker_snapshot,trade_tape \
+  -e FEATUREPLANT_MAX_EVENTS=10000 \
+  -e FEATUREPLANT_RUN_ONCE=true \
+  featureplant
+```
+
+`DbCanonicalEnvelopeSource` reads committed rows from `canonical_events` ordered
+by `canonical_commit_seq`. It excludes replay rows by default; use
+`--replay-id=<id>` for one replay or `--include-replay` to include all replay
+rows. If `poll` receives a non-positive fragment limit, the DB source caps each
+read at 1000 rows to avoid unbounded memory growth.
 
 ## Live Run
 

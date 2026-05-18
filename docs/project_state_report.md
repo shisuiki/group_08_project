@@ -53,7 +53,8 @@ Current code differs from the diagram:
   `DataProcessor` / cluster runtime.
 - NDJSON/S3 remains for recording-capture, offline replay, debug, import, and
   export workflows, not the live source of truth.
-- DB readers plus feature/frontend DB defaults remain migration work.
+- FeaturePlant has an optional canonical DB source; recording remains the
+  default, and frontend/research DB defaults remain migration work.
 - Current code adds raw replay, REST backfill, stream recorder, featureplant,
   frontend adapter, stream tap, Prometheus/Grafana, and profiling.
 
@@ -127,8 +128,11 @@ Current database status:
 - Postgres/Timescale support includes live raw writes, canonical DB sink
   wiring, and raw replay reader support.
 - DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
-  reader primitive exists for the current single-writer path, but
-  feature/frontend defaults are still migration work.
+  reader primitive exists for the current single-writer path and backs the
+  optional FeaturePlant DB source. Its cursor is global over
+  `canonical_commit_seq`; replay rows are excluded unless a replay id or
+  include-replay option is supplied. Feature/frontend defaults are still
+  migration work.
 - No persistent feature store schema is present.
 - No S3-to-Timescale loader is implemented in this repo.
 
@@ -137,7 +141,8 @@ Remaining database migration work:
 - Keep S3/file recordings as recording-capture/offline/debug/import/export
   artifacts.
 - Finish DB reader/query migration for raw/canonical data already written to
-  Timescale/Postgres, with import/export paths for recordings.
+  Timescale/Postgres, with import/export paths for recordings and frontend /
+  research defaults still on their existing sources.
 - Add versioned feature storage behind FeaturePlant.
 - Add query APIs over feature/canonical storage.
 
@@ -187,7 +192,7 @@ Legend:
 | Object-store loader/query backfill | planned | no full loader/query path |
 | Raw ingress replay | current-basic | local NDJSON import/debug path and Timescale reader; live raw ingest is DB-primary |
 | Historical REST backfill | current-basic | writes raw-rest and canonical |
-| FeaturePlant runtime | skeleton | source + module dispatch exists |
+| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; optional canonical DB source available, default still recording |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
 | Persistent feature store | planned | no durable feature DB |

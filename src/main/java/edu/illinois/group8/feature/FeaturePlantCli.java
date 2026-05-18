@@ -2,6 +2,8 @@ package edu.illinois.group8.feature;
 
 import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.canonical.StreamRegistry;
+import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
+import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -47,7 +49,12 @@ public final class FeaturePlantCli {
         long maxEvents,
         int batchSize,
         int idleSleepMillis,
-        boolean runOnce
+        boolean runOnce,
+        String dbUrl,
+        String dbUser,
+        String dbPassword,
+        boolean dbIncludeReplayEvents,
+        String dbReplayId
     ) {
         static Config fromEnvironment() {
             Map<String, String> env = System.getenv();
@@ -63,7 +70,12 @@ public final class FeaturePlantCli {
                 longValue(env, "FEATUREPLANT_MAX_EVENTS", 0L),
                 intValue(env, "FEATUREPLANT_BATCH_SIZE", 100),
                 intValue(env, "FEATUREPLANT_IDLE_SLEEP_MS", 1),
-                Boolean.parseBoolean(value(env, "FEATUREPLANT_RUN_ONCE", "true"))
+                Boolean.parseBoolean(value(env, "FEATUREPLANT_RUN_ONCE", "true")),
+                value(env, "FEATUREPLANT_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
+                value(env, "FEATUREPLANT_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
+                value(env, "FEATUREPLANT_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
+                Boolean.parseBoolean(value(env, "FEATUREPLANT_DB_INCLUDE_REPLAY", "false")),
+                value(env, "FEATUREPLANT_DB_REPLAY_ID", "")
             );
         }
 
@@ -77,6 +89,11 @@ public final class FeaturePlantCli {
             int nextBatchSize = batchSize;
             int nextIdleSleepMillis = idleSleepMillis;
             boolean nextRunOnce = runOnce;
+            String nextDbUrl = dbUrl;
+            String nextDbUser = dbUser;
+            String nextDbPassword = dbPassword;
+            boolean nextDbIncludeReplayEvents = dbIncludeReplayEvents;
+            String nextDbReplayId = dbReplayId;
 
             for (String arg : args) {
                 if ("--help".equals(arg) || "-h".equals(arg)) {
@@ -97,6 +114,16 @@ public final class FeaturePlantCli {
                     nextBatchSize = Integer.parseInt(arg.substring("--batch-size=".length()));
                 } else if (arg.startsWith("--idle-sleep-ms=")) {
                     nextIdleSleepMillis = Integer.parseInt(arg.substring("--idle-sleep-ms=".length()));
+                } else if (arg.startsWith("--db-url=")) {
+                    nextDbUrl = arg.substring("--db-url=".length());
+                } else if (arg.startsWith("--db-user=")) {
+                    nextDbUser = arg.substring("--db-user=".length());
+                } else if (arg.startsWith("--db-password=")) {
+                    nextDbPassword = arg.substring("--db-password=".length());
+                } else if ("--include-replay".equals(arg)) {
+                    nextDbIncludeReplayEvents = true;
+                } else if (arg.startsWith("--replay-id=")) {
+                    nextDbReplayId = arg.substring("--replay-id=".length());
                 } else if ("--follow".equals(arg)) {
                     nextRunOnce = false;
                 } else if ("--run-once".equals(arg)) {
@@ -114,7 +141,12 @@ public final class FeaturePlantCli {
                 nextMaxEvents,
                 Math.max(1, nextBatchSize),
                 Math.max(0, nextIdleSleepMillis),
-                nextRunOnce
+                nextRunOnce,
+                nextDbUrl,
+                nextDbUser,
+                nextDbPassword,
+                nextDbIncludeReplayEvents,
+                nextDbReplayId
             );
         }
 
@@ -123,8 +155,24 @@ public final class FeaturePlantCli {
                 case "recording", "history", "storage" ->
                     RecordingCanonicalEnvelopeSource.fromRoot(recordingRoot, streams, maxEvents);
                 case "aeron", "live", "tickerplant" -> new AeronCanonicalEnvelopeSource(aeronChannel, streams);
+                case "db", "postgres", "postgresql", "timescale", "timescaledb" -> dbSource();
                 default -> throw new IllegalArgumentException("Unsupported FEATUREPLANT_SOURCE: " + sourceMode);
             };
+        }
+
+        private CanonicalEnvelopeSource dbSource() {
+            if (dbUrl == null || dbUrl.isBlank()) {
+                throw new IllegalArgumentException(
+                    "FEATUREPLANT_DB_URL or --db-url is required when FEATUREPLANT_SOURCE=db"
+                );
+            }
+            return new DbCanonicalEnvelopeSource(
+                new JdbcCanonicalEventReader(JdbcConnectionFactories.fromDriverManager(dbUrl, dbUser, dbPassword)),
+                streams,
+                maxEvents,
+                dbIncludeReplayEvents,
+                dbReplayId
+            );
         }
 
         private static List<StreamContract> resolveStreams(String raw) {
@@ -188,9 +236,14 @@ public final class FeaturePlantCli {
             Usage: FeaturePlantCli [options]
 
             Options:
-              --source=recording|aeron
+              --source=recording|aeron|db
               --root=/path/to/recordings
               --channel=aeron:udp?endpoint=224.0.1.1:40456
+              --db-url=jdbc:postgresql://db:5432/kalshi
+              --db-user=kalshi
+              --db-password=secret
+              --include-replay
+              --replay-id=replay-20260519
               --streams=canonical.trade,canonical.ticker,derived.top_of_book
               --modules=bbo,ticker_snapshot,trade_tape
               --max-events=100000
