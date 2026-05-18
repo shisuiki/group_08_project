@@ -37,6 +37,7 @@ public record BackendConfig(
     public static final String PROFILE_LOCAL = "local";
     public static final String PROFILE_DOCKER = "docker";
     public static final String PROFILE_PRODUCTION = "production";
+    public static final String PROFILE_RECORDING_CAPTURE = "recording-capture";
 
     public static BackendConfig fromEnvironment() {
         return from(Map.copyOf(System.getenv()), System.getProperties());
@@ -149,6 +150,10 @@ public record BackendConfig(
             || "open_markets".equals(normalized)
             || "all_open".equals(normalized)
             || "all-open".equals(normalized);
+    }
+
+    public boolean recordingCaptureProfileEnabled() {
+        return PROFILE_RECORDING_CAPTURE.equalsIgnoreCase(profile.trim());
     }
 
     private static String value(

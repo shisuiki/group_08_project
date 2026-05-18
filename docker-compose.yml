@@ -188,7 +188,7 @@ services:
       - node0-capture
     restart: unless-stopped
     environment:
-      BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
+      BACKEND_PROFILE: ${BACKEND_PROFILE:-recording-capture}
       CLUSTER_ADDRESSES: ${CAPTURE_CLUSTER_ADDRESSES:-172.20.0.2}
       BASE_DIR: /app
       IP: ${WSCLIENT_CAPTURE_IP:-172.20.0.6}

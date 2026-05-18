@@ -42,6 +42,28 @@ class KalshiInboundMessageHandlerTest {
     }
 
     @Test
+    void disabledRawRecorderSkipsFileSideEffectAndKeepsClusterRawDbOrder() {
+        RecordingDeps deps = new RecordingDeps();
+        String connectionId = KalshiWebSocketClient.liveConnectionIdFor(null);
+        KalshiInboundMessageHandler handler = deps.handler(
+            KalshiInboundMessageHandler.RawRecorder.disabled(),
+            (rawPayload, receiveTsNs, receiveWallTs) -> {
+                deps.order.add("rawDb");
+                return DbOfferResult.ACCEPTED;
+            },
+            connectionId
+        );
+        String rawPayload = "{\"type\":\"ticker\",\"msg\":{\"market_ticker\":\"MARKET-1\"}}";
+
+        handler.handleInbound(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS);
+
+        assertEquals(List.of("cluster", "rawDb"), deps.order);
+        KalshiIngressEnvelope envelope = KalshiIngressEnvelope.parse(deps.clusterPayloads.get(0), -1L);
+        assertEquals(connectionId, envelope.connectionId());
+        assertTrue(connectionId.startsWith("live-"));
+    }
+
+    @Test
     void malformedJsonStillWritesClusterOnceAndRunsSideChannels() {
         RecordingDeps deps = new RecordingDeps();
         KalshiInboundMessageHandler handler = deps.handler();
@@ -133,6 +155,41 @@ class KalshiInboundMessageHandlerTest {
     }
 
     @Test
+    void disabledRawRecorderUsesRawDbConnectionIdInEnvelopeAndRawDbInput() {
+        RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        RawDbIngestSink sink = new RawDbIngestSink(writer, "kalshi-ws", "capture-1");
+        RawDbIngestSink.RawDbIngestConnection connection = sink.newConnection();
+        KalshiInboundMessageHandler.RawDbRecorder recorder = KalshiWebSocketClient.rawDbRecorderFor(connection);
+        RecordingDeps deps = new RecordingDeps();
+        String connectionId = KalshiWebSocketClient.liveConnectionIdFor(connection);
+        KalshiInboundMessageHandler handler = deps.handler(
+            KalshiInboundMessageHandler.RawRecorder.disabled(),
+            (rawPayload, receiveTsNs, receiveWallTs) -> {
+                deps.order.add("rawDb");
+                return recorder.recordInbound(rawPayload, receiveTsNs, receiveWallTs);
+            },
+            connectionId
+        );
+        String rawPayload = "{\"type\":\"ticker\",\"msg\":{\"market_ticker\":\"MARKET-1\"}}";
+
+        handler.handleInbound(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS);
+
+        assertEquals(List.of("cluster", "rawDb"), deps.order);
+        KalshiIngressEnvelope envelope = KalshiIngressEnvelope.parse(deps.clusterPayloads.get(0), -1L);
+        assertEquals(connection.connectionId(), envelope.connectionId());
+        assertEquals(connection.connectionId(), writer.rawInputs.get(0).connectionId());
+    }
+
+    @Test
+    void liveConnectionIdUsesRawDbConnectionWhenPresent() {
+        RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        RawDbIngestSink sink = new RawDbIngestSink(writer, "kalshi-ws", "capture-1");
+        RawDbIngestSink.RawDbIngestConnection connection = sink.newConnection();
+
+        assertEquals(connection.connectionId(), KalshiWebSocketClient.liveConnectionIdFor(connection));
+    }
+
+    @Test
     void nullRawDbConnectionAdapterReturnsDisabledRecorder() {
         KalshiInboundMessageHandler.RawDbRecorder recorder = KalshiWebSocketClient.rawDbRecorderFor(null);
 
@@ -202,12 +259,7 @@ class KalshiInboundMessageHandlerTest {
         }
 
         private KalshiInboundMessageHandler handler(KalshiInboundMessageHandler.RawDbRecorder rawDbRecorder) {
-            return new KalshiInboundMessageHandler(
-                payload -> {
-                    order.add("cluster");
-                    clusterPayloads.add(payload);
-                    return true;
-                },
+            return handler(
                 (connectionId, rawPayload, receiveTsNs, receiveWallTs) -> {
                     order.add("raw");
                     if (throwRaw) {
@@ -217,6 +269,23 @@ class KalshiInboundMessageHandlerTest {
                     assertEquals(RECEIVE_TS_NS, receiveTsNs);
                     assertEquals(RECEIVE_WALL_TS, receiveWallTs);
                 },
+                rawDbRecorder,
+                CONNECTION_ID
+            );
+        }
+
+        private KalshiInboundMessageHandler handler(
+            KalshiInboundMessageHandler.RawRecorder rawRecorder,
+            KalshiInboundMessageHandler.RawDbRecorder rawDbRecorder,
+            String connectionId
+        ) {
+            return new KalshiInboundMessageHandler(
+                payload -> {
+                    order.add("cluster");
+                    clusterPayloads.add(payload);
+                    return true;
+                },
+                rawRecorder,
                 rawDbRecorder,
                 new KalshiInboundMessageHandler.AckCallbacks() {
                     @Override
@@ -242,7 +311,7 @@ class KalshiInboundMessageHandlerTest {
                         okCallbacks.add(id);
                     }
                 },
-                CONNECTION_ID
+                connectionId
             );
         }
     }

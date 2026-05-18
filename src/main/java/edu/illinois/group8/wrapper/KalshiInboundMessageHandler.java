@@ -86,6 +86,11 @@ final class KalshiInboundMessageHandler {
     @FunctionalInterface
     interface RawRecorder {
         void recordInbound(String connectionId, String rawPayload, long receiveTsNs, Instant receiveWallTs);
+
+        static RawRecorder disabled() {
+            return (connectionId, rawPayload, receiveTsNs, receiveWallTs) -> {
+            };
+        }
     }
 
     @FunctionalInterface

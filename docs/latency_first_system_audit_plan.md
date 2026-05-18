@@ -164,7 +164,8 @@ Verification:
 
 Deliverables:
 
-- Disable `RawIngestRecorder` in latency-first profile.
+- Landed: decouple `RawIngestRecorder` from default live websocket client
+  construction; attach it only through `recording-capture`.
 - Stop treating `TickerplantStreamRecorder` as required storage.
 - Keep file readers only as legacy import/demo tools.
 - Remove `dropOnFull=false` mode from live profiles.

@@ -77,6 +77,9 @@ For EC2 recorder-only soak tests or export soaks, use the explicit
 `wsclient-capture`, the raw file recorder wiring, the stream recorder, and the
 S3 sync sidecar without stream tap, Prometheus, Grafana, or downstream
 feature/query modules.
+The raw file recorder only attaches to the websocket client when
+`BACKEND_PROFILE=recording-capture`; live `wsclient` should not set
+`RAW_INGEST_RECORDER_*`.
 
 For `recording-capture`, enable:
 
@@ -89,9 +92,10 @@ For `recording-capture`, enable:
 This produces the key NDJSON capture views:
 
 - `raw-ingest`: exact inbound Kalshi websocket JSON as seen by `wsclient`, with
-  receive PTP timestamps, before cluster injection. The websocket receive
-  timestamp is also carried through the ingress envelope into canonical event
-  metadata as `metadata.ingest_ts_ns`.
+  receive PTP timestamps. The websocket receive timestamp is also carried
+  through the ingress envelope into canonical event metadata as
+  `metadata.ingest_ts_ns`; live handling keeps cluster publication first, then
+  raw side-channel recording.
 - `canonical`: normalized stream records written by `TickerplantStreamRecorder`
   after it consumes the external Aeron stream like any other tickerplant client.
   Use this for e2e latency and stream-fidelity measurement.

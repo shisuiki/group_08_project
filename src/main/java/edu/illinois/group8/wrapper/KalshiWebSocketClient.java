@@ -18,14 +18,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class KalshiWebSocketClient extends WebSocketClient {
 
     private final KalshiWrapper wrapper;
     private static final String PATH = "/trade-api/ws/v2";
+    private static final AtomicLong LIVE_CONNECTION_SEQUENCE = new AtomicLong();
     private final ClientClusterOrchestrator cluster;
     private final boolean closeClusterOnClose;
-    private final RawIngestRecorder rawIngestRecorder;
     private final String rawIngestConnectionId;
     private final TimestampSource timestampSource;
     private final KalshiInboundMessageHandler inboundMessageHandler;
@@ -62,22 +63,70 @@ public class KalshiWebSocketClient extends WebSocketClient {
         this(wrapper, cluster, false, rawDbConnection);
     }
 
+    public static KalshiWebSocketClient recordingCapture(
+        KalshiWrapper wrapper,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        RawIngestRecorder rawIngestRecorder
+    ) {
+        return new KalshiWebSocketClient(
+            wrapper,
+            initClusterConn(),
+            true,
+            rawDbConnection,
+            recordingConnectionId(rawIngestRecorder),
+            rawRecorderFor(rawIngestRecorder)
+        );
+    }
+
+    public static KalshiWebSocketClient recordingCapture(
+        KalshiWrapper wrapper,
+        ClientClusterOrchestrator cluster,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        RawIngestRecorder rawIngestRecorder
+    ) {
+        return new KalshiWebSocketClient(
+            wrapper,
+            cluster,
+            false,
+            rawDbConnection,
+            recordingConnectionId(rawIngestRecorder),
+            rawRecorderFor(rawIngestRecorder)
+        );
+    }
+
     private KalshiWebSocketClient(
         KalshiWrapper wrapper,
         ClientClusterOrchestrator cluster,
         boolean closeClusterOnClose,
         RawDbIngestSink.RawDbIngestConnection rawDbConnection
     ) {
+        this(
+            wrapper,
+            cluster,
+            closeClusterOnClose,
+            rawDbConnection,
+            liveConnectionIdFor(rawDbConnection),
+            KalshiInboundMessageHandler.RawRecorder.disabled()
+        );
+    }
+
+    private KalshiWebSocketClient(
+        KalshiWrapper wrapper,
+        ClientClusterOrchestrator cluster,
+        boolean closeClusterOnClose,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        String rawIngestConnectionId,
+        KalshiInboundMessageHandler.RawRecorder rawRecorder
+    ) {
         super(wrapper.getBaseUrl().replace("https://", "wss://") + PATH);
         this.wrapper = wrapper;
         this.cluster = cluster;
         this.closeClusterOnClose = closeClusterOnClose;
-        this.rawIngestRecorder = RawIngestRecorder.fromEnvironment();
-        this.rawIngestConnectionId = rawIngestRecorder.newConnectionId();
+        this.rawIngestConnectionId = rawIngestConnectionId;
         this.timestampSource = TimestampSource.fromEnvironment();
         this.inboundMessageHandler = new KalshiInboundMessageHandler(
             cluster::writeToCluster,
-            rawIngestRecorder::recordInbound,
+            rawRecorder,
             rawDbRecorderFor(rawDbConnection),
             new KalshiAckCallbacks(),
             rawIngestConnectionId
@@ -96,6 +145,27 @@ public class KalshiWebSocketClient extends WebSocketClient {
         } catch (Exception e) {
             System.err.println("Signing websocket handshake request threw exception: " + e.getMessage());
         }
+    }
+
+    static String liveConnectionIdFor(RawDbIngestSink.RawDbIngestConnection rawDbConnection) {
+        if (rawDbConnection != null) {
+            return rawDbConnection.connectionId();
+        }
+        return "live-" + LIVE_CONNECTION_SEQUENCE.incrementAndGet();
+    }
+
+    static String recordingConnectionId(RawIngestRecorder rawIngestRecorder) {
+        if (rawIngestRecorder != null) {
+            return rawIngestRecorder.newConnectionId();
+        }
+        return "live-" + LIVE_CONNECTION_SEQUENCE.incrementAndGet();
+    }
+
+    static KalshiInboundMessageHandler.RawRecorder rawRecorderFor(RawIngestRecorder rawIngestRecorder) {
+        if (rawIngestRecorder == null) {
+            return KalshiInboundMessageHandler.RawRecorder.disabled();
+        }
+        return rawIngestRecorder::recordInbound;
     }
 
     static KalshiInboundMessageHandler.RawDbRecorder rawDbRecorderFor(

@@ -61,6 +61,38 @@ class KalshiSystemTest {
     }
 
     @Test
+    void recordingCaptureProfileIsExplicit() {
+        BackendConfig config = BackendConfig.from(Map.of(
+            "BACKEND_PROFILE", BackendConfig.PROFILE_RECORDING_CAPTURE
+        ));
+
+        assertTrue(config.recordingCaptureProfileEnabled());
+    }
+
+    @Test
+    void rawIngestRecorderFactoryOnlyRunsForRecordingCaptureProfile() {
+        AtomicInteger factoryCalls = new AtomicInteger();
+        BackendConfig liveConfig = BackendConfig.from(Map.of(
+            "BACKEND_PROFILE", BackendConfig.PROFILE_DOCKER
+        ));
+
+        assertNull(KalshiSystem.createRawIngestRecorder(liveConfig, () -> {
+            factoryCalls.incrementAndGet();
+            return null;
+        }));
+        assertEquals(0, factoryCalls.get());
+
+        BackendConfig captureConfig = BackendConfig.from(Map.of(
+            "BACKEND_PROFILE", BackendConfig.PROFILE_RECORDING_CAPTURE
+        ));
+        assertNull(KalshiSystem.createRawIngestRecorder(captureConfig, () -> {
+            factoryCalls.incrementAndGet();
+            return null;
+        }));
+        assertEquals(1, factoryCalls.get());
+    }
+
+    @Test
     void rawDbSinkFactoryDoesNotCreateWriterWhenDisabled() {
         DbWriterConfig config = DbWriterConfig.from(Map.of());
         AtomicInteger factoryCalls = new AtomicInteger();
