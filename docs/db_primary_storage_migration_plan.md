@@ -519,6 +519,17 @@ Add:
 - `db_writer_queue_depth`
 - `storage_degraded_mode`
 
+## Configuration
+
+DB writer configuration is parsed in one place and defaults to disabled:
+
+- `DB_WRITER_ENABLED` default `false`
+- `DB_WRITER_DATABASE_URL` default empty
+- `DB_WRITER_DATABASE_USER` default empty
+- `DB_WRITER_DATABASE_PASSWORD` default empty
+- `DB_WRITER_QUEUE_CAPACITY` default `250000`
+- `DB_WRITER_BATCH_SIZE` default `500`
+
 ## Open Decisions
 
 1. What queue capacity is acceptable before DB writes are dropped?
