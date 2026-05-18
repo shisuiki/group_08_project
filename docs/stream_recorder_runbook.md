@@ -12,11 +12,12 @@ Set `STREAM_RECORDER_PARTITION_GRANULARITY=minute` to add a `minute=<mm>` partit
 explicitly with `recording-capture` for recorder soak/export runs, or with
 `observability` when Prometheus needs recorder metrics.
 
-DB/Timescale is the default historical source for live data. Featureplant and
-query/export modules may still use this directory for legacy archive/import or
-debug workflows. In recording capture, it reflects what a real Aeron consumer
-observed. In REST backfill, `HistoricalBackfillCli` can write parsed canonical
-events into the same layout.
+DB/Timescale is the default source for live raw replay. Featureplant,
+research, and frontend canonical readers have not moved to DB yet, so this
+directory remains the canonical capture/export source for those legacy flows.
+In recording capture, it reflects what a real Aeron consumer observed. In REST
+backfill, `HistoricalBackfillCli` can write parsed canonical events into the
+same layout.
 
 ## Configuration
 
@@ -51,7 +52,8 @@ s3://<bucket>/<prefix>/canonical/stream=canonical.trade/date=2026-05-03/hour=10/
 ```
 
 S3 should be treated as optional cold archive/export for recorder profiles.
-TimescaleDB is the primary live query, audit, and replay store.
+TimescaleDB is the primary live raw ingest audit and replay store; canonical
+DB readers are still migration work.
 
 ## Endpoints
 

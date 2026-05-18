@@ -86,7 +86,7 @@ canonical event payloads remain JSONB.
 
 ### `canonical_events`
 
-Authoritative normalized event log.
+Target authoritative normalized event log once Phase 4 is complete.
 
 Required columns:
 

@@ -1,8 +1,9 @@
 # Backend Storage Schema
 
-New live storage is DB-primary. The async DB writer stores accepted raw
-websocket input in `raw_ws_events` and canonical market data in
-`canonical_events`. File layouts under `recordings/` remain for
+New live raw ingest is DB-primary. The async DB writer stores accepted raw
+websocket input in `raw_ws_events`. The `canonical_events` table/schema exists
+as the target for the next migration step, but the live canonical writer from
+`DataProcessor` is not wired yet. File layouts under `recordings/` remain for
 `recording-capture`, legacy archive/import, local fixtures, and debug exports.
 
 ## Raw Ingest
@@ -42,8 +43,9 @@ receive timestamp, market ticker, or raw event id.
 
 ## Downstream Canonical
 
-For new live ingestion, `canonical_events` is the primary normalized DB table
-for readers that need durable canonical market data.
+`canonical_events` is the planned normalized DB table for readers that need
+durable canonical market data. It is not the current live canonical sink until
+`DataProcessor` enqueues canonical copies and readers move off NDJSON.
 
 `recordings/canonical` is written by `TickerplantStreamRecorder`, which
 subscribes to the tickerplant exactly as a downstream Aeron client would. This
