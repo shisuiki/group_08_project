@@ -5,10 +5,10 @@ This repo can profile the backend hot path without Kalshi credentials using dete
 ## Build
 
 ```bash
-mvn package -DskipTests
+./mvnw package -DskipTests
 ```
 
-If Maven is not installed locally, use the Maven Docker image or a temporary Maven distribution. The profiling CLI is packaged into the normal shaded jar.
+Use the Maven wrapper so contributors do not need a local Maven install. The profiling CLI is packaged into the normal shaded jar.
 
 ## Baseline Script
 
