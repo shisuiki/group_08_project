@@ -43,7 +43,7 @@ Reasons:
 
 - high write rate time-series events
 - SQL querying for demo and research
-- JSONB for raw/canonical payloads during schema transition
+- raw payload text for exact audit retention and JSONB canonical payloads during schema transition
 - hypertables for timestamp partitioning
 - unique constraints for idempotent inserts
 - materialized views for bars/features later
