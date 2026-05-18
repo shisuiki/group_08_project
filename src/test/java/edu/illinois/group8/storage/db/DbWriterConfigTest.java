@@ -18,6 +18,8 @@ class DbWriterConfigTest {
         assertEquals("", config.databaseUrl());
         assertEquals("", config.databaseUser());
         assertEquals("", config.databasePassword());
+        assertEquals("kalshi.websocket", config.rawSource());
+        assertEquals("live", config.rawCaptureId());
         assertEquals(250_000, config.queueCapacity());
         assertEquals(500, config.batchSize());
     }
@@ -29,6 +31,8 @@ class DbWriterConfigTest {
             DbWriterConfig.DATABASE_URL_ENV, " jdbc:postgresql://localhost/kalshi_test ",
             DbWriterConfig.DATABASE_USER_ENV, " ",
             DbWriterConfig.DATABASE_PASSWORD_ENV, "\t",
+            DbWriterConfig.RAW_SOURCE_ENV, " kalshi.custom ",
+            DbWriterConfig.RAW_CAPTURE_ID_ENV, " capture-custom ",
             DbWriterConfig.QUEUE_CAPACITY_ENV, "64",
             DbWriterConfig.BATCH_SIZE_ENV, "8"
         ));
@@ -37,8 +41,21 @@ class DbWriterConfigTest {
         assertEquals("jdbc:postgresql://localhost/kalshi_test", config.databaseUrl());
         assertEquals("", config.databaseUser());
         assertEquals("", config.databasePassword());
+        assertEquals("kalshi.custom", config.rawSource());
+        assertEquals("capture-custom", config.rawCaptureId());
         assertEquals(64, config.queueCapacity());
         assertEquals(8, config.batchSize());
+    }
+
+    @Test
+    void blankRawSourceAndCaptureIdFallBackToDefaults() {
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.RAW_SOURCE_ENV, " ",
+            DbWriterConfig.RAW_CAPTURE_ID_ENV, "\t"
+        ));
+
+        assertEquals("kalshi.websocket", config.rawSource());
+        assertEquals("live", config.rawCaptureId());
     }
 
     @Test

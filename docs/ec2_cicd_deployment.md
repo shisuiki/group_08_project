@@ -48,6 +48,8 @@ Recommended repository variables:
 - `DB_WRITER_DATABASE_USER`: optional database user for the disabled-by-default DB writer.
 - `DB_WRITER_QUEUE_CAPACITY`: default `250000`.
 - `DB_WRITER_BATCH_SIZE`: default `500`.
+- `DB_WRITER_RAW_SOURCE`: default `kalshi.websocket`.
+- `DB_WRITER_RAW_CAPTURE_ID`: default `live`.
 - `AERON_EXTERNAL_CHANNEL`: default `aeron:udp?endpoint=224.0.1.1:40456`.
 - `STREAM_TAP_HOST_PORT`: default `8080`, bound to `127.0.0.1` on the EC2 host.
 - `STREAM_TAP_STREAMS`: comma-separated canonical stream names for the local stream tap.

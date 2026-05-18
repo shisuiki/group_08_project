@@ -533,6 +533,8 @@ DB writer configuration is parsed in one place and defaults to disabled:
 - `DB_WRITER_DATABASE_PASSWORD` default empty
 - `DB_WRITER_QUEUE_CAPACITY` default `250000`
 - `DB_WRITER_BATCH_SIZE` default `500`
+- `DB_WRITER_RAW_SOURCE` default `kalshi.websocket`
+- `DB_WRITER_RAW_CAPTURE_ID` default `live`
 
 These settings are plumbed through `.env.example`, Docker Compose, and the EC2
 deploy workflow. EC2 deployments read `DB_WRITER_DATABASE_PASSWORD` from the

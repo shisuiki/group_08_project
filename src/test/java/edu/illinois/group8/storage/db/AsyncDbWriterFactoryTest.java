@@ -34,6 +34,8 @@ class AsyncDbWriterFactoryTest {
             "jdbc:postgresql://localhost/kalshi_test",
             "",
             "",
+            DbWriterConfig.DEFAULT_RAW_SOURCE,
+            DbWriterConfig.DEFAULT_RAW_CAPTURE_ID,
             4,
             2
         );
