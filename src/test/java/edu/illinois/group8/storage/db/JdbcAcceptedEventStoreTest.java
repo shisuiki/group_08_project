@@ -6,12 +6,15 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.sql.DriverPropertyInfo;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -21,7 +24,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.UUID;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -139,6 +144,42 @@ class JdbcAcceptedEventStoreTest {
         assertEquals("execute failed", thrown.getMessage());
         assertEquals(0, jdbc.commitCalls);
         assertEquals(1, jdbc.rollbackCalls);
+    }
+
+    @Test
+    void fromDriverManagerTreatsBlankUserAsUnset() throws Exception {
+        RecordingDriver driver = new RecordingDriver();
+        DriverManager.registerDriver(driver);
+        try {
+            JdbcAcceptedEventStore blankUserStore =
+                JdbcAcceptedEventStore.fromDriverManager(RecordingDriver.URL, " ", "secret");
+
+            blankUserStore.insertRawBatch(List.of(rawEvent("raw-blank-user")));
+
+            assertEquals(1, driver.connectCalls);
+            assertFalse(driver.lastProperties.containsKey("user"));
+            assertFalse(driver.lastProperties.containsKey("password"));
+        } finally {
+            DriverManager.deregisterDriver(driver);
+        }
+    }
+
+    @Test
+    void fromDriverManagerUsesCredentialsForNonBlankUser() throws Exception {
+        RecordingDriver driver = new RecordingDriver();
+        DriverManager.registerDriver(driver);
+        try {
+            JdbcAcceptedEventStore credentialStore =
+                JdbcAcceptedEventStore.fromDriverManager(RecordingDriver.URL, "kalshi", "secret");
+
+            credentialStore.insertRawBatch(List.of(rawEvent("raw-credential-user")));
+
+            assertEquals(1, driver.connectCalls);
+            assertEquals("kalshi", driver.lastProperties.getProperty("user"));
+            assertEquals("secret", driver.lastProperties.getProperty("password"));
+        } finally {
+            DriverManager.deregisterDriver(driver);
+        }
     }
 
     @Test
@@ -324,6 +365,55 @@ class JdbcAcceptedEventStoreTest {
     }
 
     private record SqlNull(int sqlType) {
+    }
+
+    private static final class RecordingDriver implements Driver {
+        private static final String URL = "jdbc:kalshi-recording-driver:test";
+
+        private final RecordingJdbc jdbc = new RecordingJdbc();
+        private int connectCalls;
+        private Properties lastProperties = new Properties();
+
+        @Override
+        public Connection connect(String url, Properties info) throws SQLException {
+            if (!acceptsURL(url)) {
+                return null;
+            }
+            connectCalls++;
+            lastProperties = new Properties();
+            lastProperties.putAll(info);
+            return jdbc.openConnection();
+        }
+
+        @Override
+        public boolean acceptsURL(String url) {
+            return URL.equals(url);
+        }
+
+        @Override
+        public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) {
+            return new DriverPropertyInfo[0];
+        }
+
+        @Override
+        public int getMajorVersion() {
+            return 1;
+        }
+
+        @Override
+        public int getMinorVersion() {
+            return 0;
+        }
+
+        @Override
+        public boolean jdbcCompliant() {
+            return false;
+        }
+
+        @Override
+        public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+            throw new SQLFeatureNotSupportedException();
+        }
     }
 
     private static final class RecordingJdbc {

@@ -58,7 +58,7 @@ public final class JdbcAcceptedEventStore implements AcceptedEventStore {
     public static JdbcAcceptedEventStore fromDriverManager(String url, String user, String password) {
         Objects.requireNonNull(url, "url");
         return new JdbcAcceptedEventStore(() -> {
-            if (user == null) {
+            if (user == null || user.isBlank()) {
                 return DriverManager.getConnection(url);
             }
             return DriverManager.getConnection(url, user, password);
