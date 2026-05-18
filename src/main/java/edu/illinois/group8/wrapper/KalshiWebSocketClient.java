@@ -3,6 +3,7 @@ package edu.illinois.group8.wrapper;
 import edu.illinois.group8.cluster.ClientClusterOrchestrator;
 import edu.illinois.group8.config.BackendConfig;
 import edu.illinois.group8.recorder.RawIngestRecorder;
+import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.time.TimestampSource;
 import edu.illinois.group8.utils.WebSocketClient;
 import org.json.simple.JSONArray;
@@ -39,14 +40,34 @@ public class KalshiWebSocketClient extends WebSocketClient {
     }
 
     public KalshiWebSocketClient(KalshiWrapper wrapper) {
-        this(wrapper, initClusterConn(), true);
+        this(wrapper, initClusterConn(), true, null);
+    }
+
+    public KalshiWebSocketClient(
+        KalshiWrapper wrapper,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection
+    ) {
+        this(wrapper, initClusterConn(), true, rawDbConnection);
     }
 
     public KalshiWebSocketClient(KalshiWrapper wrapper, ClientClusterOrchestrator cluster) {
-        this(wrapper, cluster, false);
+        this(wrapper, cluster, false, null);
     }
 
-    private KalshiWebSocketClient(KalshiWrapper wrapper, ClientClusterOrchestrator cluster, boolean closeClusterOnClose) {
+    public KalshiWebSocketClient(
+        KalshiWrapper wrapper,
+        ClientClusterOrchestrator cluster,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection
+    ) {
+        this(wrapper, cluster, false, rawDbConnection);
+    }
+
+    private KalshiWebSocketClient(
+        KalshiWrapper wrapper,
+        ClientClusterOrchestrator cluster,
+        boolean closeClusterOnClose,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection
+    ) {
         super(wrapper.getBaseUrl().replace("https://", "wss://") + PATH);
         this.wrapper = wrapper;
         this.cluster = cluster;
@@ -57,7 +78,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
         this.inboundMessageHandler = new KalshiInboundMessageHandler(
             cluster::writeToCluster,
             rawIngestRecorder::recordInbound,
-            KalshiInboundMessageHandler.RawDbRecorder.disabled(),
+            rawDbRecorderFor(rawDbConnection),
             new KalshiAckCallbacks(),
             rawIngestConnectionId
         );
@@ -75,6 +96,15 @@ public class KalshiWebSocketClient extends WebSocketClient {
         } catch (Exception e) {
             System.err.println("Signing websocket handshake request threw exception: " + e.getMessage());
         }
+    }
+
+    static KalshiInboundMessageHandler.RawDbRecorder rawDbRecorderFor(
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection
+    ) {
+        if (rawDbConnection == null) {
+            return KalshiInboundMessageHandler.RawDbRecorder.disabled();
+        }
+        return rawDbConnection::recordInbound;
     }
 
     @Override

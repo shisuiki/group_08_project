@@ -1,7 +1,12 @@
 package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.ingress.KalshiIngressEnvelope;
+import edu.illinois.group8.storage.db.AsyncDbWriter;
+import edu.illinois.group8.storage.db.CanonicalDbEvent;
 import edu.illinois.group8.storage.db.DbOfferResult;
+import edu.illinois.group8.storage.db.DbWriterStats;
+import edu.illinois.group8.storage.db.RawDbIngestSink;
+import edu.illinois.group8.storage.db.RawWsDbEventInput;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,6 +87,41 @@ class KalshiInboundMessageHandlerTest {
     }
 
     @Test
+    void rawDbConnectionAdapterOffersRawInputThroughRealSinkConnection() {
+        RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        RawDbIngestSink sink = new RawDbIngestSink(writer, "kalshi-ws", "capture-1");
+        RawDbIngestSink.RawDbIngestConnection connection = sink.newConnection();
+        KalshiInboundMessageHandler.RawDbRecorder recorder = KalshiWebSocketClient.rawDbRecorderFor(connection);
+        RecordingDeps deps = new RecordingDeps();
+        KalshiInboundMessageHandler handler = deps.handler((rawPayload, receiveTsNs, receiveWallTs) -> {
+            deps.order.add("rawDb");
+            return recorder.recordInbound(rawPayload, receiveTsNs, receiveWallTs);
+        });
+        String rawPayload = "{\"type\":\"ticker\",\"msg\":{\"market_ticker\":\"MARKET-1\"}}";
+
+        handler.handleInbound(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS);
+
+        assertEquals(List.of("cluster", "raw", "rawDb"), deps.order);
+        assertEquals(1, writer.rawInputs.size());
+        RawWsDbEventInput input = writer.rawInputs.get(0);
+        assertEquals("kalshi-ws", input.source());
+        assertEquals("capture-1", input.captureId());
+        assertEquals(connection.connectionId(), input.connectionId());
+        assertEquals(1L, input.connectionSequence());
+        assertEquals(RECEIVE_TS_NS, input.receiveTsNs());
+        assertEquals(RECEIVE_WALL_TS, input.receiveWallTs());
+        assertEquals(rawPayload, input.rawPayload());
+        assertEquals("queued", input.ingestStatus());
+    }
+
+    @Test
+    void nullRawDbConnectionAdapterReturnsDisabledRecorder() {
+        KalshiInboundMessageHandler.RawDbRecorder recorder = KalshiWebSocketClient.rawDbRecorderFor(null);
+
+        assertEquals(DbOfferResult.DISABLED, recorder.recordInbound("payload", RECEIVE_TS_NS, RECEIVE_WALL_TS));
+    }
+
+    @Test
     void subscribedAckCallbackRunsAfterClusterWrite() {
         RecordingDeps deps = new RecordingDeps();
         KalshiInboundMessageHandler handler = deps.handler();
@@ -133,6 +173,16 @@ class KalshiInboundMessageHandlerTest {
         private boolean throwRawDb;
 
         private KalshiInboundMessageHandler handler() {
+            return handler((rawPayload, receiveTsNs, receiveWallTs) -> {
+                order.add("rawDb");
+                if (throwRawDb) {
+                    throw new IllegalStateException("raw db failed");
+                }
+                return DbOfferResult.ACCEPTED;
+            });
+        }
+
+        private KalshiInboundMessageHandler handler(KalshiInboundMessageHandler.RawDbRecorder rawDbRecorder) {
             return new KalshiInboundMessageHandler(
                 payload -> {
                     order.add("cluster");
@@ -148,13 +198,7 @@ class KalshiInboundMessageHandlerTest {
                     assertEquals(RECEIVE_TS_NS, receiveTsNs);
                     assertEquals(RECEIVE_WALL_TS, receiveWallTs);
                 },
-                (rawPayload, receiveTsNs, receiveWallTs) -> {
-                    order.add("rawDb");
-                    if (throwRawDb) {
-                        throw new IllegalStateException("raw db failed");
-                    }
-                    return DbOfferResult.ACCEPTED;
-                },
+                rawDbRecorder,
                 new KalshiInboundMessageHandler.AckCallbacks() {
                     @Override
                     public void onError(Long id, Long code, String message) {
@@ -176,6 +220,30 @@ class KalshiInboundMessageHandlerTest {
                 },
                 CONNECTION_ID
             );
+        }
+    }
+
+    private static final class RecordingAsyncDbWriter implements AsyncDbWriter {
+        private final List<RawWsDbEventInput> rawInputs = new ArrayList<>();
+
+        @Override
+        public DbOfferResult offerRaw(RawWsDbEventInput input) {
+            rawInputs.add(input);
+            return DbOfferResult.ACCEPTED;
+        }
+
+        @Override
+        public DbOfferResult offerCanonical(CanonicalDbEvent event) {
+            throw new UnsupportedOperationException("canonical writes are out of scope");
+        }
+
+        @Override
+        public DbWriterStats stats() {
+            return DbWriterStats.empty();
+        }
+
+        @Override
+        public void close() {
         }
     }
 
