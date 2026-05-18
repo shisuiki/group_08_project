@@ -2,13 +2,11 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.cluster.ClientClusterOrchestrator;
 import edu.illinois.group8.config.BackendConfig;
-import edu.illinois.group8.ingress.KalshiIngressEnvelope;
 import edu.illinois.group8.recorder.RawIngestRecorder;
 import edu.illinois.group8.time.TimestampSource;
 import edu.illinois.group8.utils.WebSocketClient;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
 
 import java.time.Instant;
 import java.util.Arrays;
@@ -29,6 +27,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
     private final RawIngestRecorder rawIngestRecorder;
     private final String rawIngestConnectionId;
     private final TimestampSource timestampSource;
+    private final KalshiInboundMessageHandler inboundMessageHandler;
     private final Map<Long, CompletableFuture<Long>> subscriptionAcks = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<Void>> updateAcks = new ConcurrentHashMap<>();
     
@@ -55,6 +54,13 @@ public class KalshiWebSocketClient extends WebSocketClient {
         this.rawIngestRecorder = RawIngestRecorder.fromEnvironment();
         this.rawIngestConnectionId = rawIngestRecorder.newConnectionId();
         this.timestampSource = TimestampSource.fromEnvironment();
+        this.inboundMessageHandler = new KalshiInboundMessageHandler(
+            cluster::writeToCluster,
+            rawIngestRecorder::recordInbound,
+            KalshiInboundMessageHandler.RawDbRecorder.disabled(),
+            new KalshiAckCallbacks(),
+            rawIngestConnectionId
+        );
 
         try {
             String timestamp = String.valueOf(System.currentTimeMillis());
@@ -80,36 +86,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
     public void onMessage(String message) {
         long receiveTsNs = timestampSource.nowNanos();
         Instant receiveWallTs = Instant.now();
-        rawIngestRecorder.recordInbound(rawIngestConnectionId, message, receiveTsNs, receiveWallTs);
-        String clusterPayload = KalshiIngressEnvelope.wrap(message, receiveTsNs, receiveWallTs, rawIngestConnectionId, null);
-        JSONParser parser = new JSONParser();
-        try {
-            JSONObject data = (JSONObject) parser.parse(message);
-            String type = (String) data.get("type");
-            JSONObject msg = (JSONObject) data.get("msg");
-            Long id = longValue(data.get("id"));
-            if ("error".equals(type) && msg != null) {
-                Long code = longValue(msg.get("code"));
-                String errorMsg = (String) msg.get("msg");
-                System.out.println("Received Kalshi error code " + code + ": " + errorMsg);
-                completeAckExceptionally(id, "Kalshi error code " + code + ": " + errorMsg);
-            } else if ("subscribed".equals(type) && msg != null) {
-                Long sid = longValue(msg.get("sid"));
-                CompletableFuture<Long> future = id == null ? null : subscriptionAcks.remove(id);
-                if (future != null && sid != null) {
-                    future.complete(sid);
-                }
-            } else if ("ok".equals(type)) {
-                CompletableFuture<Void> future = id == null ? null : updateAcks.remove(id);
-                if (future != null) {
-                    future.complete(null);
-                }
-            }
-            cluster.writeToCluster(clusterPayload);
-        } catch (Exception e) {
-            cluster.writeToCluster(clusterPayload);
-        }
-        
+        inboundMessageHandler.handleInbound(message, receiveTsNs, receiveWallTs);
     }
 
     @Override
@@ -254,13 +231,6 @@ public class KalshiWebSocketClient extends WebSocketClient {
         return currentNonce;
     }
 
-    private static Long longValue(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        return null;
-    }
-
     private <T> T awaitAck(long commandId, CompletableFuture<T> future, String command, int timeoutMs)
         throws InterruptedException {
         try {
@@ -295,6 +265,30 @@ public class KalshiWebSocketClient extends WebSocketClient {
         updateAcks.forEach((id, future) -> future.completeExceptionally(exception));
         subscriptionAcks.clear();
         updateAcks.clear();
+    }
+
+    private final class KalshiAckCallbacks implements KalshiInboundMessageHandler.AckCallbacks {
+        @Override
+        public void onError(Long id, Long code, String message) {
+            System.out.println("Received Kalshi error code " + code + ": " + message);
+            completeAckExceptionally(id, "Kalshi error code " + code + ": " + message);
+        }
+
+        @Override
+        public void onSubscribed(Long id, Long sid) {
+            CompletableFuture<Long> future = id == null ? null : subscriptionAcks.remove(id);
+            if (future != null && sid != null) {
+                future.complete(sid);
+            }
+        }
+
+        @Override
+        public void onOk(Long id) {
+            CompletableFuture<Void> future = id == null ? null : updateAcks.remove(id);
+            if (future != null) {
+                future.complete(null);
+            }
+        }
     }
 
 }
