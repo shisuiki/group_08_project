@@ -25,6 +25,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     private static final long POLL_TIMEOUT_MS = 100L;
 
     private final AcceptedEventStore store;
+    private final RawWsDbEventMapper rawMapper;
     private final BlockingQueue<WriteRequest> queue;
     private final int queueCapacity;
     private final int batchSize;
@@ -50,6 +51,16 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
         int batchSize,
         BackendMetrics metrics
     ) {
+        this(store, queueCapacity, batchSize, metrics, new RawWsDbEventMapper());
+    }
+
+    BoundedAsyncDbWriter(
+        AcceptedEventStore store,
+        int queueCapacity,
+        int batchSize,
+        BackendMetrics metrics,
+        RawWsDbEventMapper rawMapper
+    ) {
         if (queueCapacity <= 0) {
             throw new IllegalArgumentException("queueCapacity must be positive.");
         }
@@ -57,6 +68,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
             throw new IllegalArgumentException("batchSize must be positive.");
         }
         this.store = Objects.requireNonNull(store, "store");
+        this.rawMapper = Objects.requireNonNull(rawMapper, "rawMapper");
         this.queueCapacity = queueCapacity;
         this.batchSize = batchSize;
         this.metrics = Objects.requireNonNull(metrics, "metrics");
@@ -68,13 +80,13 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     }
 
     @Override
-    public DbOfferResult offerRaw(RawWsDbEvent event) {
-        Objects.requireNonNull(event, "event");
+    public DbOfferResult offerRaw(RawWsDbEventInput input) {
+        Objects.requireNonNull(input, "input");
         synchronized (lifecycleLock) {
             if (!accepting.get()) {
                 return DbOfferResult.DISABLED;
             }
-            if (!queue.offer(new RawWrite(event))) {
+            if (!queue.offer(new RawWrite(input))) {
                 rawDropped.incrementAndGet();
                 metrics.increment(RAW_DROPPED_COUNTER);
                 updateQueueDepthGauge();
@@ -160,25 +172,29 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     }
 
     private void writeRequests(List<WriteRequest> requests) {
-        List<RawWsDbEvent> rawEvents = new ArrayList<>();
+        List<RawWsDbEventInput> rawInputs = new ArrayList<>();
         List<CanonicalDbEvent> canonicalEvents = new ArrayList<>();
         for (WriteRequest request : requests) {
             if (request instanceof RawWrite rawWrite) {
-                rawEvents.add(rawWrite.event());
+                rawInputs.add(rawWrite.input());
             } else if (request instanceof CanonicalWrite canonicalWrite) {
                 canonicalEvents.add(canonicalWrite.event());
             }
         }
-        if (!rawEvents.isEmpty()) {
-            writeRawBatch(rawEvents);
+        if (!rawInputs.isEmpty()) {
+            writeRawBatch(rawInputs);
         }
         if (!canonicalEvents.isEmpty()) {
             writeCanonicalBatch(canonicalEvents);
         }
     }
 
-    private void writeRawBatch(List<RawWsDbEvent> rawEvents) {
+    private void writeRawBatch(List<RawWsDbEventInput> rawInputs) {
         try {
+            List<RawWsDbEvent> rawEvents = new ArrayList<>(rawInputs.size());
+            for (RawWsDbEventInput rawInput : rawInputs) {
+                rawEvents.add(rawMapper.toDbEvent(rawInput));
+            }
             store.insertRawBatch(List.copyOf(rawEvents));
             rawWritten.addAndGet(rawEvents.size());
             metrics.add(RAW_WRITTEN_COUNTER, rawEvents.size());
@@ -210,7 +226,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     private interface WriteRequest {
     }
 
-    private record RawWrite(RawWsDbEvent event) implements WriteRequest {
+    private record RawWrite(RawWsDbEventInput input) implements WriteRequest {
     }
 
     private record CanonicalWrite(CanonicalDbEvent event) implements WriteRequest {

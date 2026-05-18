@@ -1,6 +1,7 @@
 package edu.illinois.group8.storage.db;
 
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.parser.KalshiCanonicalParser;
 
 import java.time.Instant;
 import java.util.List;
@@ -22,7 +23,7 @@ class AsyncDbWriterTest {
         RecordingStore store = new RecordingStore();
         AsyncDbWriter writer = AsyncDbWriter.disabled();
 
-        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawEvent("raw-disabled")));
+        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput(rawPayload("disabled"))));
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonical(canonicalEvent("canonical-disabled")));
         writer.close();
 
@@ -38,12 +39,12 @@ class AsyncDbWriterTest {
         BackendMetrics metrics = new BackendMetrics();
 
         try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 1, 1, metrics)) {
-            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawEvent("raw-blocking")));
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("blocking"))));
             assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should enter the slow store");
 
-            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawEvent("raw-queued")));
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("queued"))));
             long startNs = System.nanoTime();
-            DbOfferResult result = writer.offerRaw(rawEvent("raw-dropped"));
+            DbOfferResult result = writer.offerRaw(rawInput(null));
             long elapsedNs = System.nanoTime() - startNs;
 
             assertEquals(DbOfferResult.DROPPED_FULL, result);
@@ -63,7 +64,9 @@ class AsyncDbWriterTest {
         BackendMetrics metrics = new BackendMetrics();
 
         try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 8, 4, metrics)) {
-            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawEvent("raw-ok")));
+            String rawPayload = rawPayload("ok");
+
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload)));
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalEvent("canonical-ok")));
 
             assertEventually(
@@ -71,7 +74,11 @@ class AsyncDbWriterTest {
                 "writer should hand accepted events to the store"
             );
 
-            assertEquals(List.of("raw-ok"), store.rawEvents.stream().map(RawWsDbEvent::rawEventId).toList());
+            assertEquals(
+                List.of(KalshiCanonicalParser.rawEventId(rawPayload)),
+                store.rawEvents.stream().map(RawWsDbEvent::rawEventId).toList()
+            );
+            assertEquals(List.of(rawPayload), store.rawEvents.stream().map(RawWsDbEvent::rawPayload).toList());
             assertEquals(
                 List.of("canonical-ok"),
                 store.canonicalEvents.stream().map(CanonicalDbEvent::eventId).toList()
@@ -92,7 +99,7 @@ class AsyncDbWriterTest {
 
         writer.close();
 
-        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawEvent("raw-after-close")));
+        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput(rawPayload("after-close"))));
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonical(canonicalEvent("canonical-after-close")));
         assertEquals(0L, writer.stats().rawAccepted());
         assertEquals(0L, writer.stats().canonicalAccepted());
@@ -106,7 +113,7 @@ class AsyncDbWriterTest {
 
         try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 4, 1, metrics)) {
             assertDoesNotThrow(() ->
-                assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawEvent("raw-fails")))
+                assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("store-fails"))))
             );
 
             assertEventually(
@@ -118,22 +125,63 @@ class AsyncDbWriterTest {
         }
     }
 
-    private static RawWsDbEvent rawEvent(String rawEventId) {
-        return new RawWsDbEvent(
-            rawEventId,
+    @Test
+    void mapperExceptionIsCountedByWorkerAndDoesNotEscapeOffer() throws Exception {
+        RecordingStore store = new RecordingStore();
+        BackendMetrics metrics = new BackendMetrics();
+
+        try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 4, 1, metrics)) {
+            assertDoesNotThrow(() ->
+                assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(null)))
+            );
+
+            assertEventually(
+                () -> writer.stats().failedBatches() == 1L,
+                "failed mapper batch should be counted by the worker"
+            );
+            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER));
+            assertEquals(0L, writer.stats().rawWritten());
+            assertEquals(0, store.rawInsertCalls);
+        }
+    }
+
+    @Test
+    void rawMapperExceptionDoesNotSkipCanonicalWrite() throws Exception {
+        RecordingStore store = new RecordingStore();
+        BackendMetrics metrics = new BackendMetrics();
+
+        try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 4, 2, metrics)) {
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(null)));
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalEvent("canonical-after-raw-failure")));
+
+            assertEventually(
+                () -> writer.stats().failedBatches() == 1L && writer.stats().canonicalWritten() == 1L,
+                "raw mapper failure should not prevent canonical writes from the worker"
+            );
+            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER));
+            assertEquals(
+                List.of("canonical-after-raw-failure"),
+                store.canonicalEvents.stream().map(CanonicalDbEvent::eventId).toList()
+            );
+            assertEquals(0L, writer.stats().rawWritten());
+        }
+    }
+
+    private static RawWsDbEventInput rawInput(String rawPayload) {
+        return new RawWsDbEventInput(
             "kalshi-ws",
             "capture-1",
             "connection-1",
             1L,
             2L,
             Instant.parse("2026-05-19T00:00:00Z"),
-            "MARKET-1",
-            "ticker",
-            3L,
-            "sha256",
-            "{\"type\":\"ticker\"}",
+            rawPayload,
             "accepted"
         );
+    }
+
+    private static String rawPayload(String suffix) {
+        return "{\"type\":\"ticker\",\"seq\":3,\"msg\":{\"market_ticker\":\"MARKET-" + suffix + "\"}}";
     }
 
     private static CanonicalDbEvent canonicalEvent(String eventId) {

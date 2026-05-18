@@ -1,7 +1,7 @@
 package edu.illinois.group8.storage.db;
 
 public interface AsyncDbWriter extends AutoCloseable {
-    DbOfferResult offerRaw(RawWsDbEvent event);
+    DbOfferResult offerRaw(RawWsDbEventInput input);
 
     DbOfferResult offerCanonical(CanonicalDbEvent event);
 

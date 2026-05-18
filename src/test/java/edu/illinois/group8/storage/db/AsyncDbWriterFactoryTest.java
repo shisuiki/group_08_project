@@ -22,7 +22,7 @@ class AsyncDbWriterFactoryTest {
         });
 
         assertEquals(0, openConnections.get());
-        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawEvent("raw-disabled-factory")));
+        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput("{\"type\":\"ticker\"}")));
         writer.close();
     }
 
@@ -51,20 +51,15 @@ class AsyncDbWriterFactoryTest {
         }
     }
 
-    private static RawWsDbEvent rawEvent(String rawEventId) {
-        return new RawWsDbEvent(
-            rawEventId,
+    private static RawWsDbEventInput rawInput(String rawPayload) {
+        return new RawWsDbEventInput(
             "kalshi-ws",
             "capture-1",
             "connection-1",
             1L,
             2L,
             Instant.parse("2026-05-19T00:00:00Z"),
-            "MARKET-1",
-            "ticker",
-            3L,
-            "sha256-" + rawEventId,
-            "{\"type\":\"ticker\"}",
+            rawPayload,
             null
         );
     }

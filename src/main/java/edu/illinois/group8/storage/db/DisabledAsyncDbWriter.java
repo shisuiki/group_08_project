@@ -7,7 +7,7 @@ public final class DisabledAsyncDbWriter implements AsyncDbWriter {
     }
 
     @Override
-    public DbOfferResult offerRaw(RawWsDbEvent event) {
+    public DbOfferResult offerRaw(RawWsDbEventInput input) {
         return DbOfferResult.DISABLED;
     }
 
