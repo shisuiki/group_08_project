@@ -255,6 +255,10 @@ Rule:
 - deterministic IDs and unique constraints dedupe rows.
 - batch insert uses `ON CONFLICT DO NOTHING`.
 - no distributed lock is required for append-only inserts.
+- DB cursor reads currently assume one canonical DB writer. Before allowing
+  concurrent canonical writers/importers, add an explicit committed watermark or
+  serialize canonical insert transactions so readers cannot advance past a
+  lower sequence that has not committed yet.
 
 ### Canonical Write vs Frontend Read
 
@@ -279,6 +283,9 @@ Cause:
 Rule:
 
 - canonical event identity is source/event based, not insertion-time based.
+- canonical DB cursor is a database-assigned insert sequence for committed-row
+  resume under the current single-writer path; it must not replace event
+  identity or event-time ordering.
 - latest-state updates use event timestamp fences.
 - backfill may fill historical gaps but must not overwrite newer latest state.
 

@@ -62,6 +62,7 @@ class JdbcAcceptedEventStoreTest {
         assertTrue(canonicalSql.contains("?::jsonb"));
         assertTrue(canonicalSql.contains("on conflict do nothing"));
         assertFalse(canonicalSql.contains("foreign key"));
+        assertFalse(canonicalSql.contains("canonical_commit_seq"));
     }
 
     @Test
@@ -324,7 +325,8 @@ class JdbcAcceptedEventStoreTest {
     private static void applyMigration(Connection connection) throws Exception {
         for (String resource : List.of(
             "db/migration/V001__accepted_event_storage.sql",
-            "db/migration/V002__raw_payload_text.sql"
+            "db/migration/V002__raw_payload_text.sql",
+            "db/migration/V003__canonical_commit_cursor.sql"
         )) {
             String migration;
             try (InputStream inputStream = Objects.requireNonNull(

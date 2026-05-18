@@ -126,9 +126,9 @@ Current database status:
 - Redshift hot-path writer is removed.
 - Postgres/Timescale support includes live raw writes, canonical DB sink
   wiring, and raw replay reader support.
-- DB schema/runtime wiring exists for raw/canonical paths, but DB readers and
+- DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
+  reader primitive exists for the current single-writer path, but
   feature/frontend defaults are still migration work.
-- No canonical query reader path is present.
 - No persistent feature store schema is present.
 - No S3-to-Timescale loader is implemented in this repo.
 
