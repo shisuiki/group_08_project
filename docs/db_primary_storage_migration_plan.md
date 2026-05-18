@@ -509,16 +509,14 @@ Exit criteria:
 
 Add:
 
-- `db_raw_events_inserted_total`
-- `db_raw_events_duplicate_total`
-- `db_raw_events_failed_total`
+- `db_raw_events_accepted_total`
 - `db_raw_events_dropped_total`
-- `db_write_queue_depth`
-- `db_write_queue_capacity`
-- `db_write_batch_latency_ms`
-- `db_canonical_events_inserted_total`
-- `db_canonical_events_duplicate_total`
+- `db_raw_events_written_total`
+- `db_canonical_events_accepted_total`
 - `db_canonical_events_dropped_total`
+- `db_canonical_events_written_total`
+- `db_writer_batch_failed_total`
+- `db_writer_queue_depth`
 - `storage_degraded_mode`
 
 ## Open Decisions
