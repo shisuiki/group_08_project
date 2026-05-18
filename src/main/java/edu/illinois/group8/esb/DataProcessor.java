@@ -13,6 +13,9 @@ import edu.illinois.group8.parser.CanonicalParseResult;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
 import edu.illinois.group8.publication.AeronEventPublisher;
 import edu.illinois.group8.publication.EventPublisher;
+import edu.illinois.group8.storage.db.CanonicalDbSink;
+
+import java.util.Objects;
 
 public class DataProcessor {
     private final KalshiCanonicalParser parser;
@@ -22,19 +25,36 @@ public class DataProcessor {
     private final boolean orderBookDerivedEnabled;
     private final EventPublisher publisher;
     private final BackendMetrics metrics;
+    private final CanonicalDbSink canonicalDbSink;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
-        this(communicationOrchestrator, new BackendMetrics());
+        this(communicationOrchestrator, CanonicalDbSink.disabled());
+    }
+
+    public DataProcessor(
+        ESBClusterCommunicationOrchestrator communicationOrchestrator,
+        CanonicalDbSink canonicalDbSink
+    ) {
+        this(communicationOrchestrator, new BackendMetrics(), canonicalDbSink);
     }
 
     private DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator, BackendMetrics metrics) {
-        this(communicationOrchestrator, metrics, BackendConfig.fromEnvironment());
+        this(communicationOrchestrator, metrics, BackendConfig.fromEnvironment(), CanonicalDbSink.disabled());
+    }
+
+    public DataProcessor(
+        ESBClusterCommunicationOrchestrator communicationOrchestrator,
+        BackendMetrics metrics,
+        CanonicalDbSink canonicalDbSink
+    ) {
+        this(communicationOrchestrator, metrics, BackendConfig.fromEnvironment(), canonicalDbSink);
     }
 
     private DataProcessor(
         ESBClusterCommunicationOrchestrator communicationOrchestrator,
         BackendMetrics metrics,
-        BackendConfig config
+        BackendConfig config,
+        CanonicalDbSink canonicalDbSink
     ) {
         this(
             new KalshiCanonicalParser(),
@@ -43,7 +63,8 @@ public class DataProcessor {
             config.sourceSequenceMonitorEnabled(),
             config.orderBookDerivedEnabled(),
             new AeronEventPublisher(communicationOrchestrator, new JsonCanonicalSerializer(), metrics),
-            metrics
+            metrics,
+            canonicalDbSink
         );
     }
 
@@ -53,7 +74,17 @@ public class DataProcessor {
         EventPublisher publisher,
         BackendMetrics metrics
     ) {
-        this(parser, orderBookStateManager, new SourceSequenceMonitor(), false, true, publisher, metrics);
+        this(parser, orderBookStateManager, publisher, metrics, CanonicalDbSink.disabled());
+    }
+
+    public DataProcessor(
+        KalshiCanonicalParser parser,
+        OrderBookStateManager orderBookStateManager,
+        EventPublisher publisher,
+        BackendMetrics metrics,
+        CanonicalDbSink canonicalDbSink
+    ) {
+        this(parser, orderBookStateManager, new SourceSequenceMonitor(), false, true, publisher, metrics, canonicalDbSink);
     }
 
     public DataProcessor(
@@ -65,6 +96,28 @@ public class DataProcessor {
         EventPublisher publisher,
         BackendMetrics metrics
     ) {
+        this(
+            parser,
+            orderBookStateManager,
+            sourceSequenceMonitor,
+            sourceSequenceMonitorEnabled,
+            orderBookDerivedEnabled,
+            publisher,
+            metrics,
+            CanonicalDbSink.disabled()
+        );
+    }
+
+    public DataProcessor(
+        KalshiCanonicalParser parser,
+        OrderBookStateManager orderBookStateManager,
+        SourceSequenceMonitor sourceSequenceMonitor,
+        boolean sourceSequenceMonitorEnabled,
+        boolean orderBookDerivedEnabled,
+        EventPublisher publisher,
+        BackendMetrics metrics,
+        CanonicalDbSink canonicalDbSink
+    ) {
         this.parser = parser;
         this.orderBookStateManager = orderBookStateManager;
         this.sourceSequenceMonitor = sourceSequenceMonitor;
@@ -72,6 +125,7 @@ public class DataProcessor {
         this.orderBookDerivedEnabled = orderBookDerivedEnabled;
         this.publisher = publisher;
         this.metrics = metrics;
+        this.canonicalDbSink = Objects.requireNonNull(canonicalDbSink, "canonicalDbSink");
     }
 
     public void processMessage(String message) {
@@ -127,6 +181,7 @@ public class DataProcessor {
         CanonicalEvent publishedEvent = CanonicalEvents.withPublishTsNs(event, System.nanoTime());
         boolean success = publisher.publish(publishedEvent);
         metrics.increment(success ? "processor.publish_success" : "processor.publish_failure");
+        canonicalDbSink.offer(publishedEvent);
     }
 
     private void observeEventMetrics(CanonicalEvent event) {

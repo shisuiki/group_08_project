@@ -11,6 +11,9 @@ import io.aeron.Image;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
@@ -22,6 +25,11 @@ import edu.illinois.group8.esb.DataProcessor;
 import edu.illinois.group8.esb.Tickerplant;
 
 import edu.illinois.group8.demo.MarketGridDemo;
+import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.AsyncDbWriter;
+import edu.illinois.group8.storage.db.AsyncDbWriterFactory;
+import edu.illinois.group8.storage.db.CanonicalDbSink;
+import edu.illinois.group8.storage.db.DbWriterConfig;
 
 public class ESBClusteredService implements ClusteredService {
     private Cluster cluster;
@@ -32,12 +40,26 @@ public class ESBClusteredService implements ClusteredService {
     private String aeronDirName;
     private ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private DataProcessor processor;
+    private CanonicalDbSink canonicalDbSink;
     private Thread tickerplantThread;
     private Thread clientThread;
+    private final Supplier<DbWriterConfig> dbWriterConfigSupplier;
+    private final BiFunction<DbWriterConfig, BackendMetrics, AsyncDbWriter> dbWriterFactory;
 
     public ESBClusteredService(String aeronDirName, String hostname) {
+        this(aeronDirName, hostname, DbWriterConfig::fromEnvironment, AsyncDbWriterFactory::create);
+    }
+
+    ESBClusteredService(
+        String aeronDirName,
+        String hostname,
+        Supplier<DbWriterConfig> dbWriterConfigSupplier,
+        BiFunction<DbWriterConfig, BackendMetrics, AsyncDbWriter> dbWriterFactory
+    ) {
         this.aeronDirName = aeronDirName;
         this.hostname = hostname;
+        this.dbWriterConfigSupplier = Objects.requireNonNull(dbWriterConfigSupplier, "dbWriterConfigSupplier");
+        this.dbWriterFactory = Objects.requireNonNull(dbWriterFactory, "dbWriterFactory");
     }
     
     private void loadSnapshot(final Cluster cluster, final Image snapshotImage) {
@@ -76,7 +98,9 @@ public class ESBClusteredService implements ClusteredService {
         aeron = Aeron.connect(ctx);
 
         this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname, true, aeronDirName);
-        this.processor = new DataProcessor(communicationOrchestrator);
+        BackendMetrics metrics = new BackendMetrics();
+        initializeCanonicalDbSink(metrics);
+        this.processor = new DataProcessor(communicationOrchestrator, metrics, canonicalDbSink);
         this.tickerplantThread = new Thread(new Tickerplant(communicationOrchestrator));
         this.tickerplantThread.start();
 
@@ -178,6 +202,18 @@ public class ESBClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster cluster) {
-        // Clean up resources before termination
+        closeCanonicalDbSink();
+    }
+
+    void initializeCanonicalDbSink(BackendMetrics metrics) {
+        DbWriterConfig config = dbWriterConfigSupplier.get();
+        AsyncDbWriter writer = dbWriterFactory.apply(config, metrics);
+        this.canonicalDbSink = new CanonicalDbSink(writer);
+    }
+
+    void closeCanonicalDbSink() {
+        if (canonicalDbSink != null) {
+            canonicalDbSink.close();
+        }
     }
 }
