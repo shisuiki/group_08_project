@@ -13,6 +13,22 @@ public class BackendMetrics {
     private final ConcurrentHashMap<String, AtomicLong> gauges = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Distribution> distributions = new ConcurrentHashMap<>();
 
+    public Counter counter(String name) {
+        return counter(name, Map.of());
+    }
+
+    public Counter counter(String name, Map<String, String> labels) {
+        return new Counter(metricKey(name, labels));
+    }
+
+    public DistributionHandle distribution(String name) {
+        return distribution(name, Map.of());
+    }
+
+    public DistributionHandle distribution(String name, Map<String, String> labels) {
+        return new DistributionHandle(metricKey(name, labels));
+    }
+
     public void increment(String counterName) {
         increment(counterName, Map.of());
     }
@@ -26,7 +42,7 @@ public class BackendMetrics {
     }
 
     public void add(String counterName, Map<String, String> labels, long amount) {
-        counters.computeIfAbsent(metricKey(counterName, labels), ignored -> new LongAdder()).add(amount);
+        addCounter(metricKey(counterName, labels), amount);
     }
 
     public void setGauge(String gaugeName, long value) {
@@ -42,7 +58,7 @@ public class BackendMetrics {
     }
 
     public void observe(String distributionName, Map<String, String> labels, long value) {
-        distributions.computeIfAbsent(metricKey(distributionName, labels), ignored -> new Distribution()).observe(value);
+        observeDistribution(metricKey(distributionName, labels), value);
     }
 
     public long get(String counterName) {
@@ -108,6 +124,42 @@ public class BackendMetrics {
             .replace("\\", "\\\\")
             .replace("\n", "\\n")
             .replace("\"", "\\\"");
+    }
+
+    private void addCounter(String key, long amount) {
+        counters.computeIfAbsent(key, ignored -> new LongAdder()).add(amount);
+    }
+
+    private void observeDistribution(String key, long value) {
+        distributions.computeIfAbsent(key, ignored -> new Distribution()).observe(value);
+    }
+
+    public final class Counter {
+        private final String key;
+
+        private Counter(String key) {
+            this.key = key;
+        }
+
+        public void increment() {
+            add(1L);
+        }
+
+        public void add(long amount) {
+            addCounter(key, amount);
+        }
+    }
+
+    public final class DistributionHandle {
+        private final String key;
+
+        private DistributionHandle(String key) {
+            this.key = key;
+        }
+
+        public void observe(long value) {
+            observeDistribution(key, value);
+        }
     }
 
     private static final class Distribution {

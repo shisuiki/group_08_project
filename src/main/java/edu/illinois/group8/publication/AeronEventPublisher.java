@@ -6,11 +6,14 @@ import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.metrics.BackendMetrics;
 import org.agrona.ExpandableArrayBuffer;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 public class AeronEventPublisher implements EventPublisher {
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final JsonCanonicalSerializer serializer;
     private final BackendMetrics metrics;
     private final ExpandableArrayBuffer buffer = new ExpandableArrayBuffer();
+    private final ConcurrentHashMap<PublicationMetricKey, PublicationMetricHandles> metricHandles = new ConcurrentHashMap<>();
 
     public AeronEventPublisher(
         ESBClusterCommunicationOrchestrator communicationOrchestrator,
@@ -27,19 +30,53 @@ public class AeronEventPublisher implements EventPublisher {
         long offerStartTsNs = System.nanoTime();
         byte[] bytes = serializer.toBytes(event);
         buffer.putBytes(0, bytes);
-        var labels = BackendMetrics.labels("service", "backend", "stream", event.streamName());
-        metrics.increment("backend_publication_offer_total", labels);
+        PublicationMetricHandles handles = metricHandles.computeIfAbsent(
+            new PublicationMetricKey(event.streamName()),
+            this::publicationMetricHandles
+        );
+        handles.offerTotal.increment();
         long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, bytes.length);
         long offerEndTsNs = System.nanoTime();
-        metrics.observe("backend_publication_latency_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
+        handles.latency.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
         if (result < 0L) {
-            metrics.increment("backend_publication_offer_failed_total", labels);
-            metrics.observe("backend_publication_backpressure_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
-            metrics.increment("publication.offer_failed." + event.streamName());
+            handles.offerFailed.increment();
+            handles.backpressure.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
+            handles.legacyOfferFailed.increment();
             return false;
         }
-        metrics.increment("publication.offer_success." + event.streamName());
-        metrics.add("publication.bytes." + event.streamName(), bytes.length);
+        handles.legacyOfferSuccess.increment();
+        handles.legacyBytes.add(bytes.length);
         return true;
+    }
+
+    private PublicationMetricHandles publicationMetricHandles(PublicationMetricKey key) {
+        return publicationMetricHandles(metrics, key.streamName());
+    }
+
+    static PublicationMetricHandles publicationMetricHandles(BackendMetrics metrics, String streamName) {
+        var labels = BackendMetrics.labels("service", "backend", "stream", streamName);
+        return new PublicationMetricHandles(
+            metrics.counter("backend_publication_offer_total", labels),
+            metrics.distribution("backend_publication_latency_ns", labels),
+            metrics.counter("backend_publication_offer_failed_total", labels),
+            metrics.distribution("backend_publication_backpressure_ns", labels),
+            metrics.counter("publication.offer_failed." + streamName),
+            metrics.counter("publication.offer_success." + streamName),
+            metrics.counter("publication.bytes." + streamName)
+        );
+    }
+
+    private record PublicationMetricKey(String streamName) {
+    }
+
+    record PublicationMetricHandles(
+        BackendMetrics.Counter offerTotal,
+        BackendMetrics.DistributionHandle latency,
+        BackendMetrics.Counter offerFailed,
+        BackendMetrics.DistributionHandle backpressure,
+        BackendMetrics.Counter legacyOfferFailed,
+        BackendMetrics.Counter legacyOfferSuccess,
+        BackendMetrics.Counter legacyBytes
+    ) {
     }
 }

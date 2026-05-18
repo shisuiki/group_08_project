@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DataProcessorIngressEnvelopeTest {
     private static final String TRADE_MESSAGE = """
@@ -35,23 +36,37 @@ class DataProcessorIngressEnvelopeTest {
     @Test
     void envelopeReceiveTimestampBecomesCanonicalIngestTimestamp() {
         CollectingEventPublisher publisher = new CollectingEventPublisher();
+        BackendMetrics metrics = new BackendMetrics();
         DataProcessor processor = new DataProcessor(
             new KalshiCanonicalParser(),
             new OrderBookStateManager(),
             publisher,
-            new BackendMetrics()
+            metrics
         );
 
-        processor.processMessage(KalshiIngressEnvelope.wrap(
+        String envelopedMessage = KalshiIngressEnvelope.wrap(
             TRADE_MESSAGE,
             123_456_789L,
             Instant.parse("2026-05-08T00:00:00Z"),
             "live-1",
             null
-        ));
+        );
+
+        processor.processMessage(envelopedMessage);
 
         MarketTrade trade = assertInstanceOf(MarketTrade.class, publisher.events().get(1));
         assertEquals(123_456_789L, trade.metadata().ingestTsNs());
+        assertEquals(1L, metrics.get(
+            "backend_ws_messages_total",
+            BackendMetrics.labels("service", "backend", "source", "kalshi")
+        ));
+        assertEquals(envelopedMessage.length(), metrics.get(
+            "backend_ws_bytes_total",
+            BackendMetrics.labels("service", "backend", "source", "kalshi")
+        ));
+        assertTrue(metrics.prometheusText().contains(
+            "backend_ws_message_age_ms_count{event_type=\"market_trade\",schema_version=\"1\",service=\"backend\",source=\"kalshi\",stream=\"canonical.trade\"} 1\n"
+        ));
     }
 
     @Test

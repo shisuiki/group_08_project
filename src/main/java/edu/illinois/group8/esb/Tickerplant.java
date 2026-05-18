@@ -8,12 +8,16 @@ import io.aeron.Publication;
 import io.aeron.Subscription;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Tickerplant implements Runnable {
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final Subscription internalSubscription;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final BackendMetrics metrics;
+    private final BackendMetrics.Counter missingStreamNameFailures;
+    private final BackendMetrics.Counter parseFailures;
+    private final ConcurrentHashMap<String, RouteMetricHandles> routeMetricHandles = new ConcurrentHashMap<>();
 
     public Tickerplant(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this(communicationOrchestrator, new BackendMetrics());
@@ -23,6 +27,8 @@ public class Tickerplant implements Runnable {
         this.communicationOrchestrator = communicationOrchestrator;
         this.internalSubscription = communicationOrchestrator.getInternalSubscription();
         this.metrics = metrics;
+        this.missingStreamNameFailures = metrics.counter("tickerplant.route_failed.missing_stream_name");
+        this.parseFailures = metrics.counter("tickerplant.route_failed.parse_error");
     }
 
     @Override
@@ -45,7 +51,7 @@ public class Tickerplant implements Runnable {
             JsonNode root = objectMapper.readTree(message);
             String streamName = root.path("stream_name").asText(null);
             if (streamName == null || streamName.isBlank()) {
-                metrics.increment("tickerplant.route_failed.missing_stream_name");
+                missingStreamNameFailures.increment();
                 return false;
             }
             Publication publication = communicationOrchestrator.getPublication(streamName);
@@ -53,27 +59,53 @@ public class Tickerplant implements Runnable {
                 metrics.increment("tickerplant.route_failed.unknown_stream." + streamName);
                 return false;
             }
-            var labels = BackendMetrics.labels("service", "tickerplant", "stream", streamName);
+            RouteMetricHandles handles = routeMetricHandles.computeIfAbsent(streamName, this::routeMetricHandles);
             long offerStartTsNs = System.nanoTime();
-            metrics.increment("backend_publication_offer_total", labels);
+            handles.offerTotal.increment();
             long result = publication.offer(buffer, offset, length);
             long offerEndTsNs = System.nanoTime();
-            metrics.observe("backend_publication_latency_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
+            handles.latency.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
             if (result < 0L) {
-                metrics.increment("backend_publication_offer_failed_total", labels);
-                metrics.observe("backend_publication_backpressure_ns", labels, Math.max(0L, offerEndTsNs - offerStartTsNs));
-                metrics.increment("tickerplant.route_failed.offer." + streamName);
+                handles.offerFailed.increment();
+                handles.backpressure.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
+                handles.routeOfferFailed.increment();
                 return false;
             }
-            metrics.increment("tickerplant.route_success." + streamName);
+            handles.routeSuccess.increment();
             return true;
         } catch (Exception e) {
-            metrics.increment("tickerplant.route_failed.parse_error");
+            parseFailures.increment();
             return false;
         }
     }
 
     public BackendMetrics metrics() {
         return metrics;
+    }
+
+    private RouteMetricHandles routeMetricHandles(String streamName) {
+        return routeMetricHandles(metrics, streamName);
+    }
+
+    static RouteMetricHandles routeMetricHandles(BackendMetrics metrics, String streamName) {
+        var labels = BackendMetrics.labels("service", "tickerplant", "stream", streamName);
+        return new RouteMetricHandles(
+            metrics.counter("backend_publication_offer_total", labels),
+            metrics.distribution("backend_publication_latency_ns", labels),
+            metrics.counter("backend_publication_offer_failed_total", labels),
+            metrics.distribution("backend_publication_backpressure_ns", labels),
+            metrics.counter("tickerplant.route_failed.offer." + streamName),
+            metrics.counter("tickerplant.route_success." + streamName)
+        );
+    }
+
+    record RouteMetricHandles(
+        BackendMetrics.Counter offerTotal,
+        BackendMetrics.DistributionHandle latency,
+        BackendMetrics.Counter offerFailed,
+        BackendMetrics.DistributionHandle backpressure,
+        BackendMetrics.Counter routeOfferFailed,
+        BackendMetrics.Counter routeSuccess
+    ) {
     }
 }
