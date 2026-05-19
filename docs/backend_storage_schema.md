@@ -7,6 +7,11 @@ defaults to the canonical DB reader. File layouts under `recordings/` remain for
 `recording-capture`, legacy archive/import, local fixtures, demos, and debug
 exports.
 
+The DB writer auto-enables when `DB_WRITER_DATABASE_URL` is present and
+`DB_WRITER_ENABLED` is blank or unset. Set `DB_WRITER_ENABLED=false` for an
+explicit opt-out; writes remain async, non-blocking, and drop-visible through
+writer metrics.
+
 ## Raw Ingest
 
 For new live ingestion, `raw_ws_events` is the primary replay/audit table. It

@@ -107,6 +107,41 @@ class KalshiSystemTest {
     }
 
     @Test
+    void rawDbSinkFactoryAutoEnablesWriterWhenDatabaseUrlIsPresent() {
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.DATABASE_URL_ENV, "jdbc:postgresql://localhost/kalshi_test"
+        ));
+        RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        AtomicInteger factoryCalls = new AtomicInteger();
+
+        RawDbIngestSink sink = KalshiSystem.createRawDbIngestSink(config, new BackendMetrics(), (dbConfig, metrics) -> {
+            factoryCalls.incrementAndGet();
+            assertEquals(config, dbConfig);
+            return writer;
+        });
+
+        assertNotNull(sink);
+        assertEquals(1, factoryCalls.get());
+    }
+
+    @Test
+    void rawDbSinkFactoryHonorsExplicitFalseOptOutWithDatabaseUrl() {
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.ENABLED_ENV, "false",
+            DbWriterConfig.DATABASE_URL_ENV, "jdbc:postgresql://localhost/kalshi_test"
+        ));
+        AtomicInteger factoryCalls = new AtomicInteger();
+
+        RawDbIngestSink sink = KalshiSystem.createRawDbIngestSink(config, new BackendMetrics(), (dbConfig, metrics) -> {
+            factoryCalls.incrementAndGet();
+            return new RecordingAsyncDbWriter();
+        });
+
+        assertNull(sink);
+        assertEquals(0, factoryCalls.get());
+    }
+
+    @Test
     void rawDbSinkFactoryUsesConfiguredSourceCaptureAndCanClose() {
         DbWriterConfig config = new DbWriterConfig(
             true,

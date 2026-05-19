@@ -53,6 +53,44 @@ class AsyncDbWriterFactoryTest {
         }
     }
 
+    @Test
+    void databaseUrlAutoEnabledConfigConstructsWriterWithoutOpeningConnection() {
+        AtomicInteger openConnections = new AtomicInteger();
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.DATABASE_URL_ENV, "jdbc:postgresql://localhost/kalshi_test"
+        ));
+
+        AsyncDbWriter writer = AsyncDbWriterFactory.create(config, new BackendMetrics(), () -> {
+            openConnections.incrementAndGet();
+            throw new AssertionError("connection should not open during writer construction");
+        });
+
+        try {
+            assertEquals(0, openConnections.get());
+            assertEquals(DbWriterConfig.DEFAULT_QUEUE_CAPACITY, writer.stats().queueCapacity());
+        } finally {
+            writer.close();
+        }
+    }
+
+    @Test
+    void explicitFalseWithDatabaseUrlReturnsDisabledWriterWithoutCreatingStore() {
+        AtomicInteger openConnections = new AtomicInteger();
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.ENABLED_ENV, "false",
+            DbWriterConfig.DATABASE_URL_ENV, "jdbc:postgresql://localhost/kalshi_test"
+        ));
+
+        AsyncDbWriter writer = AsyncDbWriterFactory.create(config, new BackendMetrics(), () -> {
+            openConnections.incrementAndGet();
+            throw new AssertionError("connection should not open for explicitly disabled writer");
+        });
+
+        assertEquals(0, openConnections.get());
+        assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput("{\"type\":\"ticker\"}")));
+        writer.close();
+    }
+
     private static RawWsDbEventInput rawInput(String rawPayload) {
         return new RawWsDbEventInput(
             "kalshi-ws",

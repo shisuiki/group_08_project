@@ -50,7 +50,7 @@ public record DbWriterConfig(
     public static DbWriterConfig from(Map<String, String> env) {
         Objects.requireNonNull(env, "env");
         return new DbWriterConfig(
-            parseBoolean(env.get(ENABLED_ENV), false),
+            parseEnabled(env.get(ENABLED_ENV), env.get(DATABASE_URL_ENV)),
             env.get(DATABASE_URL_ENV),
             env.get(DATABASE_USER_ENV),
             env.get(DATABASE_PASSWORD_ENV),
@@ -61,9 +61,9 @@ public record DbWriterConfig(
         );
     }
 
-    private static boolean parseBoolean(String value, boolean defaultValue) {
+    private static boolean parseEnabled(String value, String databaseUrl) {
         if (value == null || value.isBlank()) {
-            return defaultValue;
+            return !normalize(databaseUrl).isBlank();
         }
         String normalized = value.trim().toLowerCase();
         if ("true".equals(normalized)) {

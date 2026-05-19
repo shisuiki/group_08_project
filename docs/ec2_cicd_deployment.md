@@ -19,7 +19,9 @@ Required repository secrets:
 
 Optional repository secrets:
 
-- `DB_WRITER_DATABASE_PASSWORD`: database password for the optional DB writer. The DB writer is disabled by default.
+- `DB_WRITER_DATABASE_PASSWORD`: database password for the optional DB writer.
+  The DB writer auto-enables when `DB_WRITER_DATABASE_URL` is provided; set
+  `DB_WRITER_ENABLED=false` to opt out.
 
 ## GitHub Variables
 
@@ -43,9 +45,10 @@ Recommended repository variables:
 - `KALSHI_WS_ACK_TIMEOUT_MS`: default `30000`; timeout for Kalshi subscribe/update acknowledgements during open-market startup.
 - `BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED`: default `false`; enable only when the selected feed's per-connection sequence semantics are understood.
 - `BACKEND_ORDERBOOK_DERIVED_ENABLED`: default `true`; set `false` for recorder-first high-volume open-market runs.
-- `DB_WRITER_ENABLED`: default `false`.
-- `DB_WRITER_DATABASE_URL`: optional database URL for the disabled-by-default DB writer.
-- `DB_WRITER_DATABASE_USER`: optional database user for the disabled-by-default DB writer.
+- `DB_WRITER_ENABLED`: blank/unset auto-enables when `DB_WRITER_DATABASE_URL`
+  is present; set `false` to force-disable.
+- `DB_WRITER_DATABASE_URL`: optional database URL for the DB writer.
+- `DB_WRITER_DATABASE_USER`: optional database user for the DB writer.
 - `DB_WRITER_QUEUE_CAPACITY`: default `250000`.
 - `DB_WRITER_BATCH_SIZE`: default `500`.
 - `DB_WRITER_RAW_SOURCE`: default `kalshi.websocket`.

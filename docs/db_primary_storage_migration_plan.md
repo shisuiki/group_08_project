@@ -533,9 +533,11 @@ Add:
 
 ## Configuration
 
-DB writer configuration is parsed in one place and defaults to disabled:
+DB writer configuration is parsed in one place. Blank or unset
+`DB_WRITER_ENABLED` auto-enables the writer when `DB_WRITER_DATABASE_URL` is
+present; set `DB_WRITER_ENABLED=false` to opt out explicitly:
 
-- `DB_WRITER_ENABLED` default `false`
+- `DB_WRITER_ENABLED` blank/unset means auto
 - `DB_WRITER_DATABASE_URL` default empty
 - `DB_WRITER_DATABASE_USER` default empty
 - `DB_WRITER_DATABASE_PASSWORD` default empty
@@ -546,8 +548,8 @@ DB writer configuration is parsed in one place and defaults to disabled:
 
 These settings are plumbed through `.env.example`, Docker Compose, and the EC2
 deploy workflow. EC2 deployments read `DB_WRITER_DATABASE_PASSWORD` from the
-optional GitHub secret of the same name. The writer remains disabled unless
-`DB_WRITER_ENABLED=true`.
+optional GitHub secret of the same name. DB writes remain async, non-blocking,
+and drop-visible through writer metrics.
 
 ## Open Decisions
 

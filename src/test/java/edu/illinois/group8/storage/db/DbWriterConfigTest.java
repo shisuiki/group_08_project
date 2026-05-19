@@ -48,6 +48,37 @@ class DbWriterConfigTest {
     }
 
     @Test
+    void databaseUrlAutoEnablesWriterWhenEnabledIsUnset() {
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.DATABASE_URL_ENV, " jdbc:postgresql://localhost/kalshi_test "
+        ));
+
+        assertTrue(config.enabled());
+        assertEquals("jdbc:postgresql://localhost/kalshi_test", config.databaseUrl());
+    }
+
+    @Test
+    void databaseUrlAutoEnablesWriterWhenEnabledIsBlank() {
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.ENABLED_ENV, " ",
+            DbWriterConfig.DATABASE_URL_ENV, "jdbc:postgresql://localhost/kalshi_test"
+        ));
+
+        assertTrue(config.enabled());
+    }
+
+    @Test
+    void explicitFalseDisablesWriterEvenWithDatabaseUrl() {
+        DbWriterConfig config = DbWriterConfig.from(Map.of(
+            DbWriterConfig.ENABLED_ENV, " false ",
+            DbWriterConfig.DATABASE_URL_ENV, "jdbc:postgresql://localhost/kalshi_test"
+        ));
+
+        assertFalse(config.enabled());
+        assertEquals("jdbc:postgresql://localhost/kalshi_test", config.databaseUrl());
+    }
+
+    @Test
     void blankRawSourceAndCaptureIdFallBackToDefaults() {
         DbWriterConfig config = DbWriterConfig.from(Map.of(
             DbWriterConfig.RAW_SOURCE_ENV, " ",
