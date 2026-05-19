@@ -352,9 +352,25 @@ public class KalshiCanonicalParser {
         StringBuilder builder = new StringBuilder(rawEventId);
         for (String part : parts) {
             if (part != null && !part.isBlank()) {
-                builder.append('_').append(part.replaceAll("[^A-Za-z0-9_\\-]", "_"));
+                builder.append('_');
+                appendSanitizedEventIdPart(builder, part);
             }
         }
         return builder.toString();
+    }
+
+    private static void appendSanitizedEventIdPart(StringBuilder builder, String part) {
+        for (int i = 0; i < part.length(); i++) {
+            char ch = part.charAt(i);
+            builder.append(isEventIdPartChar(ch) ? ch : '_');
+        }
+    }
+
+    private static boolean isEventIdPartChar(char ch) {
+        return (ch >= 'A' && ch <= 'Z')
+            || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9')
+            || ch == '_'
+            || ch == '-';
     }
 }

@@ -64,4 +64,10 @@ class KalshiCanonicalParserTest {
         ParserErrorEvent error = assertInstanceOf(ParserErrorEvent.class, result.canonicalEvents().get(0));
         assertEquals("malformed_json", error.errorCode());
     }
+
+    @Test
+    void eventIdSanitizesPartsWithoutRegex() {
+        assertEquals("raw_test_a_b_c_d", KalshiCanonicalParser.eventId("raw_test", "a.b/c d"));
+        assertEquals("raw_test_a_b_c_d_e-f", KalshiCanonicalParser.eventId("raw_test", "a.b/c d_e-f"));
+    }
 }

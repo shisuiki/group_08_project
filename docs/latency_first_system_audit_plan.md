@@ -70,13 +70,15 @@ Kalshi WebSocket
   Fix: document DB as primary query/audit store for accepted rows only; expose
   `db_*_dropped_total`, gaps, and watermarks.
 
-- [Medium] Hot path does expensive ID and numeric work.
+- [Medium, partially resolved] Hot path does expensive ID and numeric work.
   Impact: CPU and allocation overhead on high-frequency orderbook deltas.
-  Evidence: raw event id uses SHA-256; event id sanitization uses regex;
-  price/quantity parsing uses `BigDecimal`; order book uses boxed `TreeMap`.
-  Fix: use source sequence based event ids where available; replace hot
-  `BigDecimal` parsing with fixed-point string parsing; consider primitive
-  price-level arrays/maps.
+  Evidence: raw event id still uses SHA-256; order book uses boxed `TreeMap`.
+  Status: common price/quantity decimal strings now use a fixed-point fast path
+  with `BigDecimal` fallback for non-simple formats, and canonical event id part
+  sanitization uses a deterministic char loop instead of regex.
+  Fix: decide whether source sequence based event ids can replace hot
+  `rawEventId` hashing where available; consider primitive price-level
+  arrays/maps.
 
 - [Medium, partially resolved] Metrics are too expensive for per-message hot path.
   Impact: each call allocates label maps and metric key strings.
@@ -219,8 +221,9 @@ Deliverables:
 - Add stream id/name header so `Tickerplant` can eventually route from metadata
   instead of payload inspection; full-tree parse optimization is handled.
 - Avoid `byte[] -> String -> byte[]` round trips where possible.
-- Replace hot `BigDecimal` parsing with fixed-point parser.
-- Replace regex event id sanitization with deterministic low-allocation logic.
+- Landed: common hot decimal strings use fixed-point parsing with `BigDecimal`
+  fallback for compatibility.
+- Landed: event id sanitization uses deterministic low-allocation char loops.
 - Move SHA-256 to DB/audit sink, not mandatory processor path.
 
 Verification:
@@ -322,7 +325,7 @@ Ranked by expected impact:
 2. Remove JSON envelope double parse.
 3. Header-based tickerplant routing.
 4. Precomputed metric keys and sampled latency metrics.
-5. Fixed-point parser instead of `BigDecimal`.
+5. Move raw event id SHA-256 off the mandatory processor path where possible.
 6. Primitive price-level order book.
 7. Binary canonical serialization for internal streams.
 8. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
