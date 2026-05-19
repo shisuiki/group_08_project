@@ -174,7 +174,7 @@ Required columns:
 
 ### `feature_outputs`
 
-Future durable feature store.
+Durable feature store schema and isolated JDBC store boundary.
 
 Required columns:
 
@@ -590,15 +590,16 @@ and drop-visible through writer metrics.
 
 ## Completed Batches
 
-- V001/V002/V003/V004/V005 migrations exist for raw websocket events, canonical
+- V001/V002/V003/V004/V005/V006 migrations exist for raw websocket events, canonical
   events, canonical commit cursoring, raw payload text storage, and raw REST
-  response capture, plus timestamp-fenced `latest_market_state`.
+  response capture, timestamp-fenced `latest_market_state`, and
+  `feature_outputs`.
 - `AsyncDbWriter`, bounded DB writer queues, raw/canonical JDBC writes, raw REST
   JDBC storage, canonical DB reads, and DB-default replay/feature/frontend/export
   paths exist.
 
 ## Remaining Next Batches
 
-1. Add schema batches for `market_metadata` and `feature_outputs`.
+1. Add the schema batch for `market_metadata`.
 2. Finish DB query/API migration and DB-seeded demo data.
 3. Define the S3 archive/import/export retention and restore policy.

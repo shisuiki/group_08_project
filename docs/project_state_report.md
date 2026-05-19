@@ -184,7 +184,8 @@ Current database status:
   default FeaturePlant, frontend adapter, and research export DB sources. Its
   cursor is global over `canonical_commit_seq`; replay rows are excluded unless
   a replay id or include-replay option is supplied.
-- No persistent feature store schema is present.
+- `feature_outputs` schema and an isolated JDBC store boundary exist; FeaturePlant
+  live/runtime writes are not wired.
 - No S3-to-Timescale loader is implemented in this repo.
 
 Remaining database migration work:
@@ -193,7 +194,8 @@ Remaining database migration work:
   artifacts.
 - Finish DB query/API migration for raw/canonical data already written to
   Timescale/Postgres, while keeping recording import/export boundaries explicit.
-- Add versioned feature storage behind FeaturePlant.
+- Wire versioned feature storage behind FeaturePlant when it can stay off the
+  live hot path.
 - Add query APIs over feature/canonical storage.
 
 ## Caches And Buffers
@@ -249,7 +251,7 @@ Legend:
 | FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, live Aeron fair-polls streams and parses envelopes from byte[] while retaining payload strings, recording is explicit legacy/debug/demo/import; fair-poll coverage uses fake pollers |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
-| Persistent feature store | planned | no durable feature DB |
+| Persistent feature store | current-basic | `feature_outputs` schema and isolated JDBC store boundary exist; no FeaturePlant live/runtime wiring |
 | MarketStateStore | planned | latest trade/ticker/OI/BBO/depth store absent |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
 | Feature/query API | planned | `/features`, `/bars`, WS features absent |
