@@ -40,8 +40,7 @@ public class Tickerplant implements Runnable {
             int fragments = internalSubscription.poll((buffer, offset, length, header) -> {
                 byte[] data = new byte[length];
                 buffer.getBytes(offset, data);
-                String message = new String(data, StandardCharsets.UTF_8);
-                routeMessage(message, buffer, offset, length);
+                routePayload(data, 0, length, buffer, offset, length);
             }, 10);
             if (fragments == 0) {
                 Thread.onSpinWait();
@@ -51,7 +50,17 @@ public class Tickerplant implements Runnable {
 
     public boolean routeMessage(String message, org.agrona.DirectBuffer buffer, int offset, int length) {
         try {
-            String streamName = extractTopLevelStreamName(message);
+            byte[] data = message.getBytes(StandardCharsets.UTF_8);
+            return routePayload(data, 0, data.length, buffer, offset, length);
+        } catch (Exception e) {
+            parseFailures.increment();
+            return false;
+        }
+    }
+
+    boolean routePayload(byte[] data, int dataOffset, int dataLength, org.agrona.DirectBuffer buffer, int offset, int length) {
+        try {
+            String streamName = extractTopLevelStreamName(data, dataOffset, dataLength);
             if (streamName == null || streamName.isBlank()) {
                 missingStreamNameFailures.increment();
                 return false;
@@ -82,32 +91,41 @@ public class Tickerplant implements Runnable {
     }
 
     static String extractTopLevelStreamName(String message) throws IOException {
-        try (JsonParser parser = JSON_FACTORY.createParser(message)) {
-            JsonToken token = parser.nextToken();
-            if (token == null) {
-                return null;
-            }
-            String streamName = null;
-            if (token == JsonToken.START_OBJECT) {
-                while (parser.nextToken() != JsonToken.END_OBJECT) {
-                    if (parser.currentToken() != JsonToken.FIELD_NAME) {
-                        throw new IOException("Malformed JSON object while reading stream_name");
-                    }
-                    String fieldName = parser.currentName();
-                    JsonToken valueToken = parser.nextToken();
-                    if ("stream_name".equals(fieldName)) {
-                        streamName = scalarText(valueToken, parser);
-                    }
-                    parser.skipChildren();
+        byte[] data = message.getBytes(StandardCharsets.UTF_8);
+        return extractTopLevelStreamName(data, 0, data.length);
+    }
+
+    static String extractTopLevelStreamName(byte[] data, int offset, int length) throws IOException {
+        try (JsonParser parser = JSON_FACTORY.createParser(data, offset, length)) {
+            return extractTopLevelStreamName(parser);
+        }
+    }
+
+    private static String extractTopLevelStreamName(JsonParser parser) throws IOException {
+        JsonToken token = parser.nextToken();
+        if (token == null) {
+            return null;
+        }
+        String streamName = null;
+        if (token == JsonToken.START_OBJECT) {
+            while (parser.nextToken() != JsonToken.END_OBJECT) {
+                if (parser.currentToken() != JsonToken.FIELD_NAME) {
+                    throw new IOException("Malformed JSON object while reading stream_name");
                 }
-            } else {
+                String fieldName = parser.currentName();
+                JsonToken valueToken = parser.nextToken();
+                if ("stream_name".equals(fieldName)) {
+                    streamName = scalarText(valueToken, parser);
+                }
                 parser.skipChildren();
             }
-            if (parser.nextToken() != null) {
-                throw new IOException("Trailing JSON content after canonical event");
-            }
-            return streamName;
+        } else {
+            parser.skipChildren();
         }
+        if (parser.nextToken() != null) {
+            throw new IOException("Trailing JSON content after canonical event");
+        }
+        return streamName;
     }
 
     private static String scalarText(JsonToken token, JsonParser parser) throws IOException {

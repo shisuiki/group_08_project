@@ -4,6 +4,7 @@ import edu.illinois.group8.metrics.BackendMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -55,12 +56,42 @@ class TickerplantMetricsTest {
     }
 
     @Test
+    void extractsTopLevelStreamNameFromBytes() throws Exception {
+        byte[] data = bytes("""
+            {"event_id":"e1","stream_name":"derived.top_of_book","metadata":{"stream_name":"canonical.trade"}}
+            """);
+
+        assertEquals("derived.top_of_book", Tickerplant.extractTopLevelStreamName(data, 0, data.length));
+    }
+
+    @Test
     void nestedStreamNameDoesNotRouteAsTopLevel() throws Exception {
         String streamName = Tickerplant.extractTopLevelStreamName("""
             {"event_id":"e1","metadata":{"stream_name":"canonical.trade"}}
             """);
 
         assertNull(streamName);
+    }
+
+    @Test
+    void byteExtractionIgnoresNestedOnlyStreamName() throws Exception {
+        byte[] data = bytes("""
+            {"event_id":"e1","metadata":{"stream_name":"canonical.trade"}}
+            """);
+
+        assertNull(Tickerplant.extractTopLevelStreamName(data, 0, data.length));
+    }
+
+    @Test
+    void byteExtractionHonorsNonZeroOffsetSlice() throws Exception {
+        String payload = "{\"event_id\":\"e1\",\"stream_name\":\"derived.top_of_book\"}";
+        byte[] payloadBytes = bytes(payload);
+        byte[] data = bytes("xx" + payload + "yy");
+
+        assertEquals(
+            "derived.top_of_book",
+            Tickerplant.extractTopLevelStreamName(data, 2, payloadBytes.length)
+        );
     }
 
     @Test
@@ -79,5 +110,27 @@ class TickerplantMetricsTest {
             IOException.class,
             () -> Tickerplant.extractTopLevelStreamName("{\"stream_name\":\"canonical.trade\"")
         );
+    }
+
+    @Test
+    void byteExtractionThrowsForMalformedAndTrailingJson() {
+        assertThrows(
+            IOException.class,
+            () -> {
+                byte[] data = bytes("{\"stream_name\":\"canonical.trade\"");
+                Tickerplant.extractTopLevelStreamName(data, 0, data.length);
+            }
+        );
+        assertThrows(
+            IOException.class,
+            () -> {
+                byte[] data = bytes("{\"stream_name\":\"canonical.trade\"}{}");
+                Tickerplant.extractTopLevelStreamName(data, 0, data.length);
+            }
+        );
+    }
+
+    private static byte[] bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
     }
 }
