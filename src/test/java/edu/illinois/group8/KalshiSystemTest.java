@@ -245,6 +245,28 @@ class KalshiSystemTest {
     }
 
     @Test
+    void openMarketShardClientsUseFactoryWithoutSharedClusterArgument() {
+        RawDbIngestSink sink = new RawDbIngestSink(new RecordingAsyncDbWriter(), "kalshi.websocket", "live");
+        List<RawDbIngestSink.RawDbIngestConnection> connections = new ArrayList<>();
+        AtomicInteger factoryCalls = new AtomicInteger();
+        KalshiSystem.OpenMarketWebSocketClientFactory factory = (wrapper, rawDbConnection, recorder) -> {
+            factoryCalls.incrementAndGet();
+            connections.add(rawDbConnection);
+            assertNull(recorder);
+            return null;
+        };
+
+        assertNull(KalshiSystem.newOpenMarketWebSocketClient(null, sink, null, factory));
+        assertNull(KalshiSystem.openOrderbookConnection(null, 2, sink, null, factory));
+
+        assertEquals(2, factoryCalls.get());
+        assertEquals(2, connections.size());
+        assertEquals("live-1", connections.get(0).connectionId());
+        assertEquals("live-2", connections.get(1).connectionId());
+        assertFalse(connections.get(0) == connections.get(1));
+    }
+
+    @Test
     void orderBookRecoveryGapConsumerFactoryNoopsWhenDisabled() {
         BackendConfig config = BackendConfig.from(Map.of());
         AtomicInteger factoryCalls = new AtomicInteger();

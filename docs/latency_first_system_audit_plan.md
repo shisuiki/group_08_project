@@ -27,7 +27,7 @@ Kalshi WebSocket
   -> KalshiWebSocketClient.onMessage
   -> optional RawIngestRecorder
   -> KalshiIngressEnvelope byte[] JSON envelope
-  -> ClientClusterOrchestrator.writeToCluster(byte[])
+  -> per-shard ClientClusterOrchestrator.writeToCluster(byte[])
   -> ESBClusteredService.onSessionMessage scratch byte[] slice
   -> DataProcessor.processMessage(byte[], offset, length)
   -> KalshiCanonicalParser
@@ -44,8 +44,9 @@ Kalshi WebSocket
   cluster ingress by default on the WebSocket receive path.
   Impact: cluster ingress backpressure stalls live ingestion.
   Status: live ingress now defaults to one Aeron offer and drops/counts on
-  failure. Prefer one ingress client per WebSocket shard or a non-shared buffer
-  as the next bottleneck reduction.
+  failure. Open-market WebSocket shards now use one ingress client per shard
+  instead of sharing one synchronized `ClientClusterOrchestrator`; configured
+  market mode keeps its existing single-client behavior.
 
 - [High] The same message is parsed/copied too many times.
   Impact: avoidable latency and allocation.
@@ -170,8 +171,7 @@ Deliverables:
   drop-first ingress.
 - Landed: add `cluster_ingress_offer_failed_total`.
 - Landed: add `cluster_ingress_dropped_total`.
-- Remaining: remove shared synchronized ingress bottleneck or use one ingress
-  client per WebSocket shard.
+- Landed: one ingress client per open-market WebSocket shard.
 
 Verification:
 
@@ -370,16 +370,15 @@ Verification:
 
 Ranked by expected impact:
 
-1. One ingress client per WebSocket shard.
-2. Remove JSON envelope double parse.
-3. Header-based tickerplant routing.
-4. Precomputed metric keys and sampled latency metrics.
-5. Move raw event id SHA-256 off the mandatory processor path where possible.
-6. Primitive price-level order book.
-7. Binary canonical serialization for internal streams.
-8. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
+1. Remove JSON envelope double parse.
+2. Header-based tickerplant routing.
+3. Precomputed metric keys and sampled latency metrics.
+4. Move raw event id SHA-256 off the mandatory processor path where possible.
+5. Primitive price-level order book.
+6. Binary canonical serialization for internal streams.
+7. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
    tickerplant, and DB writer.
-9. GC tuning only after allocation reductions are measured.
+8. GC tuning only after allocation reductions are measured.
 
 Do not start with GC flags, S3, or DB tuning. Current code-level allocation and
 blocking points are more obvious and cheaper to fix first.
@@ -411,5 +410,6 @@ Smallest useful slice:
 5. DB migrations for `raw_ws_events`, `canonical_events`, and
    `latest_market_state` are landed.
 6. Tests cover duplicate insert and queue overflow.
+7. Per-WebSocket-shard ingress clients are landed for open-market mode.
 
 This slice proves the latency-first contract without rewriting the full system.

@@ -156,7 +156,7 @@ flowchart LR
     RAWSTORE["recordings/raw-ingest<br/>source/date/hour/minute NDJSON"]:::storage
     RAWDB["raw_ws_events<br/>Postgres/Timescale accepted raw DB"]:::storage
     ENVELOPE["KalshiIngressEnvelope<br/>raw payload + receive timestamp<br/>connection/replay metadata"]:::current
-    CCO["ClientClusterOrchestrator<br/>Aeron Cluster ingress"]:::bus
+    CCO["ClientClusterOrchestrator per shard<br/>Aeron Cluster ingress"]:::bus
   end
 
   CFG --> KS
@@ -168,7 +168,7 @@ flowchart LR
   KWS -.->|recordInbound when enabled| RAWREC
   KWS -.->|raw DB side copy when enabled| RAWDB
   RAWREC -.-> RAWSTORE
-  KWS -->|byte[] KalshiIngressEnvelope| ENVELOPE
+  KWS -->|per-shard byte[] KalshiIngressEnvelope| ENVELOPE
   ENVELOPE --> CCO
 
   subgraph RawReplay["Raw Ingress Replay"]

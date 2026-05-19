@@ -70,7 +70,7 @@ Main path:
 Kalshi REST/WebSocket
   -> KalshiSystem / KalshiWebSocketClient
   -> KalshiIngressEnvelope byte[] ingress
-  -> ClientClusterOrchestrator.writeToCluster(byte[])
+  -> per-shard ClientClusterOrchestrator.writeToCluster(byte[])
   -> Aeron Cluster / ESBClusteredService scratch byte[] parse
   -> DataProcessor.processMessage(byte[], offset, length)
   -> internal Aeron stream
@@ -85,7 +85,8 @@ Important classes:
 - `KalshiWrapper`: Kalshi REST wrapper and request signing.
 - `KalshiWebSocketClient`: custom WebSocket client, subscription ack handling,
   raw ingest byte envelope creation.
-- `ClientClusterOrchestrator`: byte[] Aeron Cluster ingress writer.
+- `ClientClusterOrchestrator`: per-WebSocket-shard byte[] Aeron Cluster
+  ingress writer in open-market mode.
 - `ClusterMain`: Aeron Cluster node startup.
 - `ESBClusteredService`: leader-side cluster message handling with reusable
   ingress scratch buffer and recovery snapshot payloads.

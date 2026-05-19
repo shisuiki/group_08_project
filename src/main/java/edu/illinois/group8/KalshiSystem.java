@@ -4,7 +4,6 @@ import edu.illinois.group8.config.BackendConfig;
 import edu.illinois.group8.canonical.EventType;
 import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.canonical.StreamRegistry;
-import edu.illinois.group8.cluster.ClientClusterOrchestrator;
 import edu.illinois.group8.feature.AeronCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.CanonicalEnvelopeSource;
 import edu.illinois.group8.metrics.BackendMetrics;
@@ -82,21 +81,20 @@ public class KalshiSystem {
         KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
         try {
             if (config.openMarketSelectionEnabled()) {
-                ClientClusterOrchestrator cluster = new ClientClusterOrchestrator(config.clusterAddresses(), config.hostIp());
-                KalshiWebSocketClient wsClient = newWebSocketClient(
+                KalshiWebSocketClient wsClient = newOpenMarketWebSocketClient(
                     wrapper,
-                    cluster,
-                    newRawDbConnection(rawDbSink),
-                    rawIngestRecorder
+                    rawDbSink,
+                    rawIngestRecorder,
+                    KalshiSystem::newWebSocketClient
                 );
                 subscribeOpenMarketCapture(
                     config,
                     wrapper,
                     wsClient,
-                    cluster,
                     rawDbSink,
                     rawIngestRecorder,
-                    orderBookRecoveryController
+                    orderBookRecoveryController,
+                    KalshiSystem::newWebSocketClient
                 );
             } else {
                 List<String> tickers = resolveMarketTickers(config, wrapper);
@@ -120,10 +118,10 @@ public class KalshiSystem {
         BackendConfig config,
         KalshiWrapper wrapper,
         KalshiWebSocketClient wsClient,
-        ClientClusterOrchestrator cluster,
         RawDbIngestSink rawDbSink,
         RawIngestRecorder rawIngestRecorder,
-        OrderBookRecoveryController orderBookRecoveryController
+        OrderBookRecoveryController orderBookRecoveryController,
+        OpenMarketWebSocketClientFactory clientFactory
     ) throws InterruptedException {
         List<String> globalChannels = config.websocketGlobalChannels().isEmpty()
             ? requestedOpenMarketGlobalChannels(config.websocketChannels())
@@ -140,13 +138,13 @@ public class KalshiSystem {
         discoverAndSubscribeMarketChunks(
             config,
             wrapper,
-            cluster,
             wsClient,
             filteredChannels,
             "",
             rawDbSink,
             rawIngestRecorder,
-            orderBookRecoveryController
+            orderBookRecoveryController,
+            clientFactory
         );
     }
 
@@ -209,13 +207,13 @@ public class KalshiSystem {
     private static void discoverAndSubscribeMarketChunks(
         BackendConfig config,
         KalshiWrapper wrapper,
-        ClientClusterOrchestrator cluster,
         KalshiWebSocketClient initialClient,
         List<String> channels,
         String seriesTicker,
         RawDbIngestSink rawDbSink,
         RawIngestRecorder rawIngestRecorder,
-        OrderBookRecoveryController orderBookRecoveryController
+        OrderBookRecoveryController orderBookRecoveryController,
+        OpenMarketWebSocketClientFactory clientFactory
     ) throws InterruptedException {
         if (channels.isEmpty()) {
             return;
@@ -246,10 +244,10 @@ public class KalshiSystem {
                         subscriptionSid = -1;
                         orderbookClient = openOrderbookConnection(
                             wrapper,
-                            cluster,
                             connectionIndex,
                             rawDbSink,
-                            rawIngestRecorder
+                            rawIngestRecorder,
+                            clientFactory
                         );
                     }
                     OrderbookSubscriptionState state = subscribeDiscoveredChunk(
@@ -274,10 +272,10 @@ public class KalshiSystem {
                             subscriptionSid = -1;
                             orderbookClient = openOrderbookConnection(
                                 wrapper,
-                                cluster,
                                 connectionIndex,
                                 rawDbSink,
-                                rawIngestRecorder
+                                rawIngestRecorder,
+                                clientFactory
                             );
                         }
                         OrderbookSubscriptionState state = subscribeDiscoveredChunk(
@@ -314,10 +312,10 @@ public class KalshiSystem {
                         subscriptionSid = -1;
                         orderbookClient = openOrderbookConnection(
                             wrapper,
-                            cluster,
                             connectionIndex,
                             rawDbSink,
-                            rawIngestRecorder
+                            rawIngestRecorder,
+                            clientFactory
                         );
                     }
                     OrderbookSubscriptionState state = subscribeDiscoveredChunk(
@@ -340,15 +338,25 @@ public class KalshiSystem {
         }
     }
 
-    private static KalshiWebSocketClient openOrderbookConnection(
+    static KalshiWebSocketClient openOrderbookConnection(
         KalshiWrapper wrapper,
-        ClientClusterOrchestrator cluster,
         int connectionIndex,
         RawDbIngestSink rawDbSink,
-        RawIngestRecorder rawIngestRecorder
+        RawIngestRecorder rawIngestRecorder,
+        OpenMarketWebSocketClientFactory clientFactory
     ) {
         System.out.println("Opening Kalshi orderbook websocket shard " + connectionIndex + ".");
-        return newWebSocketClient(wrapper, cluster, newRawDbConnection(rawDbSink), rawIngestRecorder);
+        return newOpenMarketWebSocketClient(wrapper, rawDbSink, rawIngestRecorder, clientFactory);
+    }
+
+    static KalshiWebSocketClient newOpenMarketWebSocketClient(
+        KalshiWrapper wrapper,
+        RawDbIngestSink rawDbSink,
+        RawIngestRecorder rawIngestRecorder,
+        OpenMarketWebSocketClientFactory clientFactory
+    ) {
+        Objects.requireNonNull(clientFactory, "clientFactory");
+        return clientFactory.create(wrapper, newRawDbConnection(rawDbSink), rawIngestRecorder);
     }
 
     static RawIngestRecorder createRawIngestRecorder(BackendConfig config) {
@@ -378,16 +386,13 @@ public class KalshiSystem {
         return KalshiWebSocketClient.recordingCapture(wrapper, rawDbConnection, rawIngestRecorder);
     }
 
-    private static KalshiWebSocketClient newWebSocketClient(
-        KalshiWrapper wrapper,
-        ClientClusterOrchestrator cluster,
-        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
-        RawIngestRecorder rawIngestRecorder
-    ) {
-        if (rawIngestRecorder == null) {
-            return new KalshiWebSocketClient(wrapper, cluster, rawDbConnection);
-        }
-        return KalshiWebSocketClient.recordingCapture(wrapper, cluster, rawDbConnection, rawIngestRecorder);
+    @FunctionalInterface
+    interface OpenMarketWebSocketClientFactory {
+        KalshiWebSocketClient create(
+            KalshiWrapper wrapper,
+            RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+            RawIngestRecorder rawIngestRecorder
+        );
     }
 
     static RawDbIngestSink createRawDbIngestSink(DbWriterConfig config) {
