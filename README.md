@@ -88,12 +88,14 @@ Each formatted message is then published to our system’s internal Aeron channe
 
 ### Tickerplant
 
-The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and sending them to clients. To do this, we opted to create a multicast Aeron channel for each stream type (i.e. trades, top-of-book, open interest, etc.) so that our system supports many subscribed clients. This design also maintains market integrity by ensuring all clients receive the same data at the same time. The tickerplant categorizes each message received and publishes it to the appropriate channel(s).
+The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and sending them to clients. It publishes on one configured external Aeron channel using stream IDs 10-19, routing by each message's `stream_name`. This design keeps stream selection explicit while still allowing many subscribed clients to receive the same data at the same time.
 
 ### Real-Time Data Storage
 
 New live captures store raw websocket input and canonical events primarily in
-Postgres/Timescale. Raw replay and FeaturePlant default to DB sources. NDJSON/S3
+Postgres/Timescale when a DB URL is configured. Current Docker Compose profiles
+do not start a local DB service; use an external DB URL, or add a future local
+Timescale profile. Raw replay and FeaturePlant default to DB sources. NDJSON/S3
 recording is retained for `recording-capture`, legacy archive/import, fixtures,
 demo data, and debug exports. The downstream stream recorder remains useful for
 validating what Aeron clients receive.
@@ -105,8 +107,8 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 ## How to Run
 1. Copy `.env.example` to `.env`.
 2. For live ingestion, set `KALSHI_KEY_ID`, `KALSHI_KEY_HOST_PATH`, and either `KALSHI_MARKET_TICKERS`, `KALSHI_MARKET_SERIES_TICKER`, or `KALSHI_MARKET_SELECTION_MODE=open_markets`.
-3. Run a single local node with `docker compose --profile single-node-local up --build`, or the three-node live stack with `docker compose --profile cluster-live up --build`.
-4. Raw replay defaults to DB/Timescale; local NDJSON replay is explicit fixture/import/debug mode with `RAW_REPLAY_SOURCE=local-ndjson`.
+3. Use `docker compose --profile cluster-live up --build` for the three-node live stack with `wsclient`; use `docker compose --profile single-node-local up --build` only for a local node0 smoke check.
+4. Raw replay defaults to DB/Timescale. Current Compose profiles do not start Postgres/Timescale; set an external DB URL, or use `RAW_REPLAY_SOURCE=local-ndjson` for explicit fixture/import/debug mode.
 5. Observability is available with `docker compose --profile observability up --build`.
 6. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
 7. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
@@ -116,10 +118,10 @@ Backend stream contracts, schema mappings, replay behavior, featureplant behavio
 
 ## Future Work
 
-Currently, we are using Unicast for all Aeron channels which is inefficient and tough to code with. This is due to the fact that Multicast with Docker Bridges on MacOS doesn’t work properly; the only way to fix this is by deploying on Linux instead. We eventually plan to deploy our services on a K8s cluster running Linux which should fix our multicast problem. We purposely architected our codebase with layers of abstraction that allow us to switch from Unicast to Multicast endpoints easily.
+Currently, our local profiles use configured Aeron endpoints that are constrained by Docker networking. Multicast with Docker Bridges on MacOS does not work reliably; deploying on Linux/K8s remains the intended network path for multicast-style external delivery. We purposely architected our codebase with layers of abstraction that allow us to switch endpoints without rewriting stream routing.
 
 TimescaleDB is the primary live raw ingest, canonical, replay, and FeaturePlant
 source. S3 remains useful for cold archive/export and retained legacy imports
 without adding more hot-path consumers.
 
-Because our WebSocket client is custom-made to be lightweight, it is lacking some features. For example, the Kalshi API documentation mentions that it uses the WebSocket protocol’s standard ping/pong frames (heartbeat), which we have not yet implemented. This is something we would like to implement to ensure a reliable connection.
+Because our WebSocket client is custom-made to be lightweight, reliability work remains. Ping/pong replies exist, but production-grade reconnect, subscription restore, and connection health metrics are still future work.

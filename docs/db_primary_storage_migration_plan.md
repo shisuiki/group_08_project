@@ -383,13 +383,11 @@ Not allowed:
 
 Deliverables:
 
-- add `STORAGE_MODE=db-async|file-primary-legacy`
-- add `DB_URL`, `DB_USER`, `DB_PASSWORD`
-- define drop policy:
-  - `DB_WRITE_QUEUE_CAPACITY`
-  - `DB_WRITE_DROP_ON_FULL=true`
-  - `DB_WRITE_BATCH_SIZE`
-  - `DB_WRITE_FLUSH_INTERVAL_MS`
+- configure async DB writer with `DB_WRITER_ENABLED`,
+  `DB_WRITER_DATABASE_URL`, `DB_WRITER_DATABASE_USER`, and
+  `DB_WRITER_DATABASE_PASSWORD`
+- define bounded writer behavior with `DB_WRITER_QUEUE_CAPACITY`,
+  `DB_WRITER_BATCH_SIZE`, and drop/failure metrics
 
 Exit criteria:
 
@@ -485,25 +483,18 @@ Exit criteria:
 
 ### Phase 5: Readers Move To DB
 
-Move these readers from recording files to DB:
+Baseline delivered:
 
-- raw replay selection
-- frontend `/symbols`
-- frontend `/quotes`
-- frontend `/datafeed/history`
-- featureplant recording source
-- research export source
+- raw replay defaults to Timescale/Postgres, with
+  `RAW_REPLAY_SOURCE=local-ndjson` for explicit import/debug.
+- FeaturePlant, frontend adapter, and research export default to canonical DB
+  rows.
 
-Rules:
+Remaining:
 
-- DB readers become default.
-- history reads use watermarks and event-time ordering.
-- readers tolerate missing rows and gaps.
-
-Exit criteria:
-
-- demo works with DB only
-- demo data can be seeded through DB imports
+- finish DB query/API migration for raw/canonical data.
+- keep recording import/export boundaries explicit.
+- seed demo data through DB imports.
 
 ### Phase 6: S3 Archive Export
 
@@ -586,15 +577,23 @@ and drop-visible through writer metrics.
 2. Should DB writer drop newest or oldest events when full?
 3. Is replay allowed to update latest state in any mode?
 4. Should feature store be normalized columns, JSONB, or hybrid?
-5. Should S3 archive export be retained at all after DB migration?
+5. What retention, checksum, and restore policy should S3 archive exports use?
 6. Should the store API report inserted versus duplicate rows, or should duplicate
    accounting stay in the later JDBC integration layer?
 
-## Recommended First Batch
+## Completed Batches
 
-1. Add V001 migration for `raw_ws_events` and `canonical_events`.
-   Add `latest_market_state` in a later migration.
-2. Add Docker Compose TimescaleDB profile.
-3. Add `AsyncDbWriter` with bounded queues and batch insert.
-4. Add idempotency tests for raw/canonical inserts.
-5. Add queue overflow tests proving live path does not block.
+- V001/V002/V003/V004 migrations exist for raw websocket events, canonical
+  events, canonical commit cursoring, raw payload text storage, and raw REST
+  response capture.
+- `AsyncDbWriter`, bounded DB writer queues, raw/canonical JDBC writes, raw REST
+  JDBC storage, canonical DB reads, and DB-default replay/feature/frontend/export
+  paths exist.
+
+## Remaining Next Batches
+
+1. Add a local Timescale Compose profile plus a migration runner.
+2. Add schema batches for `latest_market_state`, `market_metadata`, and
+   `feature_outputs`.
+3. Finish DB query/API migration and DB-seeded demo data.
+4. Define the S3 archive/import/export retention and restore policy.

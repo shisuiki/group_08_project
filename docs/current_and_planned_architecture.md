@@ -36,9 +36,9 @@ Plan status from the markdowns:
 
 | Plan | Current state | Where remaining planned modules belong |
 | --- | --- | --- |
-| `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket heartbeat reliability. |
+| `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket reconnect/subscription restore reliability. |
 | `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, DB-backed default input, recording/Aeron sources, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
-| `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer`, live chart demo, and research CSV gateway path have been removed. | Frontend visualization, backtesting, and research export should attach to the same feature/query boundary used for historical replay, not directly to live tickerplant streams. |
+| `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer` path has been removed; a current frontend adapter HTTP service and lightweight chart demo expose datafeed/search/history/quotes/health/metrics endpoints. | Production frontend work should add durable query backing, WS/SSE streaming, replay controls, and frontend hardening behind the feature/query boundary. |
 | `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
 | `05_semantic_feature_plant_ontology_pricing_plan.md` | Not implemented in source packages today. | Add a downstream semantic/pricing service that consumes canonical streams, feature streams, market metadata, replay, and quality/staleness indicators. |
 
@@ -154,6 +154,7 @@ flowchart LR
     RAWCFG["RawIngestRecorderConfig<br/>RAW_INGEST_RECORDER_* root/enabled"]:::current
     RAWREC["RawIngestRecorder<br/>optional exact inbound WS payload capture"]:::optional
     RAWSTORE["recordings/raw-ingest<br/>source/date/hour/minute NDJSON"]:::storage
+    RAWDB["raw_ws_events<br/>Postgres/Timescale accepted raw DB"]:::storage
     ENVELOPE["KalshiIngressEnvelope<br/>raw payload + receive timestamp<br/>connection/replay metadata"]:::current
     CCO["ClientClusterOrchestrator<br/>Aeron Cluster ingress"]:::bus
   end
@@ -165,15 +166,17 @@ flowchart LR
   KALSHI -->|WS market data| KWS
   RAWCFG --> RAWREC
   KWS -.->|recordInbound when enabled| RAWREC
+  KWS -.->|raw DB side copy when enabled| RAWDB
   RAWREC -.-> RAWSTORE
   KWS -->|enveloped raw Kalshi JSON| ENVELOPE
   ENVELOPE --> CCO
 
   subgraph RawReplay["Raw Ingress Replay"]
-    RAWREPLAY["RawIngressReplayCli / Service<br/>selects raw events from Timescale/S3 source of truth<br/>replays raw payloads to ingress"]:::current
+    RAWREPLAY["RawIngressReplayCli / Service<br/>selects raw events from Timescale by default<br/>or explicit local NDJSON import/debug source<br/>replays raw payloads to ingress"]:::current
   end
 
-  RAWSTORE --> RAWREPLAY
+  RAWDB -->|default raw replay source| RAWREPLAY
+  RAWSTORE -.->|RAW_REPLAY_SOURCE=local-ndjson| RAWREPLAY
   RAWREPLAY -->|adds replay_id metadata| ENVELOPE
 
   subgraph ESB["Aeron Cluster / ESB Runtime"]
@@ -276,9 +279,10 @@ flowchart LR
     CORE["Core backend<br/>KalshiSystem + ESBClusteredService + DataProcessor"]:::current
     CANON["Canonical tickerplant streams<br/>raw.*, canonical.*, derived.top_of_book, system.*"]:::current
     CDB2["canonical_events<br/>Postgres/Timescale canonical DB"]:::current
+    RAWDB2["raw_ws_events<br/>Postgres/Timescale raw DB"]:::current
     RAWREST2["raw_rest_responses<br/>Postgres/Timescale REST response DB"]:::current
     RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + recordings/canonical"]:::current
-    REPLAY2["RawIngressReplayCli<br/>Timescale/S3 raw selection + ingress injection"]:::current
+    REPLAY2["RawIngressReplayCli<br/>Timescale raw rows by default<br/>+ explicit local NDJSON import/debug"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
     RESTBACK2["HistoricalBackfillCli<br/>DB-primary raw REST + canonical backfill"]:::current
     CURFEATURE["FeaturePlantService skeleton<br/>DB default + Aeron/recording sources<br/>stdout/buffer sinks"]:::current
@@ -288,24 +292,27 @@ flowchart LR
   KALSHI2 --> CORE
   CORE --> CANON
   CORE --> CDB2
+  CORE --> RAWDB2
   CORE -->|raw-ingest capture| RAWSTORE
   CANON -->|stream-recorder canonical copy| RAWSTORE
-  RAWSTORE --> REPLAY2
+  RAWDB2 -->|default raw replay source| REPLAY2
+  RAWSTORE -.->|explicit local-ndjson source| REPLAY2
   REPLAY2 -->|raw replay into ingress| CORE
   KALSHI2 --> RESTHELPERS
   RESTHELPERS --> RESTBACK2
   RESTBACK2 --> CDB2
   RESTBACK2 --> RAWREST2
   RESTBACK2 -. explicit recording target .-> RAWSTORE
-  CANON --> CURFEATURE
-  RAWSTORE -->|recordings/canonical| CURFEATURE
+  CDB2 -->|default canonical DB source| CURFEATURE
+  CANON -.->|live Aeron source| CURFEATURE
+  RAWSTORE -.->|explicit recordings/canonical source| CURFEATURE
   CANON --> CURMON
   RAWSTORE --> CURMON
 
   subgraph CoreHardening["Planned Core Backend Hardening"]
-    HEARTBEAT["WebSocket heartbeat/reconnect<br/>connection state metrics"]:::planned
+    HEARTBEAT["WebSocket reconnect/subscription restore<br/>connection state metrics"]:::planned
     RECOVERY["Order book recovery<br/>snapshot reload after gaps<br/>cluster snapshot/restore"]:::planned
-    OBJECTBACKFILL["Object-store backfill<br/>S3 to local/replay/query loaders"]:::plannedStorage
+    OBJECTBACKFILL["Object-store archive/import/export<br/>S3 retention + restore policy"]:::plannedStorage
     BINARY["Binary serialization experiment<br/>SBE, FlatBuffers, protobuf,<br/>or Agrona buffers"]:::planned
     METASTORE["Market metadata and terms store<br/>markets, events, series, rules text"]:::plannedStorage
   end
@@ -350,17 +357,20 @@ flowchart LR
   FSTORE --> FAPI
 
   subgraph Frontend["Frontend / Research Placement"]
-    FE2["Frontend adapter service<br/>symbols, quotes, depth,<br/>history, WS stream"]:::planned
+    FE2["Frontend adapter HTTP service<br/>datafeed/search/history/quotes<br/>health + metrics"]:::current
+    FEPROD["Production frontend hardening<br/>durable query backing<br/>WS/SSE stream"]:::planned
     CHART2["TradingView or Lightweight Charts<br/>standard datafeed adapter"]:::external
     REPLAYCTRL["Replay viewer controls<br/>pause, resume, seek, speed"]:::planned
     RESEARCH["Research exports and backtests<br/>CSV, Parquet, Python client"]:::external
   end
 
-  FAPI --> FE2
+  FAPI --> FEPROD
+  FE2 --> FEPROD
   FSTORE --> RESEARCH
   FAPI --> REPLAYCTRL
-  REPLAYCTRL --> FE2
+  REPLAYCTRL --> FEPROD
   FE2 --> CHART2
+  FEPROD --> CHART2
   FAPI --> RESEARCH
 
   subgraph Semantic["Planned Semantic, Ontology, Pricing Layer"]
@@ -393,7 +403,7 @@ flowchart LR
   PRICING --> ARB
   CONSTRAINTS --> ARB
   ARB --> SSTREAMS
-  SSTREAMS --> FE2
+  SSTREAMS --> FEPROD
   SSTREAMS --> RESEARCH
 
   subgraph Instrumentation["Planned Cross-Cutting Instrumentation"]
