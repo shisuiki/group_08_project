@@ -61,7 +61,9 @@ The old live parser used these fields:
 
 - Use `BackendConfig` environment fields instead of hardcoded URLs, key paths, DB settings, cluster addresses, and market filters.
 - Use `KalshiCanonicalParser` for all live WebSocket payloads.
-- Persist `RawSourceEvent` before parsing-derived canonical events.
+- Offer raw and canonical events to the async DB writer without blocking live
+  publication; raw/canonical DB commits can drop or arrive independently.
 - Publish only stream names documented in `docs/backend_stream_contracts.md`.
 - Use `OrderBookStateManager` for snapshots/deltas and top-of-book generation.
-- Use replay from `raw-ingest` recordings for deterministic backfills and parser compatibility checks.
+- Use DB raw ingest rows for default replay. Use local NDJSON `raw-ingest` only
+  for fixture/import/debug compatibility checks.

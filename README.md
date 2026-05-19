@@ -93,12 +93,12 @@ The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_h
 ### Real-Time Data Storage
 
 New live captures store raw websocket input and canonical events primarily in
-Postgres/Timescale when a DB URL is configured. Current Docker Compose profiles
-do not start a local DB service; use an external DB URL, or add a future local
-Timescale profile. Raw replay and FeaturePlant default to DB sources. NDJSON/S3
-recording is retained for `recording-capture`, legacy archive/import, fixtures,
-demo data, and debug exports. The downstream stream recorder remains useful for
-validating what Aeron clients receive.
+Postgres/Timescale when a DB URL is configured. Docker Compose includes a
+`local-db` Timescale profile and `db-migrate` runner for local smoke tests. Raw
+replay and FeaturePlant default to DB sources. NDJSON/S3 recording is retained
+for `recording-capture`, legacy archive/import, fixtures, demo data, and debug
+exports. The downstream stream recorder remains useful for validating what Aeron
+clients receive.
 
 ## Demo Video
 
@@ -108,11 +108,12 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 1. Copy `.env.example` to `.env`.
 2. For live ingestion, set `KALSHI_KEY_ID`, `KALSHI_KEY_HOST_PATH`, and either `KALSHI_MARKET_TICKERS`, `KALSHI_MARKET_SERIES_TICKER`, or `KALSHI_MARKET_SELECTION_MODE=open_markets`.
 3. Use `docker compose --profile cluster-live up --build` for the three-node live stack with `wsclient`; use `docker compose --profile single-node-local up --build` only for a local node0 smoke check.
-4. Raw replay defaults to DB/Timescale. Current Compose profiles do not start Postgres/Timescale; set an external DB URL, or use `RAW_REPLAY_SOURCE=local-ndjson` for explicit fixture/import/debug mode.
-5. Observability is available with `docker compose --profile observability up --build`.
-6. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
-7. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
-8. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.
+4. For local DB smoke tests, run `docker compose --profile local-db up -d timescaledb` and `docker compose --profile local-db run --rm db-migrate`; live/EC2 deployments should still use their configured external DB URL.
+5. Raw replay defaults to DB/Timescale; use `RAW_REPLAY_SOURCE=local-ndjson` only for explicit fixture/import/debug mode.
+6. Observability is available with `docker compose --profile observability up --build`.
+7. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
+8. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
+9. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.
 
 Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 

@@ -233,7 +233,10 @@ Symptoms: `system.parser_errors` rate increases.
 
 Actions:
 
-- Inspect the `raw-ingest` object referenced by `metadata.raw_event_id`.
+- Inspect the DB `raw_ws_events.raw_payload` row referenced by
+  `metadata.raw_event_id`.
+- For `recording-capture` or local debug runs, inspect the matching NDJSON
+  `raw-ingest` file/object.
 - Compare the raw payload against `docs/backend_schema_gap_report.md`.
 - Add or update a parser fixture before changing parser behavior.
 

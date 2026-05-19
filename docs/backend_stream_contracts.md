@@ -22,16 +22,20 @@ All events include:
 
 | Stream | ID | Schema | Ordering | Replay | Retention |
 | --- | ---: | ---: | --- | --- | --- |
-| `raw.kalshi.websocket` | 10 | 1 | Ingest order | Yes | Raw ingest recording |
-| `canonical.trade` | 11 | 1 | Source order where available | Yes | Producer/downstream canonical recording |
-| `canonical.orderbook.snapshot` | 12 | 1 | Source subscription sequence | Yes | Producer/downstream canonical recording |
-| `canonical.orderbook.delta` | 13 | 1 | Source subscription sequence | Yes | Producer/downstream canonical recording |
-| `canonical.ticker` | 14 | 1 | Ingest/source order | Yes | Producer/downstream canonical recording |
-| `canonical.open_interest` | 15 | 1 | Ingest/source order | Yes | Producer/downstream canonical recording |
-| `derived.top_of_book` | 16 | 1 | Derived from orderbook sequence | Yes | Producer/downstream canonical recording |
-| `canonical.market_lifecycle` | 17 | 1 | Ingest/source order | Yes | Producer/downstream canonical recording |
-| `system.parser_errors` | 18 | 1 | Ingest order | Yes | Producer/downstream canonical recording |
-| `system.sequence_gaps` | 19 | 1 | Source subscription sequence | Yes | Producer/downstream canonical recording |
+| `raw.kalshi.websocket` | 10 | 1 | Ingest order | Yes | DB raw ingest; NDJSON/S3 explicit capture/export |
+| `canonical.trade` | 11 | 1 | Source order where available | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `canonical.orderbook.snapshot` | 12 | 1 | Source subscription sequence | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `canonical.orderbook.delta` | 13 | 1 | Source subscription sequence | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `canonical.ticker` | 14 | 1 | Ingest/source order | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `canonical.open_interest` | 15 | 1 | Ingest/source order | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `derived.top_of_book` | 16 | 1 | Derived from orderbook sequence | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `canonical.market_lifecycle` | 17 | 1 | Ingest/source order | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `system.parser_errors` | 18 | 1 | Ingest order | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+| `system.sequence_gaps` | 19 | 1 | Source subscription sequence | Yes | DB canonical; NDJSON/S3 explicit capture/export |
+
+DB offers are best-effort and non-blocking. Drops or disabled DB writes are
+observable through `db_*` writer metrics and `processor_db_offers_total`; they
+do not block Aeron publication.
 
 The internal tickerplant bus uses stream ID 20 and routes canonical JSON by `stream_name`. No production route depends on a fixed JSON character offset.
 

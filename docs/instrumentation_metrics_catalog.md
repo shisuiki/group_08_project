@@ -42,11 +42,20 @@ for success, failure, drop, parser error, and order book quality remain exact.
 - `backend_publication_offer_failed_total`: publication failure counter.
 - `backend_publication_backpressure_ns`: publication backpressure distribution; sampled for backend live publisher.
 - `backend_publication_latency_ns`: publication latency distribution; sampled for backend live publisher.
-- `backend_storage_enqueue_total`: durable storage enqueue counter.
-- `backend_storage_commit_total`: durable storage commit counter.
-- `backend_storage_error_total`: durable storage error counter.
-- `backend_storage_queue_depth`: durable storage queue depth gauge.
-- `backend_storage_commit_latency_ns`: durable storage commit latency distribution.
+- `backend_storage_enqueue_total`: stream-recorder/file capture enqueue counter.
+- `backend_storage_commit_total`: stream-recorder/file capture commit counter.
+- `backend_storage_error_total`: stream-recorder/file capture error counter.
+- `backend_storage_queue_depth`: stream-recorder/file capture queue depth gauge.
+- `backend_storage_commit_latency_ns`: stream-recorder/file capture commit latency distribution.
+- `processor_db_offers_total`: non-blocking DB offer result counter by path,
+  event type, stream, and result.
+- `db_raw_events_accepted_total`, `db_raw_events_dropped_total`,
+  `db_raw_events_written_total`: raw DB writer counters.
+- `db_canonical_events_accepted_total`, `db_canonical_events_dropped_total`,
+  `db_canonical_events_written_total`: canonical DB writer counters.
+- `db_writer_batch_failed_total`, `db_writer_queue_depth`,
+  `db_writer_raw_queue_depth`, `db_writer_canonical_queue_depth`: DB writer
+  failure and queue health metrics.
 - `backend_replay_sessions_active`: active replay session gauge.
 - `backend_replay_events_published_total`: replay event counter.
 - `backend_replay_lag_ms`: replay lag distribution.
@@ -72,6 +81,12 @@ for success, failure, drop, parser error, and order book quality remain exact.
 events for producer-side order book quality counters. Distribution metrics remain
 sampled on the live hot path; counters remain exact.
 
-`stream-recorder` emits the storage, parser visibility, order book quality, and feature input metrics for normalized tickerplant streams. `FeaturePlantService` emits `feature_module_*` metrics when embedded or run by a module host. `streamtap` remains a lightweight inspection tool for recent normalized stream events.
+`stream-recorder` emits NDJSON capture/import/export storage metrics, parser
+visibility, order book quality, and feature input metrics for normalized
+tickerplant streams. DB-primary live storage is observed through
+`processor_db_offers_total` and `db_*` writer metrics. `FeaturePlantService`
+emits `feature_module_*` metrics when embedded or run by a module host.
+`streamtap` remains a lightweight inspection tool for recent normalized stream
+events.
 
 For profiling before optimization, use `edu.illinois.group8.profile.HotPathProfileCli`. It exercises the parser, order-book state, processor, serialization, and file journal with synthetic Kalshi-shaped messages and can print the same Prometheus metrics emitted by the hot path.

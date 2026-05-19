@@ -342,14 +342,16 @@ Rule:
 - retry inserts are idempotent.
 - changed feature logic increments `feature_version`.
 
-## NDJSON Removal
+## NDJSON Legacy/Capture Boundary
 
-NDJSON is removed from the target runtime path.
+NDJSON is removed from the default runtime path. It remains explicit
+capture/import/export/fixture/demo/debug tooling.
 
-Allowed temporary roles during migration:
+Allowed roles:
 
 - existing demo fixtures until DB-backed demo data exists
 - one-time import source for historical recordings already created
+- explicit recording-capture raw/canonical output
 - explicit raw REST recording/export/debug when
   `HISTORICAL_BACKFILL_RAW_REST_TARGET=recording`
 - manual debug export from DB, not an ingestion fallback
@@ -363,7 +365,9 @@ Not allowed:
 
 ## S3 Role After Migration
 
-S3 is archive/cold storage fed from DB exports.
+S3 is optional archive/cold storage for explicit capture/export/import
+workflows. Normal live replay, FeaturePlant, frontend, and research sources use
+Timescale/Postgres.
 
 Allowed:
 
@@ -539,8 +543,10 @@ Exit criteria:
 
 ## Metrics
 
-Add:
+DB-primary live storage is observed through processor DB offers and DB writer
+metrics:
 
+- `processor_db_offers_total`
 - `db_raw_events_accepted_total`
 - `db_raw_events_dropped_total`
 - `db_raw_events_written_total`
@@ -549,7 +555,8 @@ Add:
 - `db_canonical_events_written_total`
 - `db_writer_batch_failed_total`
 - `db_writer_queue_depth`
-- `storage_degraded_mode`
+- `db_writer_raw_queue_depth`
+- `db_writer_canonical_queue_depth`
 
 ## Configuration
 
@@ -592,8 +599,7 @@ and drop-visible through writer metrics.
 
 ## Remaining Next Batches
 
-1. Add a local Timescale Compose profile plus a migration runner.
-2. Add schema batches for `latest_market_state`, `market_metadata`, and
+1. Add schema batches for `latest_market_state`, `market_metadata`, and
    `feature_outputs`.
-3. Finish DB query/API migration and DB-seeded demo data.
-4. Define the S3 archive/import/export retention and restore policy.
+2. Finish DB query/API migration and DB-seeded demo data.
+3. Define the S3 archive/import/export retention and restore policy.

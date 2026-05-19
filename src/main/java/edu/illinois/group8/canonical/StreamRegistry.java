@@ -26,16 +26,16 @@ public final class StreamRegistry {
     private static final Map<String, StreamContract> STREAMS = new LinkedHashMap<>();
 
     static {
-        register(EventType.RAW_SOURCE_EVENT, RAW_KALSHI_WEBSOCKET, "append-only local files plus optional Aeron", true);
-        register(EventType.MARKET_TRADE, CANONICAL_TRADE, "append-only local/S3 recordings", true);
-        register(EventType.ORDER_BOOK_SNAPSHOT, CANONICAL_ORDERBOOK_SNAPSHOT, "append-only local files", true);
-        register(EventType.ORDER_BOOK_DELTA, CANONICAL_ORDERBOOK_DELTA, "append-only local files", true);
-        register(EventType.TICKER_UPDATE, CANONICAL_TICKER, "append-only local files", true);
-        register(EventType.OPEN_INTEREST_UPDATE, CANONICAL_OPEN_INTEREST, "append-only local files", true);
-        register(EventType.TOP_OF_BOOK_UPDATE, DERIVED_TOP_OF_BOOK, "append-only local files", true);
-        register(EventType.MARKET_LIFECYCLE_UPDATE, CANONICAL_MARKET_LIFECYCLE, "append-only local files", true);
-        register(EventType.PARSER_ERROR, SYSTEM_PARSER_ERRORS, "append-only local files", true);
-        register(EventType.SEQUENCE_GAP, SYSTEM_SEQUENCE_GAPS, "append-only local files", true);
+        register(EventType.RAW_SOURCE_EVENT, RAW_KALSHI_WEBSOCKET, "DB raw ingest; NDJSON/S3 explicit capture/export", true);
+        register(EventType.MARKET_TRADE, CANONICAL_TRADE, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.ORDER_BOOK_SNAPSHOT, CANONICAL_ORDERBOOK_SNAPSHOT, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.ORDER_BOOK_DELTA, CANONICAL_ORDERBOOK_DELTA, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.TICKER_UPDATE, CANONICAL_TICKER, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.OPEN_INTEREST_UPDATE, CANONICAL_OPEN_INTEREST, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.TOP_OF_BOOK_UPDATE, DERIVED_TOP_OF_BOOK, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.MARKET_LIFECYCLE_UPDATE, CANONICAL_MARKET_LIFECYCLE, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.PARSER_ERROR, SYSTEM_PARSER_ERRORS, "DB canonical; NDJSON/S3 explicit capture/export", true);
+        register(EventType.SEQUENCE_GAP, SYSTEM_SEQUENCE_GAPS, "DB canonical; NDJSON/S3 explicit capture/export", true);
     }
 
     private StreamRegistry() {
