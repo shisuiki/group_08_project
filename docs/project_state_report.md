@@ -334,8 +334,9 @@ Current:
 - Java 17/Maven project.
 - Maven Wrapper is present.
 - 43 test files under `src/test/java`.
-- GitHub Actions runs `mvn -B test` and uses Node 24-native
-  `actions/checkout@v6` and `actions/setup-java@v5`.
+- GitHub Actions runs `mvn -B test` and `mvn -B -DskipTests package`, and
+  uses Node 24-native `actions/checkout@v6` and `actions/setup-java@v5`.
+- CI builds the Docker image before deploy.
 - CI runs shell syntax checks for the DB-primary demo scripts and validates
   `docker compose config` for `cluster-live`, `single-node-local`,
   `recording-capture`, `observability`, `local-db` + `frontend-integration`,
@@ -350,8 +351,6 @@ Current:
 
 Gaps:
 
-- no CI `mvn package` gate
-- no Docker build gate before deploy
 - no dependency vulnerability gate
 - no deploy rollback gate
 
@@ -425,9 +424,9 @@ Do not demo as completed:
    frontend demo expectations.
 3. Keep README run commands for `single-node-local`, raw replay, DB seed, and
    frontend `feature_outputs` mode current.
-4. Add remaining CI gates: `mvn package`, Docker build, dependency scanning,
-   and rollback checks. `mvn test`, compose config validation, and
-   cluster-live health smoke checks already exist.
+4. Add remaining CI gates: dependency scanning and rollback checks. `mvn test`,
+   `mvn package`, Docker build, compose config validation, and cluster-live
+   health smoke checks already exist.
 5. Extend health smoke checks beyond `cluster-live` only when the target profile
    has stable HTTP endpoints.
 6. Default HTTP admin endpoints to localhost or add auth.

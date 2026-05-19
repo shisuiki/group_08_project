@@ -28,6 +28,12 @@ jobs:
       - name: Run Maven tests
         run: mvn -B test
 
+      - name: Build Maven package
+        run: mvn -B -DskipTests package
+
+      - name: Build Docker image
+        run: docker build --pull --build-arg MAVEN_PACKAGE_ARGS="-DskipTests package" -t kalshi-project:${{ github.sha }} .
+
       - name: Validate shell scripts
         run: |
           set -euo pipefail

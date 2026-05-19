@@ -12,7 +12,8 @@ RUN mvn dependency:go-offline
 COPY src ./src
 
 # Build the application
-RUN mvn package
+ARG MAVEN_PACKAGE_ARGS="package"
+RUN mvn -B ${MAVEN_PACKAGE_ARGS}
 
 # Stage 2: Create a lightweight image for running the app
 FROM eclipse-temurin:17-jdk-jammy
