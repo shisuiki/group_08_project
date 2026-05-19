@@ -78,7 +78,13 @@ public abstract class WebSocketClient {
             startListening();
         } catch (IOException e) {
             markClosedIfOpen(-1, e.getMessage());
+            try {
+                socket.close();
+            } catch (IOException closeException) {
+                e.addSuppressed(closeException);
+            }
             onError(e);
+            notifyClosed();
         }
     }
 

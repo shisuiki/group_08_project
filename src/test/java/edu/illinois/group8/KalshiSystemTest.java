@@ -578,6 +578,47 @@ class KalshiSystemTest {
     }
 
     @Test
+    void sessionSupervisorTreatsGlobalSubscribeFalseAsFailedAttempt() {
+        BackendConfig config = liveConfig(Map.of(
+            "KALSHI_WS_CHANNELS", "market_lifecycle_v2",
+            "KALSHI_WS_SUBSCRIPTION_DELAY_MS", "0",
+            "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "0",
+            "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", "0",
+            "BACKEND_WS_RECONNECT_MAX_ATTEMPTS", "2"
+        ));
+        RecordingSessionFactory sessionFactory = new RecordingSessionFactory(11L, 22L);
+        sessionFactory.failGlobalSubscribeAttempts.add(1);
+        BackendMetrics metrics = new BackendMetrics();
+
+        IllegalStateException exhausted = assertThrows(
+            IllegalStateException.class,
+            () -> KalshiSystem.runLiveSessionSupervisor(
+                config,
+                () -> KalshiSystem.startLiveSessionAttempt(
+                    config,
+                    new FakeKalshiWrapper(),
+                    null,
+                    null,
+                    null,
+                    sessionFactory
+                ),
+                metrics,
+                millis -> {
+                }
+            )
+        );
+
+        assertTrue(exhausted.getMessage().contains("BACKEND_WS_RECONNECT_MAX_ATTEMPTS"));
+        assertEquals(2, sessionFactory.sessions.size());
+        assertEquals(1, sessionFactory.sessions.get(0).closeCalls);
+        assertEquals(List.of(List.of("market_lifecycle_v2")), sessionFactory.sessions.get(1).globalSubscriptions);
+        assertEquals(1L, metrics.get(
+            "backend_ws_session_failures_total",
+            BackendMetrics.labels("service", "wsclient", "reason", "subscription")
+        ));
+    }
+
+    @Test
     void openMarketSessionReconnectsDiscoverySubscriptionsAndRawConnections() {
         BackendConfig config = liveConfig(Map.ofEntries(
             Map.entry("KALSHI_MARKET_SELECTION_MODE", "open_markets"),
@@ -765,6 +806,7 @@ class KalshiSystemTest {
         private final ArrayDeque<Long> sids = new ArrayDeque<>();
         private final List<RecordingLiveWebSocketSession> sessions = new ArrayList<>();
         private final List<String> rawConnectionIds = new ArrayList<>();
+        private final List<Integer> failGlobalSubscribeAttempts = new ArrayList<>();
         private final List<Integer> failSubscribeAttempts = new ArrayList<>();
         private int createCalls;
 
@@ -785,6 +827,7 @@ class KalshiSystemTest {
             long sid = sids.isEmpty() ? createCalls : sids.removeFirst();
             RecordingLiveWebSocketSession session = new RecordingLiveWebSocketSession(
                 sid,
+                failGlobalSubscribeAttempts.contains(createCalls),
                 failSubscribeAttempts.contains(createCalls)
             );
             sessions.add(session);
@@ -794,6 +837,7 @@ class KalshiSystemTest {
 
     private static final class RecordingLiveWebSocketSession implements KalshiLiveWebSocketSession {
         private final long sid;
+        private final boolean failGlobalSubscribe;
         private final boolean failSubscribeAndAwait;
         private final CompletableFuture<Void> closed = CompletableFuture.completedFuture(null);
         private final List<List<String>> globalSubscriptions = new ArrayList<>();
@@ -802,13 +846,17 @@ class KalshiSystemTest {
         private final List<SnapshotCall> snapshotCalls = new ArrayList<>();
         private int closeCalls;
 
-        private RecordingLiveWebSocketSession(long sid, boolean failSubscribeAndAwait) {
+        private RecordingLiveWebSocketSession(long sid, boolean failGlobalSubscribe, boolean failSubscribeAndAwait) {
             this.sid = sid;
+            this.failGlobalSubscribe = failGlobalSubscribe;
             this.failSubscribeAndAwait = failSubscribeAndAwait;
         }
 
         @Override
         public boolean subscribe(String[] channels) {
+            if (failGlobalSubscribe) {
+                return false;
+            }
             globalSubscriptions.add(List.of(channels));
             return true;
         }

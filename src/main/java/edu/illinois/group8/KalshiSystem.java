@@ -240,6 +240,22 @@ public class KalshiSystem {
         );
     }
 
+    private static void subscribeGlobalOrThrow(KalshiLiveWebSocketSession session, List<String> channels) {
+        if (!session.subscribe(channels.toArray(new String[0]))) {
+            throw new IllegalStateException("Kalshi websocket failed to send global subscribe for channels " + channels + ".");
+        }
+    }
+
+    private static void subscribeMarketsOrThrow(
+        KalshiLiveWebSocketSession session,
+        String[] channels,
+        String[] marketTickers
+    ) {
+        if (!session.subscribe(channels, marketTickers)) {
+            throw new IllegalStateException("Kalshi websocket failed to send market subscribe.");
+        }
+    }
+
     private static void closeSessions(List<KalshiLiveWebSocketSession> sessions) {
         closeSessions(sessions, null);
     }
@@ -332,7 +348,7 @@ public class KalshiSystem {
 
         if (!globalChannels.isEmpty()) {
             System.out.println("Subscribing Kalshi global channels " + globalChannels + " for all markets.");
-            wsClient.subscribe(globalChannels.toArray(new String[0]));
+            subscribeGlobalOrThrow(wsClient, globalChannels);
             delayBetweenSubscriptions(config);
         }
         discoverAndSubscribeMarketChunks(
@@ -363,7 +379,7 @@ public class KalshiSystem {
 
         if (!globalChannels.isEmpty()) {
             System.out.println("Subscribing Kalshi unfiltered channels " + globalChannels + ".");
-            wsClient.subscribe(globalChannels.toArray(new String[0]));
+            subscribeGlobalOrThrow(wsClient, globalChannels);
             delayBetweenSubscriptions(config);
         }
         subscribeMarketChunks(config, wsClient, filteredChannels, tickers, orderBookRecoveryController);
@@ -393,7 +409,7 @@ public class KalshiSystem {
             String[] channelArray = channels.toArray(new String[0]);
             String[] marketArray = chunk.toArray(new String[0]);
             if (orderBookRecoveryController == null) {
-                wsClient.subscribe(channelArray, marketArray);
+                subscribeMarketsOrThrow(wsClient, channelArray, marketArray);
             } else {
                 long sid = wsClient.subscribeAndAwaitSid(channelArray, marketArray, config.subscriptionAckTimeoutMs());
                 registerRecoveryMarkets(orderBookRecoveryController, sid, chunk, wsClient::requestSnapshotAndAwaitOk);
