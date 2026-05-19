@@ -8,9 +8,10 @@
 
 Set `STREAM_RECORDER_PARTITION_GRANULARITY=minute` to add a `minute=<mm>` partition between `hour=<hh>` and `events.ndjson`. That is the better setting for S3-backed archive/export runs because active files become stable and uploadable within roughly one minute instead of waiting for an hour boundary.
 
-`stream-recorder` is not part of the default `cluster-live` profile. Start it
-explicitly with `recording-capture` for recorder soak/export runs, or with
-`observability` when Prometheus needs recorder metrics.
+`stream-recorder` is not part of the default `cluster-live` or pure
+`observability` profiles. Start it explicitly with `recording-capture` for
+recorder soak/export runs. Prometheus may keep a recorder scrape target, but it
+is expected to be down unless `recording-capture` is also enabled.
 
 DB/Timescale is the default source for live raw replay, FeaturePlant canonical
 input, frontend adapter input, and research export. Recording-backed readers
@@ -82,6 +83,7 @@ fixture/import/debug mode.
 ## Verification
 
 ```bash
+docker compose --profile recording-capture up -d stream-recorder
 curl http://127.0.0.1:8092/health
 curl http://127.0.0.1:8092/metrics
 find recordings/canonical -type f | head

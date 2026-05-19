@@ -84,10 +84,13 @@ sampled on the live hot path; counters remain exact.
 
 `stream-recorder` emits NDJSON capture/import/export storage metrics, parser
 visibility, order book quality, and feature input metrics for normalized
-tickerplant streams. DB-primary live storage is observed through
-`processor_db_offers_total` and `db_*` writer metrics. `BackendMetrics` cached
-handles resolve counter/distribution storage once; unused resolved handles do
-not appear in `snapshot()` or Prometheus output until used.
+tickerplant streams only when the explicit `recording-capture` profile is
+enabled. Pure `observability` does not start the recorder or write
+`recordings/`; the Prometheus recorder target is expected to be down in that
+mode. DB-primary live storage is observed through `processor_db_offers_total`
+and `db_*` writer metrics. `BackendMetrics` cached handles resolve
+counter/distribution storage once; unused resolved handles do not appear in
+`snapshot()` or Prometheus output until used.
 
 `FeaturePlantService` caches `feature_module_*` metric handles per module and
 stream when embedded or run by a module host. Its latency and lag distributions

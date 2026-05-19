@@ -7,6 +7,8 @@ scrape_configs:
       - targets: ["wsclient:8091"]
 
   - job_name: tickerplant-stream-recorder
+    # This target is up only when the explicit recording-capture profile is
+    # enabled. Pure observability intentionally does not start NDJSON capture.
     static_configs:
       - targets: ["stream-recorder:8092"]
 

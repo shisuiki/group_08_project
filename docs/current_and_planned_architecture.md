@@ -224,7 +224,7 @@ flowchart LR
     RAWRESTDB["raw_rest_responses<br/>Postgres/Timescale REST response DB"]:::storage
     RAWREST["recordings/raw-rest<br/>optional REST response export/debug"]:::storage
     S3SYNC["s3-recording-sync<br/>uploads canonical, raw-ingest,<br/>raw-rest subtrees"]:::optional
-    MON["Prometheus + Grafana<br/>scrapes stream-recorder and streamtap"]:::external
+    MON["Prometheus + Grafana<br/>scrapes streamtap/wsclient;<br/>recorder target down unless recording-capture runs"]:::external
     PROF["HotPathProfileCli<br/>synthetic parser/book/processor profiling"]:::current
   end
 
@@ -243,7 +243,7 @@ flowchart LR
   CANONREC --> S3SYNC
   RAWREST --> S3SYNC
   TAP --> MON
-  RECORDER --> MON
+  RECORDER -. recording-capture only .-> MON
 
   subgraph FeatureCurrent["Current Featureplant Templates"]
     DBSRC["DbCanonicalEnvelopeSource<br/>default canonical_events input"]:::current
@@ -287,7 +287,7 @@ flowchart LR
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
     RESTBACK2["HistoricalBackfillCli<br/>DB-primary raw REST + canonical backfill"]:::current
     CURFEATURE["FeaturePlantService skeleton<br/>DB default + fair-polled Aeron/recording sources<br/>stdout/DB/buffer sinks"]:::current
-    CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
+    CURMON["Current observability<br/>streamtap, wsclient metrics,<br/>Prometheus, Grafana, profiler<br/>recorder metrics only with recording-capture"]:::current
     RECBASE["Basic cluster recovery snapshot<br/>source watermarks + paused book checkpoints<br/>no depth restore"]:::current
   end
 

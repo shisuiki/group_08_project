@@ -110,7 +110,7 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 3. Use `docker compose --profile cluster-live up --build` for the three-node live stack with `wsclient`; use `docker compose --profile single-node-local up --build` only for a local node0 smoke check.
 4. For local DB smoke tests, run `docker compose --profile local-db up -d timescaledb` and `docker compose --profile local-db run --rm db-migrate`; live/EC2 deployments should still use their configured external DB URL.
 5. Raw replay defaults to DB/Timescale; use `RAW_REPLAY_SOURCE=local-ndjson` only for explicit fixture/import/debug mode.
-6. Observability is available with `docker compose --profile observability up --build`.
+6. Pure observability is available with `docker compose --profile observability up --build`; it starts Prometheus/Grafana and streamtap only, without `stream-recorder`, S3 sync, or `recordings/` writes. Use `recording-capture` explicitly for NDJSON capture/archive runs.
 7. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
 8. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
 9. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.

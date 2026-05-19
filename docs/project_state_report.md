@@ -268,7 +268,7 @@ Legend:
 | Pricing model layer | planned | absent |
 | Arb scanner | planned | absent |
 | Metrics | current-basic | custom Prometheus text metrics; hot-path handles resolve storage once and unused resolved handles stay absent from `snapshot()` and Prometheus output until used |
-| Grafana/Prometheus | current-basic | config exists |
+| Grafana/Prometheus | current-basic | config exists; pure `observability` starts Prometheus/Grafana/streamtap without recorder or S3 side effects |
 | DataQualityEvent stream | planned | absent |
 | OpenTelemetry tracing | planned | absent |
 | Alerts/runbooks | planned-basic | docs exist; alert rules incomplete |
@@ -285,7 +285,7 @@ Legend:
 | `historical-backfill` | REST backfill CLI | current-basic |
 | `featureplant` | featureplant CLI | skeleton/current-basic |
 | `frontend-integration` | frontend adapter HTTP service | current-demo |
-| `observability` | Prometheus/Grafana/stream services | current-basic |
+| `observability` | Prometheus/Grafana/streamtap, no recorder/S3/NDJSON writes | current-basic |
 
 README caveat:
 
