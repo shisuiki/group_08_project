@@ -80,6 +80,19 @@ class FeaturePlantCliTest {
     }
 
     @Test
+    void dbCursorNameFlagIsAcceptedWithoutAffectingNonDbSources() {
+        FeaturePlantCli.main(new String[] {
+            "--source=recording",
+            "--root=" + tempDir,
+            "--output=stdout",
+            "--db-url=",
+            "--db-cursor-name=featureplant-prod",
+            "--max-events=0",
+            "--run-once"
+        });
+    }
+
+    @Test
     void unsupportedOutputModeIsRejected() {
         IllegalArgumentException thrown = assertThrows(
             IllegalArgumentException.class,

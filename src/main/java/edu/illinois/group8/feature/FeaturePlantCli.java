@@ -5,6 +5,7 @@ import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputStore;
+import edu.illinois.group8.storage.db.JdbcFeaturePlantCursorStore;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -56,7 +57,8 @@ public final class FeaturePlantCli {
         String dbUser,
         String dbPassword,
         boolean dbIncludeReplayEvents,
-        String dbReplayId
+        String dbReplayId,
+        String dbCursorName
     ) {
         static Config fromEnvironment() {
             Map<String, String> env = System.getenv();
@@ -78,7 +80,8 @@ public final class FeaturePlantCli {
                 value(env, "FEATUREPLANT_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
                 value(env, "FEATUREPLANT_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
                 Boolean.parseBoolean(value(env, "FEATUREPLANT_DB_INCLUDE_REPLAY", "false")),
-                value(env, "FEATUREPLANT_DB_REPLAY_ID", "")
+                value(env, "FEATUREPLANT_DB_REPLAY_ID", ""),
+                value(env, "FEATUREPLANT_DB_CURSOR_NAME", "")
             );
         }
 
@@ -98,6 +101,7 @@ public final class FeaturePlantCli {
             String nextDbPassword = dbPassword;
             boolean nextDbIncludeReplayEvents = dbIncludeReplayEvents;
             String nextDbReplayId = dbReplayId;
+            String nextDbCursorName = dbCursorName;
 
             for (String arg : args) {
                 if ("--help".equals(arg) || "-h".equals(arg)) {
@@ -130,6 +134,8 @@ public final class FeaturePlantCli {
                     nextDbIncludeReplayEvents = true;
                 } else if (arg.startsWith("--replay-id=")) {
                     nextDbReplayId = arg.substring("--replay-id=".length());
+                } else if (arg.startsWith("--db-cursor-name=")) {
+                    nextDbCursorName = arg.substring("--db-cursor-name=".length());
                 } else if ("--follow".equals(arg)) {
                     nextRunOnce = false;
                 } else if ("--run-once".equals(arg)) {
@@ -153,7 +159,8 @@ public final class FeaturePlantCli {
                 nextDbUser,
                 nextDbPassword,
                 nextDbIncludeReplayEvents,
-                nextDbReplayId
+                nextDbReplayId,
+                nextDbCursorName
             );
         }
 
@@ -203,7 +210,11 @@ public final class FeaturePlantCli {
                 streams,
                 maxEvents,
                 dbIncludeReplayEvents,
-                dbReplayId
+                dbReplayId,
+                dbCursorName == null || dbCursorName.isBlank()
+                    ? null
+                    : JdbcFeaturePlantCursorStore.fromDriverManager(dbUrl, dbUser, dbPassword),
+                dbCursorName
             );
         }
 
@@ -293,6 +304,7 @@ public final class FeaturePlantCli {
               --db-password=secret
               --include-replay
               --replay-id=replay-20260519
+              --db-cursor-name=featureplant-prod
               --streams=canonical.trade,canonical.ticker,derived.top_of_book
               --modules=bbo,ticker_snapshot,trade_tape
               --max-events=100000

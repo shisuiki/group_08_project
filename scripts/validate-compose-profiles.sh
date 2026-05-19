@@ -233,6 +233,23 @@ assert_release_gate_defaults_aligned() {
     printf 'PASS release_gate_defaults db_preflight_required=false wsclient_capture_metrics_host_port=8093\n'
 }
 
+assert_featureplant_cursor_config_propagated() {
+    rendered="$(service_config_for featureplant --profile featureplant)"
+    if ! printf '%s\n' "$rendered" | grep -q '^      FEATUREPLANT_DB_CURSOR_NAME: ""$'; then
+        printf 'featureplant service is missing default FEATUREPLANT_DB_CURSOR_NAME\n' >&2
+        exit 1
+    fi
+    for expected in \
+        "FEATUREPLANT_DB_CURSOR_NAME: \${{ vars.FEATUREPLANT_DB_CURSOR_NAME }}" \
+        'FEATUREPLANT_DB_CURSOR_NAME=$FEATUREPLANT_DB_CURSOR_NAME'; do
+        if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing featureplant cursor propagation: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS featureplant_cursor_config_propagated\n'
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -264,3 +281,4 @@ assert_no_default_network "raw-replay" --profile raw-replay
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned
+assert_featureplant_cursor_config_propagated

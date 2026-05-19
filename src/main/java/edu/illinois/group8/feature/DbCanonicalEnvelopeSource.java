@@ -7,6 +7,7 @@ import edu.illinois.group8.storage.db.CanonicalDbCursor;
 import edu.illinois.group8.storage.db.CanonicalDbEventReader;
 import edu.illinois.group8.storage.db.CanonicalDbReadEvent;
 import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
+import edu.illinois.group8.storage.db.FeaturePlantCursorStore;
 
 import java.util.List;
 import java.util.Objects;
@@ -20,8 +21,10 @@ public class DbCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
     private final long maxEvents;
     private final boolean includeReplayEvents;
     private final String replayId;
+    private final FeaturePlantCursorStore cursorStore;
+    private final String cursorName;
 
-    private CanonicalDbCursor cursor = CanonicalDbCursor.start();
+    private CanonicalDbCursor cursor;
     private long consumedEvents;
 
     public DbCanonicalEnvelopeSource(
@@ -34,6 +37,27 @@ public class DbCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
         this(reader, streamNames(streams), maxEvents, includeReplayEvents, replayId, new JsonCanonicalSerializer().mapper());
     }
 
+    public DbCanonicalEnvelopeSource(
+        CanonicalDbEventReader reader,
+        List<StreamContract> streams,
+        long maxEvents,
+        boolean includeReplayEvents,
+        String replayId,
+        FeaturePlantCursorStore cursorStore,
+        String cursorName
+    ) {
+        this(
+            reader,
+            streamNames(streams),
+            maxEvents,
+            includeReplayEvents,
+            replayId,
+            new JsonCanonicalSerializer().mapper(),
+            cursorStore,
+            cursorName
+        );
+    }
+
     DbCanonicalEnvelopeSource(
         CanonicalDbEventReader reader,
         List<String> streams,
@@ -42,12 +66,30 @@ public class DbCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
         String replayId,
         ObjectMapper mapper
     ) {
+        this(reader, streams, maxEvents, includeReplayEvents, replayId, mapper, null, null);
+    }
+
+    DbCanonicalEnvelopeSource(
+        CanonicalDbEventReader reader,
+        List<String> streams,
+        long maxEvents,
+        boolean includeReplayEvents,
+        String replayId,
+        ObjectMapper mapper,
+        FeaturePlantCursorStore cursorStore,
+        String cursorName
+    ) {
         this.reader = Objects.requireNonNull(reader, "reader");
         this.streams = List.copyOf(Objects.requireNonNull(streams, "streams"));
         this.mapper = Objects.requireNonNull(mapper, "mapper");
         this.maxEvents = Math.max(0L, maxEvents);
         this.includeReplayEvents = includeReplayEvents;
         this.replayId = replayId == null ? "" : replayId.trim();
+        this.cursorName = normalizeCursorName(cursorName);
+        this.cursorStore = this.cursorName.isEmpty() ? null : Objects.requireNonNull(cursorStore, "cursorStore");
+        this.cursor = this.cursorStore == null
+            ? CanonicalDbCursor.start()
+            : this.cursorStore.loadCursor(this.cursorName).orElse(CanonicalDbCursor.start());
     }
 
     @Override
@@ -77,7 +119,11 @@ public class DbCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
             }
             CanonicalEnvelope envelope = CanonicalEnvelope.fromPayload(event.streamName(), event.payload(), mapper);
             handler.onEvent(envelope);
-            cursor = event.nextCursor();
+            CanonicalDbCursor nextCursor = event.nextCursor();
+            if (cursorStore != null) {
+                cursorStore.saveCursor(cursorName, nextCursor);
+            }
+            cursor = nextCursor;
             consumedEvents++;
             emitted++;
         }
@@ -109,5 +155,9 @@ public class DbCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
         return streams.stream()
             .map(StreamContract::streamName)
             .toList();
+    }
+
+    private static String normalizeCursorName(String cursorName) {
+        return cursorName == null ? "" : cursorName.trim();
     }
 }

@@ -1,17 +1,21 @@
 package edu.illinois.group8.feature;
 
 import edu.illinois.group8.canonical.StreamRegistry;
+import edu.illinois.group8.storage.db.CanonicalDbCursor;
 import edu.illinois.group8.storage.db.CanonicalDbEventReader;
 import edu.illinois.group8.storage.db.CanonicalDbReadEvent;
 import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
+import edu.illinois.group8.storage.db.FeaturePlantCursorStore;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Queue;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DbCanonicalEnvelopeSourceTest {
     @Test
@@ -123,6 +127,68 @@ class DbCanonicalEnvelopeSourceTest {
         assertEquals(1L, source.cursor().lastCommitSeq());
     }
 
+    @Test
+    void durableCursorLoadsAndSavesAfterSuccessfulHandler() {
+        FakeCursorStore cursorStore = new FakeCursorStore(new CanonicalDbCursor(5L));
+        FakeReader reader = new FakeReader(List.of(event(6L, "canonical.trade", "event-6")));
+        DbCanonicalEnvelopeSource source = newSource(reader, 0L, false, "", cursorStore, " featureplant-prod ");
+        List<String> eventIds = new ArrayList<>();
+
+        assertEquals(1, source.poll(envelope -> eventIds.add(envelope.eventId()), 10));
+
+        assertEquals(List.of("event-6"), eventIds);
+        assertEquals(5L, reader.requests.get(0).cursor().lastCommitSeq());
+        assertEquals(List.of("featureplant-prod"), cursorStore.loadNames);
+        assertEquals(List.of("featureplant-prod"), cursorStore.saveNames);
+        assertEquals(List.of(new CanonicalDbCursor(6L)), cursorStore.savedCursors);
+        assertEquals(6L, source.cursor().lastCommitSeq());
+    }
+
+    @Test
+    void durableCursorLetsNewSourceResumeAfterPersistedCommitSeq() {
+        FakeCursorStore cursorStore = new FakeCursorStore(null);
+        FakeReader firstReader = new FakeReader(List.of(
+            event(1L, "canonical.trade", "event-1"),
+            event(2L, "canonical.trade", "event-2")
+        ));
+        DbCanonicalEnvelopeSource firstSource = newSource(firstReader, 0L, false, "", cursorStore, "featureplant-prod");
+
+        assertEquals(2, firstSource.poll(envelope -> {
+        }, 10));
+
+        FakeReader secondReader = new FakeReader(List.of());
+        DbCanonicalEnvelopeSource secondSource = newSource(
+            secondReader,
+            0L,
+            false,
+            "",
+            cursorStore,
+            "featureplant-prod"
+        );
+
+        assertEquals(0, secondSource.poll(envelope -> {
+        }, 10));
+        assertEquals(2L, secondReader.requests.get(0).cursor().lastCommitSeq());
+    }
+
+    @Test
+    void durableCursorDoesNotAdvanceWhenHandlerFails() {
+        FakeCursorStore cursorStore = new FakeCursorStore(new CanonicalDbCursor(4L));
+        FakeReader reader = new FakeReader(List.of(event(5L, "canonical.trade", "event-5")));
+        DbCanonicalEnvelopeSource source = newSource(reader, 0L, false, "", cursorStore, "featureplant-prod");
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> source.poll(envelope -> {
+                throw new IllegalStateException("sink failed");
+            }, 10)
+        );
+
+        assertEquals(List.of(), cursorStore.saveNames);
+        assertEquals(4L, source.cursor().lastCommitSeq());
+        assertEquals(0L, source.consumedEvents());
+    }
+
     private static DbCanonicalEnvelopeSource newSource(
         FakeReader reader,
         long maxEvents,
@@ -138,6 +204,28 @@ class DbCanonicalEnvelopeSourceTest {
             maxEvents,
             includeReplayEvents,
             replayId
+        );
+    }
+
+    private static DbCanonicalEnvelopeSource newSource(
+        FakeReader reader,
+        long maxEvents,
+        boolean includeReplayEvents,
+        String replayId,
+        FeaturePlantCursorStore cursorStore,
+        String cursorName
+    ) {
+        return new DbCanonicalEnvelopeSource(
+            reader,
+            List.of(
+                StreamRegistry.byName("canonical.trade").orElseThrow(),
+                StreamRegistry.byName("canonical.ticker").orElseThrow()
+            ),
+            maxEvents,
+            includeReplayEvents,
+            replayId,
+            cursorStore,
+            cursorName
         );
     }
 
@@ -173,6 +261,30 @@ class DbCanonicalEnvelopeSourceTest {
         public List<CanonicalDbReadEvent> read(CanonicalDbReadRequest request) {
             requests.add(request);
             return responses.isEmpty() ? List.of() : responses.remove();
+        }
+    }
+
+    private static final class FakeCursorStore implements FeaturePlantCursorStore {
+        private CanonicalDbCursor cursor;
+        private final List<String> loadNames = new ArrayList<>();
+        private final List<String> saveNames = new ArrayList<>();
+        private final List<CanonicalDbCursor> savedCursors = new ArrayList<>();
+
+        private FakeCursorStore(CanonicalDbCursor cursor) {
+            this.cursor = cursor;
+        }
+
+        @Override
+        public Optional<CanonicalDbCursor> loadCursor(String cursorName) {
+            loadNames.add(cursorName);
+            return Optional.ofNullable(cursor);
+        }
+
+        @Override
+        public void saveCursor(String cursorName, CanonicalDbCursor cursor) {
+            saveNames.add(cursorName);
+            savedCursors.add(cursor);
+            this.cursor = cursor;
         }
     }
 }

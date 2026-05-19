@@ -29,7 +29,10 @@ class DbPrimaryDemoScriptsTest {
 
         assertTrue(script.contains("FEATUREPLANT_SOURCE=db"));
         assertTrue(script.contains("FEATUREPLANT_OUTPUT=db"));
+        assertTrue(script.contains("FEATUREPLANT_DB_CURSOR_NAME=\"${FEATUREPLANT_DB_CURSOR_NAME:-}\""));
+        assertTrue(script.contains("FEATUREPLANT_DB_CURSOR_NAME=\"$FEATUREPLANT_DB_CURSOR_NAME\""));
         assertTrue(script.contains("FEATUREPLANT_RUN_ONCE=true"));
+        assertTrue(script.contains("docker compose --profile featureplant run --rm --build featureplant"));
         assertTrue(script.contains("EXPECTED_FEATURE_OUTPUTS_BEFORE"));
         assertTrue(script.contains("source_event_id like 'demo-db-primary-canonical-%'"));
         assertTrue(script.contains("PASS demo_featureplant"));
