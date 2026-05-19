@@ -49,11 +49,17 @@ public class KalshiSystem {
             throw new IllegalStateException("KALSHI_WS_CHANNELS must contain at least one channel.");
         }
 
-        RawDbIngestSink rawDbSink = createRawDbIngestSink(DbWriterConfig.fromEnvironment());
+        BackendMetrics backendMetrics = new BackendMetrics();
+        AutoCloseable metricsServer = startMetricsServer(config, backendMetrics, KalshiMetricsServer::start);
+        registerMetricsShutdownHook(metricsServer);
+        RawDbIngestSink rawDbSink = createRawDbIngestSink(
+            DbWriterConfig.fromEnvironment(),
+            backendMetrics,
+            AsyncDbWriterFactory::create
+        );
         registerRawDbShutdownHook(rawDbSink);
         RawIngestRecorder rawIngestRecorder = createRawIngestRecorder(config);
-        BackendMetrics recoveryBackendMetrics = new BackendMetrics();
-        OrderBookRecoveryMetrics orderBookRecoveryMetrics = new OrderBookRecoveryMetrics(recoveryBackendMetrics);
+        OrderBookRecoveryMetrics orderBookRecoveryMetrics = new OrderBookRecoveryMetrics(backendMetrics);
         ExecutorService orderBookRecoveryExecutor = newOrderBookRecoveryExecutor();
         registerOrderBookRecoveryShutdownHook(orderBookRecoveryExecutor);
         OrderBookRecoveryController orderBookRecoveryController = new OrderBookRecoveryController(
@@ -402,6 +408,28 @@ public class KalshiSystem {
         return new RawDbIngestSink(writer, config.rawSource(), config.rawCaptureId());
     }
 
+    static AutoCloseable startMetricsServer(
+        BackendConfig config,
+        BackendMetrics metrics,
+        MetricsServerFactory serverFactory
+    ) {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(metrics, "metrics");
+        Objects.requireNonNull(serverFactory, "serverFactory");
+        if (config.metricsPort() == 0) {
+            return null;
+        }
+        if (config.metricsPort() < 0) {
+            throw new IllegalStateException("BACKEND_METRICS_PORT must be zero or positive.");
+        }
+        return serverFactory.start(config.metricsHost(), config.metricsPort(), metrics);
+    }
+
+    @FunctionalInterface
+    interface MetricsServerFactory {
+        AutoCloseable start(String host, int port, BackendMetrics metrics);
+    }
+
     static OrderBookRecoveryGapConsumer createOrderBookRecoveryGapConsumer(
         BackendConfig config,
         OrderBookRecoveryController controller,
@@ -459,6 +487,23 @@ public class KalshiSystem {
     private static void registerRawDbShutdownHook(RawDbIngestSink rawDbSink) {
         if (rawDbSink != null) {
             Runtime.getRuntime().addShutdownHook(new Thread(rawDbSink::close, "raw-db-ingest-sink-shutdown"));
+        }
+    }
+
+    private static void registerMetricsShutdownHook(AutoCloseable metricsServer) {
+        if (metricsServer != null) {
+            Runtime.getRuntime().addShutdownHook(new Thread(
+                () -> closeMetricsServer(metricsServer),
+                "backend-metrics-server-shutdown"
+            ));
+        }
+    }
+
+    private static void closeMetricsServer(AutoCloseable metricsServer) {
+        try {
+            metricsServer.close();
+        } catch (Exception exc) {
+            throw new IllegalStateException("Failed to stop backend metrics server.", exc);
         }
     }
 

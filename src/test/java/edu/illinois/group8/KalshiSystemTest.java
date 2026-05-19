@@ -39,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,6 +89,24 @@ class KalshiSystemTest {
         assertEquals(64, config.orderBookRecoveryGapConsumerFragmentLimit());
         assertEquals(1, config.orderBookRecoveryGapConsumerIdleSleepMs());
         assertEquals("aeron:udp?endpoint=external:40456", config.aeronChannel());
+    }
+
+    @Test
+    void backendConfigDefaultsMetricsEndpointAndRejectsNegativePort() {
+        BackendConfig config = BackendConfig.from(Map.of());
+
+        assertEquals("0.0.0.0", config.metricsHost());
+        assertEquals(8091, config.metricsPort());
+
+        BackendConfig disabled = liveConfig(Map.of("BACKEND_METRICS_PORT", "0"));
+        assertEquals(0, disabled.metricsPort());
+        assertDoesNotThrow(disabled::validateForLiveIngestion);
+
+        IllegalStateException negative = assertThrows(
+            IllegalStateException.class,
+            () -> liveConfig(Map.of("BACKEND_METRICS_PORT", "-1")).validateForLiveIngestion()
+        );
+        assertTrue(negative.getMessage().contains("BACKEND_METRICS_PORT"));
     }
 
     @Test
@@ -160,10 +179,12 @@ class KalshiSystemTest {
         ));
         RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
         AtomicInteger factoryCalls = new AtomicInteger();
+        BackendMetrics sharedMetrics = new BackendMetrics();
 
-        RawDbIngestSink sink = KalshiSystem.createRawDbIngestSink(config, new BackendMetrics(), (dbConfig, metrics) -> {
+        RawDbIngestSink sink = KalshiSystem.createRawDbIngestSink(config, sharedMetrics, (dbConfig, metrics) -> {
             factoryCalls.incrementAndGet();
             assertEquals(config, dbConfig);
+            assertSame(sharedMetrics, metrics);
             return writer;
         });
 
@@ -295,6 +316,50 @@ class KalshiSystemTest {
 
         assertTrue(thread.isDaemon());
         assertEquals("orderbook-recovery-gap-consumer", thread.getName());
+    }
+
+    @Test
+    void metricsServerFactoryUsesConfiguredEndpointAndSharedMetrics() throws Exception {
+        BackendConfig config = BackendConfig.from(Map.of(
+            "BACKEND_METRICS_HOST", "127.0.0.1",
+            "BACKEND_METRICS_PORT", "19091"
+        ));
+        BackendMetrics sharedMetrics = new BackendMetrics();
+        AtomicReference<String> capturedHost = new AtomicReference<>();
+        AtomicInteger capturedPort = new AtomicInteger();
+        AtomicReference<BackendMetrics> capturedMetrics = new AtomicReference<>();
+        AtomicInteger closeCalls = new AtomicInteger();
+
+        AutoCloseable server = KalshiSystem.startMetricsServer(config, sharedMetrics, (host, port, metrics) -> {
+            capturedHost.set(host);
+            capturedPort.set(port);
+            capturedMetrics.set(metrics);
+            return closeCalls::incrementAndGet;
+        });
+
+        assertNotNull(server);
+        assertEquals("127.0.0.1", capturedHost.get());
+        assertEquals(19091, capturedPort.get());
+        assertSame(sharedMetrics, capturedMetrics.get());
+
+        server.close();
+
+        assertEquals(1, closeCalls.get());
+    }
+
+    @Test
+    void metricsServerFactoryNoopsWhenDisabled() {
+        BackendConfig config = BackendConfig.from(Map.of("BACKEND_METRICS_PORT", "0"));
+        AtomicInteger factoryCalls = new AtomicInteger();
+
+        AutoCloseable server = KalshiSystem.startMetricsServer(config, new BackendMetrics(), (host, port, metrics) -> {
+            factoryCalls.incrementAndGet();
+            return () -> {
+            };
+        });
+
+        assertNull(server);
+        assertEquals(0, factoryCalls.get());
     }
 
     @Test

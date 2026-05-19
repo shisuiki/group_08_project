@@ -35,7 +35,9 @@ public record BackendConfig(
     String hostIp,
     String baseDir,
     int clusterPortBase,
-    String aeronChannel
+    String aeronChannel,
+    String metricsHost,
+    int metricsPort
 ) {
     public static final String PROFILE_LOCAL = "local";
     public static final String PROFILE_DOCKER = "docker";
@@ -82,7 +84,9 @@ public record BackendConfig(
             value(env, properties, "IP", "127.0.0.1"),
             baseDir,
             intValue(env, properties, "CLUSTER_PORT_BASE", 9000),
-            aeronChannel(env, properties)
+            aeronChannel(env, properties),
+            value(env, properties, "BACKEND_METRICS_HOST", "0.0.0.0"),
+            intValue(env, properties, "BACKEND_METRICS_PORT", 8091)
         );
     }
 
@@ -127,6 +131,9 @@ public record BackendConfig(
         }
         if (orderBookRecoveryGapConsumerIdleSleepMs < 0) {
             errors.append("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS must be zero or positive. ");
+        }
+        if (metricsPort < 0) {
+            errors.append("BACKEND_METRICS_PORT must be zero or positive. ");
         }
         if (clusterAddresses.isEmpty()) {
             errors.append("CLUSTER_ADDRESSES must contain at least one host. ");
@@ -247,5 +254,6 @@ public record BackendConfig(
         hostIp = Objects.requireNonNullElse(hostIp, "127.0.0.1");
         baseDir = Objects.requireNonNullElse(baseDir, "/app");
         aeronChannel = Objects.requireNonNullElse(aeronChannel, "aeron:udp?endpoint=224.0.1.1:40456");
+        metricsHost = Objects.requireNonNullElse(metricsHost, "0.0.0.0");
     }
 }

@@ -2,6 +2,10 @@ global:
   scrape_interval: 10s
 
 scrape_configs:
+  - job_name: wsclient
+    static_configs:
+      - targets: ["wsclient:8091"]
+
   - job_name: tickerplant-stream-recorder
     static_configs:
       - targets: ["stream-recorder:8092"]
