@@ -10,6 +10,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class BoundedAsyncDbWriter implements AsyncDbWriter {
@@ -32,9 +33,16 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     private final int queueCapacity;
     private final int batchSize;
     private final BackendMetrics metrics;
+    private final BackendMetrics.Counter rawAcceptedCounter;
+    private final BackendMetrics.Counter rawDroppedCounter;
+    private final BackendMetrics.Counter rawWrittenCounter;
+    private final BackendMetrics.Counter canonicalAcceptedCounter;
+    private final BackendMetrics.Counter canonicalDroppedCounter;
+    private final BackendMetrics.Counter canonicalWrittenCounter;
+    private final BackendMetrics.Counter batchFailedCounter;
     private final Thread worker;
-    private final Object lifecycleLock = new Object();
     private final AtomicBoolean accepting = new AtomicBoolean(true);
+    private final AtomicInteger activeOffers = new AtomicInteger();
     private final AtomicLong rawAccepted = new AtomicLong();
     private final AtomicLong rawDropped = new AtomicLong();
     private final AtomicLong rawWritten = new AtomicLong();
@@ -86,6 +94,13 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
         this.queueCapacity = queueCapacity;
         this.batchSize = batchSize;
         this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.rawAcceptedCounter = this.metrics.counter(RAW_ACCEPTED_COUNTER);
+        this.rawDroppedCounter = this.metrics.counter(RAW_DROPPED_COUNTER);
+        this.rawWrittenCounter = this.metrics.counter(RAW_WRITTEN_COUNTER);
+        this.canonicalAcceptedCounter = this.metrics.counter(CANONICAL_ACCEPTED_COUNTER);
+        this.canonicalDroppedCounter = this.metrics.counter(CANONICAL_DROPPED_COUNTER);
+        this.canonicalWrittenCounter = this.metrics.counter(CANONICAL_WRITTEN_COUNTER);
+        this.batchFailedCounter = this.metrics.counter(BATCH_FAILED_COUNTER);
         this.queue = new ArrayBlockingQueue<>(queueCapacity);
         this.worker = new Thread(this::runWorker, "bounded-async-db-writer");
         this.worker.setDaemon(true);
@@ -96,50 +111,66 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     @Override
     public DbOfferResult offerRaw(RawWsDbEventInput input) {
         Objects.requireNonNull(input, "input");
-        synchronized (lifecycleLock) {
+        if (!accepting.get()) {
+            return DbOfferResult.DISABLED;
+        }
+        activeOffers.incrementAndGet();
+        try {
             if (!accepting.get()) {
                 return DbOfferResult.DISABLED;
             }
             if (!queue.offer(new RawWrite(input))) {
                 rawDropped.incrementAndGet();
-                metrics.increment(RAW_DROPPED_COUNTER);
+                rawDroppedCounter.increment();
                 updateQueueDepthGauge();
                 return DbOfferResult.DROPPED_FULL;
             }
             rawAccepted.incrementAndGet();
-            metrics.increment(RAW_ACCEPTED_COUNTER);
-            updateQueueDepthGauge();
+            rawAcceptedCounter.increment();
             return DbOfferResult.ACCEPTED;
+        } finally {
+            activeOffers.decrementAndGet();
         }
     }
 
     @Override
     public DbOfferResult offerCanonical(CanonicalDbEvent event) {
         Objects.requireNonNull(event, "event");
+        if (!accepting.get()) {
+            return DbOfferResult.DISABLED;
+        }
         return offerCanonicalRequest(new CanonicalWrite(event));
     }
 
     @Override
     public DbOfferResult offerCanonicalEvent(CanonicalEvent event) {
         Objects.requireNonNull(event, "event");
+        if (!accepting.get()) {
+            return DbOfferResult.DISABLED;
+        }
         return offerCanonicalRequest(new CanonicalEventWrite(event));
     }
 
     private DbOfferResult offerCanonicalRequest(WriteRequest request) {
-        synchronized (lifecycleLock) {
+        if (!accepting.get()) {
+            return DbOfferResult.DISABLED;
+        }
+        activeOffers.incrementAndGet();
+        try {
             if (!accepting.get()) {
                 return DbOfferResult.DISABLED;
             }
             if (!queue.offer(request)) {
                 canonicalDropped.incrementAndGet();
-                metrics.increment(CANONICAL_DROPPED_COUNTER);
+                canonicalDroppedCounter.increment();
                 updateQueueDepthGauge();
                 return DbOfferResult.DROPPED_FULL;
             }
             canonicalAccepted.incrementAndGet();
-            metrics.increment(CANONICAL_ACCEPTED_COUNTER);
-            updateQueueDepthGauge();
+            canonicalAcceptedCounter.increment();
             return DbOfferResult.ACCEPTED;
+        } finally {
+            activeOffers.decrementAndGet();
         }
     }
 
@@ -160,10 +191,8 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
 
     @Override
     public void close() {
-        synchronized (lifecycleLock) {
-            accepting.set(false);
-        }
-        worker.interrupt();
+        accepting.set(false);
+        // Let in-flight store calls finish; idle workers wake via poll timeout.
         try {
             worker.join(CLOSE_TIMEOUT_MS);
         } catch (InterruptedException e) {
@@ -172,7 +201,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
     }
 
     private void runWorker() {
-        while (accepting.get() || !queue.isEmpty()) {
+        while (shouldDrain()) {
             try {
                 WriteRequest first = queue.poll(POLL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 if (first == null) {
@@ -193,6 +222,10 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
             }
         }
         updateQueueDepthGauge();
+    }
+
+    private boolean shouldDrain() {
+        return accepting.get() || activeOffers.get() > 0 || !queue.isEmpty();
     }
 
     private void writeRequests(List<WriteRequest> requests) {
@@ -224,7 +257,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
             }
             store.insertRawBatch(List.copyOf(rawEvents));
             rawWritten.addAndGet(rawEvents.size());
-            metrics.add(RAW_WRITTEN_COUNTER, rawEvents.size());
+            rawWrittenCounter.add(rawEvents.size());
         } catch (Exception e) {
             countFailedBatch(e);
         }
@@ -246,7 +279,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
         try {
             store.insertCanonicalBatch(List.copyOf(canonicalEvents));
             canonicalWritten.addAndGet(canonicalEvents.size());
-            metrics.add(CANONICAL_WRITTEN_COUNTER, canonicalEvents.size());
+            canonicalWrittenCounter.add(canonicalEvents.size());
         } catch (Exception e) {
             countFailedBatch(e);
         }
@@ -266,7 +299,7 @@ public final class BoundedAsyncDbWriter implements AsyncDbWriter {
 
     private void countFailedBatch(Exception e) {
         failedBatches.incrementAndGet();
-        metrics.increment(BATCH_FAILED_COUNTER);
+        batchFailedCounter.increment();
         System.err.println("Async DB writer failed to write batch: " + e.getMessage());
     }
 

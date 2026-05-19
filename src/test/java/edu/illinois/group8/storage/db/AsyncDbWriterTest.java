@@ -15,6 +15,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.Test;
@@ -62,6 +64,13 @@ class AsyncDbWriterTest {
 
             store.releaseRaw.countDown();
             assertEventually(() -> store.rawEvents.size() == 2, "queued raw event should flush after release");
+            long closeStartNs = System.nanoTime();
+            writer.close();
+            long closeElapsedNs = System.nanoTime() - closeStartNs;
+
+            assertTrue(closeElapsedNs < TimeUnit.MILLISECONDS.toNanos(500), "close should not wait after release");
+            assertEquals(2L, writer.stats().rawWritten());
+            assertEquals(0, writer.stats().queueDepth());
         }
     }
 
@@ -137,6 +146,62 @@ class AsyncDbWriterTest {
     }
 
     @Test
+    void closeDrainsAcceptedEventsAndCountsFinalStats() throws Exception {
+        RecordingStore store = new RecordingStore();
+        store.blockRaw.set(true);
+        BackendMetrics metrics = new BackendMetrics();
+        BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 16, 8, metrics);
+        CountDownLatch closeInvoked = new CountDownLatch(1);
+        AtomicReference<Throwable> closeFailure = new AtomicReference<>();
+        Thread closeThread = new Thread(() -> {
+            try {
+                closeInvoked.countDown();
+                writer.close();
+            } catch (Throwable t) {
+                closeFailure.compareAndSet(null, t);
+            }
+        }, "async-db-writer-close-drain");
+
+        try {
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("close-raw-1"))));
+            assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should block in raw store");
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("close-raw-2"))));
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("close-canonical")));
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonicalEvent(canonicalEvent("close-canonical-event")));
+
+            closeThread.start();
+            assertTrue(closeInvoked.await(5, TimeUnit.SECONDS), "close should start");
+            Thread.sleep(50L);
+            assertTrue(closeThread.isAlive(), "close should wait for accepted blocked work to drain");
+
+            store.releaseRaw.countDown();
+            closeThread.join(2_000L);
+
+            assertTrue(!closeThread.isAlive(), "close should finish after the store releases");
+            assertEquals(null, closeFailure.get());
+            assertEquals(2L, writer.stats().rawAccepted());
+            assertEquals(2L, writer.stats().rawWritten());
+            assertEquals(2L, writer.stats().canonicalAccepted());
+            assertEquals(2L, writer.stats().canonicalWritten());
+            assertEquals(0, writer.stats().queueDepth());
+            assertEquals(2L, metrics.get(BoundedAsyncDbWriter.RAW_WRITTEN_COUNTER));
+            assertEquals(2L, metrics.get(BoundedAsyncDbWriter.CANONICAL_WRITTEN_COUNTER));
+            assertEquals(2, store.rawEvents.size());
+            assertEquals(2, store.canonicalEvents.size());
+            assertTrue(
+                store.canonicalEvents.stream()
+                    .map(CanonicalDbEvent::eventId)
+                    .toList()
+                    .containsAll(List.of("close-canonical", "close-canonical-event")),
+                "close should drain both canonical write forms"
+            );
+        } finally {
+            store.releaseRaw.countDown();
+            writer.close();
+        }
+    }
+
+    @Test
     void canonicalEventOfferDropsQuicklyWhenQueueIsFull() throws Exception {
         RecordingStore store = new RecordingStore();
         store.blockRaw.set(true);
@@ -174,6 +239,78 @@ class AsyncDbWriterTest {
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonicalEvent(canonicalEvent("canonical-event-after-close")));
         assertEquals(0L, writer.stats().rawAccepted());
         assertEquals(0L, writer.stats().canonicalAccepted());
+    }
+
+    @Test
+    void offerAndCloseRaceDoesNotThrowOrBlock() throws Exception {
+        RecordingStore store = new RecordingStore();
+        store.blockRaw.set(true);
+        BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 32, 8, new BackendMetrics());
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicLong acceptedOffers = new AtomicLong();
+        AtomicLong droppedOffers = new AtomicLong();
+        AtomicLong disabledOffers = new AtomicLong();
+        Thread[] offerThreads = new Thread[4];
+        Thread closeThread = new Thread(() -> {
+            try {
+                assertTrue(start.await(5, TimeUnit.SECONDS), "race should start");
+                writer.close();
+            } catch (Throwable t) {
+                failure.compareAndSet(null, t);
+            }
+        }, "async-db-writer-close-race");
+
+        try {
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("race-blocking"))));
+            assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should block in raw store");
+            for (int threadIndex = 0; threadIndex < offerThreads.length; threadIndex++) {
+                int workerIndex = threadIndex;
+                offerThreads[threadIndex] = new Thread(() -> {
+                    try {
+                        assertTrue(start.await(5, TimeUnit.SECONDS), "race should start");
+                        for (int i = 0; i < 100; i++) {
+                            countResult(
+                                writer.offerRaw(rawInput(rawPayload("race-" + workerIndex + "-" + i))),
+                                acceptedOffers,
+                                droppedOffers,
+                                disabledOffers
+                            );
+                            countResult(
+                                writer.offerCanonicalEvent(canonicalEvent("race-canonical-" + workerIndex + "-" + i)),
+                                acceptedOffers,
+                                droppedOffers,
+                                disabledOffers
+                            );
+                        }
+                    } catch (Throwable t) {
+                        failure.compareAndSet(null, t);
+                    }
+                }, "async-db-writer-offer-race-" + threadIndex);
+                offerThreads[threadIndex].start();
+            }
+            closeThread.start();
+            start.countDown();
+            for (Thread offerThread : offerThreads) {
+                offerThread.join(1_000L);
+                assertTrue(!offerThread.isAlive(), "offer thread should not block on close or store work");
+            }
+
+            store.releaseRaw.countDown();
+            closeThread.join(2_000L);
+
+            assertEquals(800L, acceptedOffers.get() + droppedOffers.get() + disabledOffers.get());
+            assertTrue(!closeThread.isAlive(), "close thread should return");
+            assertEquals(null, failure.get());
+            assertEquals(writer.stats().rawAccepted(), writer.stats().rawWritten());
+            assertEquals(writer.stats().canonicalAccepted(), writer.stats().canonicalWritten());
+            assertEquals(0, writer.stats().queueDepth());
+            assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput(rawPayload("after-race-close"))));
+            assertEquals(DbOfferResult.DISABLED, writer.offerCanonical(canonicalDbEvent("after-race-close")));
+        } finally {
+            store.releaseRaw.countDown();
+            writer.close();
+        }
     }
 
     @Test
@@ -352,6 +489,19 @@ class AsyncDbWriterTest {
             Thread.sleep(5L);
         }
         assertTrue(condition.getAsBoolean(), message);
+    }
+
+    private static void countResult(
+        DbOfferResult result,
+        AtomicLong accepted,
+        AtomicLong dropped,
+        AtomicLong disabled
+    ) {
+        switch (result) {
+            case ACCEPTED -> accepted.incrementAndGet();
+            case DROPPED_FULL -> dropped.incrementAndGet();
+            case DISABLED -> disabled.incrementAndGet();
+        }
     }
 
     private static final class RecordingStore implements AcceptedEventStore {
