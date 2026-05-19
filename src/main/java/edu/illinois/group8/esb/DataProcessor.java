@@ -228,6 +228,7 @@ public class DataProcessor {
     }
 
     private void handleGeneratedEvent(CanonicalEvent generated) {
+        observeEventMetrics(generated);
         publish(generated, "generated");
         generatedEventCounter(generated.eventType()).increment();
     }

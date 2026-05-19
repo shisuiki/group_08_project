@@ -52,6 +52,9 @@ class DataProcessorIngressEnvelopeTest {
     private static final String ORDERBOOK_DELTA_SEQ5_MESSAGE = """
         {"type":"orderbook_delta","sid":11,"seq":5,"msg":{"market_ticker":"M","price_dollars":"0.4700","delta_fp":"1.00","side":"yes","ts_ms":1}}
         """;
+    private static final String ORDERBOOK_CROSSED_DELTA_SEQ3_MESSAGE = """
+        {"type":"orderbook_delta","sid":11,"seq":3,"msg":{"market_ticker":"M","price_dollars":"0.6500","delta_fp":"1.00","side":"yes","ts_ms":1}}
+        """;
     private static final String ORDERBOOK_RECOVERY_SNAPSHOT_SEQ6_MESSAGE = """
         {"type":"orderbook_snapshot","sid":11,"seq":6,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4800","8.00"]],"no_dollars_fp":[["0.3900","4.00"]]}}
         """;
@@ -357,6 +360,80 @@ class DataProcessorIngressEnvelopeTest {
     }
 
     @Test
+    void generatedSequenceGapsIncrementQualityMetric() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        BackendMetrics metrics = new BackendMetrics();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            new SourceSequenceMonitor(),
+            true,
+            true,
+            publisher,
+            metrics
+        );
+
+        processor.processMessage(envelope(ORDERBOOK_SNAPSHOT_MESSAGE));
+
+        assertEquals(0L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_sequence_gap_total",
+            "system.sequence_gaps",
+            "sequence_gap"
+        ));
+
+        processor.processMessage(envelope(ORDERBOOK_DELTA_SEQ4_MESSAGE));
+
+        assertEquals(1L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_sequence_gap_total",
+            "system.sequence_gaps",
+            "sequence_gap"
+        ));
+
+        processor.processMessage(envelope(ORDERBOOK_DELTA_SEQ5_MESSAGE));
+
+        assertEquals(2L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_sequence_gap_total",
+            "system.sequence_gaps",
+            "sequence_gap"
+        ));
+        assertEquals(2L, metrics.get("processor.generated_events.sequence_gap"));
+    }
+
+    @Test
+    void generatedCrossedTopOfBookIncrementsQualityMetric() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        BackendMetrics metrics = new BackendMetrics();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            publisher,
+            metrics
+        );
+
+        processor.processMessage(envelope(ORDERBOOK_SNAPSHOT_MESSAGE));
+
+        assertEquals(0L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_crossed_total",
+            "derived.top_of_book",
+            "top_of_book_update"
+        ));
+
+        processor.processMessage(envelope(ORDERBOOK_CROSSED_DELTA_SEQ3_MESSAGE));
+
+        assertEquals(1L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_crossed_total",
+            "derived.top_of_book",
+            "top_of_book_update"
+        ));
+        assertEquals(2L, metrics.get("processor.generated_events.top_of_book_update"));
+    }
+
+    @Test
     void canonicalDbSinkReceivesSerializedPayloadAfterPublisherReturns() {
         RecordingEventPublisher publisher = new RecordingEventPublisher(true, true);
         RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
@@ -462,6 +539,24 @@ class DataProcessorIngressEnvelopeTest {
         return events.stream()
             .filter(event -> eventType.equals(event.eventType()))
             .count();
+    }
+
+    private static long qualityMetricCount(
+        BackendMetrics metrics,
+        String metricName,
+        String stream,
+        String eventType
+    ) {
+        return metrics.get(
+            metricName,
+            BackendMetrics.labels(
+                "service", "backend",
+                "stream", stream,
+                "event_type", eventType,
+                "schema_version", "1",
+                "source", "kalshi"
+            )
+        );
     }
 
     private static long dbOfferCount(
