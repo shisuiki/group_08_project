@@ -30,7 +30,8 @@ Current core promise:
 1. Collect Kalshi REST/WebSocket market data.
 2. Convert raw payloads into canonical market-data events.
 3. Distribute events through Aeron Cluster and tickerplant streams.
-4. Record raw and canonical data for replay, research, and demos.
+4. Store accepted raw/canonical rows in Timescale/Postgres for replay,
+   research, frontend, and FeaturePlant defaults.
 5. Run simple feature templates and a TradingView-style demo adapter.
 
 ## Legacy Diagram Notes
@@ -92,6 +93,8 @@ Important classes:
 - `OrderBookStateManager`: per-market snapshot/delta state and derived
   top-of-book recovery pauses.
 - `Tickerplant`: routes internal canonical JSON by `stream_name`.
+- `AeronCanonicalEnvelopeSource`: live canonical consumer source for
+  FeaturePlant-style modules; fair-polls stream subscriptions across calls.
 - `StreamRegistry`: external stream IDs and stream contracts.
 
 ## Sequence And Derived State Semantics
@@ -109,11 +112,12 @@ Current:
   publishes raw, source gap, and canonical events, but skips derived order-book
   apply and marks that market paused until a fresh snapshot. When derived
   order-book mode is disabled, the anomaly path does not create book state.
-- Crossed books suppress the invalid crossed top update, emit a recovery event,
-  and pause the market until a fresh snapshot.
+- Crossed books suppress the invalid crossed `top_of_book_update`, emit
+  `SequenceGapEvent(reason="crossed_book")`, and pause the market until a fresh
+  snapshot.
 - Generated sequence-gap events count producer-side
   `backend_orderbook_sequence_gap_total`; `crossed_book` sequence-gap events
-  also count `backend_orderbook_crossed_total`.
+  also count `backend_orderbook_crossed_total` from the sequence-gap labels.
   Distribution metrics remain sampled; counters remain exact.
 
 Planned:
@@ -169,7 +173,8 @@ Current database status:
   wiring, raw replay reader support, historical REST canonical backfill, and
   historical raw REST response rows in `raw_rest_responses`.
 - DB writer observability includes raw/canonical queue/drop/write metrics and
-  `processor_db_offers_total` for accepted, dropped-full, and disabled offers.
+  `processor_db_offers_total` for accepted, dropped-full, and disabled
+  best-effort non-blocking offers.
 - DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
   reader primitive exists for the current single-writer path and backs the
   default FeaturePlant, frontend adapter, and research export DB sources. Its
@@ -200,6 +205,7 @@ Most "cache" code is in-process memory, not durable cache infrastructure.
 | `FrontendFeatureStore.byMarket` | per-market deque | no | recent feature data for chart/quotes |
 | `FrontendFeatureStore.latestByMarket` | map | no | latest feature by market |
 | `BoundedFeatureOutputBuffer` | deque | no | embedded feature output buffer |
+| `FeaturePlantService.metricHandles` | map | no | cached module/stream metric handles |
 | `StreamTapServer.recentEvents` | deque | no | recent stream inspection |
 | `TickerplantStreamRecorder.recentEvents` | deque | no | recent recorder event summaries |
 | WebSocket ack maps | futures/maps | no | subscribe/update ack tracking |
@@ -226,7 +232,7 @@ Legend:
 | Canonical event model | current | stream registry and serializer exist |
 | Kalshi WS parser | current | parser error events exist |
 | Kalshi REST parser | current | used by historical backfill |
-| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books suppress invalid crossed top updates and pause; automated fresh snapshot reload and cluster restore remain planned |
+| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books suppress invalid crossed `top_of_book_update`, emit `SequenceGapEvent(reason="crossed_book")`, and pause until a fresh snapshot; automated fresh snapshot reload and cluster restore remain planned |
 | Source sequence monitor | current-basic | optional monotonic subscription watermark; forward gaps advance, duplicate/older events do not rewind |
 | Tickerplant routing | current | JSON `stream_name` routing |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
@@ -236,7 +242,7 @@ Legend:
 | Object-store loader/query backfill | planned | no full loader/query path |
 | Raw ingress replay | current-basic | Timescale reader default plus local NDJSON import/debug; publishes byte[] ingress envelopes with `replay_id` |
 | Historical REST backfill | current-basic | canonical DB and raw REST DB targets are default; canonical/raw-rest NDJSON are explicit legacy/debug/export |
-| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, live Aeron parses envelopes from byte[] while retaining payload strings, recording is explicit legacy/debug/demo/import |
+| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, live Aeron fair-polls streams and parses envelopes from byte[] while retaining payload strings, recording is explicit legacy/debug/demo/import; fair-poll coverage uses fake pollers |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
 | Persistent feature store | planned | no durable feature DB |
@@ -252,7 +258,7 @@ Legend:
 | Synthetic contract engine | planned | absent |
 | Pricing model layer | planned | absent |
 | Arb scanner | planned | absent |
-| Metrics | current-basic | custom Prometheus text metrics |
+| Metrics | current-basic | custom Prometheus text metrics; hot-path handles resolve storage once and unused resolved handles stay absent from `snapshot()` and Prometheus output until used |
 | Grafana/Prometheus | current-basic | config exists |
 | DataQualityEvent stream | planned | absent |
 | OpenTelemetry tracing | planned | absent |
@@ -356,14 +362,15 @@ Maintainability risks:
 
 ## Demo Readiness
 
-Safe demo path should use recorded data, not live credentials.
+Safe demo path should use DB-backed local/demo rows, not live credentials.
+Recording mode is an explicit offline fixture path.
 
 Recommended demo scope:
 
 1. Show current architecture and distinguish roadmap.
-2. Start from sample `recordings/canonical`.
-3. Run `featureplant` over recording only as an explicit demo/legacy mode.
-4. Run `frontend-adapter` against recording only for offline demo fixtures.
+2. Seed or reuse local Timescale/Postgres demo rows.
+3. Run `featureplant` from the DB default source.
+4. Run `frontend-adapter` from the DB default source.
 5. Open static chart demo.
 6. Show `/health` and `/metrics`.
 7. Optionally show raw replay dry-run.

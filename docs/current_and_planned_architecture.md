@@ -37,9 +37,9 @@ Plan status from the markdowns:
 | Plan | Current state | Where remaining planned modules belong |
 | --- | --- | --- |
 | `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket reconnect/subscription restore reliability. |
-| `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, DB-backed default input, recording/Aeron sources, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
+| `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, DB-backed default input, recording/Aeron sources, fair-polled live stream subscriptions, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
 | `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer` path has been removed; a current frontend adapter HTTP service and lightweight chart demo expose datafeed/search/history/quotes/health/metrics endpoints. | Production frontend work should add durable query backing, WS/SSE streaming, replay controls, and frontend hardening behind the feature/query boundary. |
-| `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
+| `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, cached hot-path metric handles, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
 | `05_semantic_feature_plant_ontology_pricing_plan.md` | Not implemented in source packages today. | Add a downstream semantic/pricing service that consumes canonical streams, feature streams, market metadata, replay, and quality/staleness indicators. |
 
 ## Diagram 0: Legacy Baseline Codebase
@@ -214,7 +214,7 @@ flowchart LR
   ORCH --> EXT
 
   subgraph Tooling["Current Consumers And Tooling"]
-    CLIENTS["Aeron clients<br/>stream-recorder, featureplant,<br/>or other subscribers"]:::external
+    CLIENTS["Aeron clients<br/>stream-recorder, explicit live featureplant,<br/>or other subscribers"]:::external
     DEMO["MarketGridDemo<br/>optional demo client"]:::optional
     TAP["StreamTapServer<br/>/events /health /metrics"]:::current
     RECORDER["TickerplantStreamRecorder<br/>records normalized streams"]:::current
@@ -247,7 +247,7 @@ flowchart LR
 
   subgraph FeatureCurrent["Current Featureplant Templates"]
     DBSRC["DbCanonicalEnvelopeSource<br/>default canonical_events input"]:::current
-    AERONSRC["AeronCanonicalEnvelopeSource<br/>live byte parse<br/>retains payload String"]:::current
+    AERONSRC["AeronCanonicalEnvelopeSource<br/>live byte parse + fair poll<br/>retains payload String"]:::current
     RECSRC["RecordingCanonicalEnvelopeSource<br/>recordings/canonical input"]:::current
     FPSVC1["FeaturePlantCli / FeaturePlantService<br/>poll + module dispatch + metrics text"]:::current
     FMODS["Current modules<br/>feature.bbo, feature.ticker_snapshot,<br/>feature.trade_tape"]:::current
@@ -285,7 +285,7 @@ flowchart LR
     REPLAY2["RawIngressReplayCli<br/>Timescale raw rows by default<br/>+ explicit local NDJSON import/debug"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
     RESTBACK2["HistoricalBackfillCli<br/>DB-primary raw REST + canonical backfill"]:::current
-    CURFEATURE["FeaturePlantService skeleton<br/>DB default + Aeron/recording sources<br/>stdout/buffer sinks"]:::current
+    CURFEATURE["FeaturePlantService skeleton<br/>DB default + fair-polled Aeron/recording sources<br/>stdout/buffer sinks"]:::current
     CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
   end
 

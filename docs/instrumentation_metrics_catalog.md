@@ -16,8 +16,9 @@ Use these labels where they apply:
 Avoid labels for `trade_id`, raw error messages, raw payload values, and unconstrained market tickers. Use sampled logs or recent-event buffers for payload-level investigation.
 
 Backend live hot-path latency, age, and backpressure distributions emitted with
-`service="backend"` are sampled to keep the live path latency-first. Counters
-for success, failure, drop, parser error, and order book quality remain exact.
+`service="backend"` are sampled first event plus every 64th event to keep the
+live path latency-first. Counters for success, failure, drop, parser error, and
+order book quality remain exact.
 
 ## Core Metrics
 
@@ -35,8 +36,8 @@ for success, failure, drop, parser error, and order book quality remain exact.
 - `backend_orderbook_sequence_gap_total`: sequence gap counter, including
   generated source/order-book recovery events.
 - `backend_orderbook_delta_before_snapshot_total`: bad order book lifecycle counter.
-- `backend_orderbook_crossed_total`: crossed book counter, including generated
-  `sequence_gap` events with `reason="crossed_book"`.
+- `backend_orderbook_crossed_total`: crossed book counter, counted from
+  generated `sequence_gap` events labeled `reason="crossed_book"`.
 - `backend_orderbook_negative_level_total`: invalid level counter.
 - `backend_publication_offer_total`: publication attempt/success counter.
 - `backend_publication_offer_failed_total`: publication failure counter.
@@ -84,8 +85,13 @@ sampled on the live hot path; counters remain exact.
 `stream-recorder` emits NDJSON capture/import/export storage metrics, parser
 visibility, order book quality, and feature input metrics for normalized
 tickerplant streams. DB-primary live storage is observed through
-`processor_db_offers_total` and `db_*` writer metrics. `FeaturePlantService`
-emits `feature_module_*` metrics when embedded or run by a module host.
+`processor_db_offers_total` and `db_*` writer metrics. `BackendMetrics` cached
+handles resolve counter/distribution storage once; unused resolved handles do
+not appear in `snapshot()` or Prometheus output until used.
+
+`FeaturePlantService` caches `feature_module_*` metric handles per module and
+stream when embedded or run by a module host. Its latency and lag distributions
+follow the same first-event plus every 64th accepted dispatch sampling rule.
 `streamtap` remains a lightweight inspection tool for recent normalized stream
 events.
 

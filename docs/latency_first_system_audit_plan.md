@@ -57,7 +57,9 @@ Kalshi WebSocket
   parse has been optimized, but routing still depends on payload-carried stream
   metadata. FeaturePlant live Aeron input parses canonical envelopes from
   byte[] via `CanonicalEnvelope.fromPayloadBytes` while retaining the
-  `payload()` string API; DB and recording sources still read stored strings.
+  `payload()` string API; its live source fair-polls stream subscriptions across
+  calls so later streams still receive polling turns when earlier streams are
+  busy. DB and recording sources still read stored strings.
   Fix: keep the lightweight routing path; long term, carry stream id/name in a
   header so `Tickerplant` can route without JSON payload inspection.
 
@@ -87,15 +89,17 @@ Kalshi WebSocket
 
 - [Medium, partially resolved] Metrics are too expensive for per-message hot path.
   Impact: each call allocates label maps and metric key strings.
-  Evidence: `BackendMetrics.labels` and `metricKey` run repeatedly in
-  `DataProcessor`, `AeronEventPublisher`, `Tickerplant`, recorder, and feature
-  code.
+  Evidence: uncached metrics call sites still rebuild labels/keys in remaining
+  recorder and tooling paths.
   Status: live `DataProcessor` and `AeronEventPublisher` handles are cached, and
   their hot-path latency/age/backpressure distributions are sampled first-event
   plus every 64th event. Success, failure, drop, parser error, and order book
   quality counters remain exact. Generated `sequence_gap` events, including
   `crossed_book`, now count producer-side
   `backend_orderbook_sequence_gap_total` / `backend_orderbook_crossed_total`.
+  `BackendMetrics` handles resolve storage once, `FeaturePlantService` caches
+  module/stream metric handles, and unused resolved handles stay absent from
+  `snapshot()` and Prometheus output until used.
   Fix: keep sampling distribution-only, precompute remaining metric keys,
   aggregate in counters, export histograms/quantiles outside the hot path.
 
@@ -231,6 +235,8 @@ Deliverables:
   leader-side parsing uses a reusable scratch buffer and byte[] slice parser.
 - Landed: FeaturePlant live Aeron source parses canonical envelope JSON from
   byte[] and still retains the payload string for compatibility.
+- Landed: FeaturePlant live Aeron source fair-polls subscriptions across calls;
+  coverage uses fake pollers, not a live Aeron integration test.
 - Remaining: replace JSON ingress envelope with length-prefixed/binary envelope
   or direct raw bytes plus metadata header.
 - Add stream id/name header so `Tickerplant` can eventually route from metadata
@@ -261,8 +267,9 @@ Deliverables:
   source gap, and canonical events, but skip derived order-book apply and mark
   the market paused until a fresh snapshot. Disabled derived mode does not
   create order-book state.
-- Landed: crossed books suppress the invalid crossed top update, emit a
-  recovery event, and pause.
+- Landed: crossed books suppress the invalid crossed `top_of_book_update`, emit
+  `SequenceGapEvent(reason="crossed_book")`, count
+  `backend_orderbook_crossed_total` from the sequence-gap labels, and pause.
 - Remaining: automated fresh snapshot reload and cluster snapshot/restore.
 - Add primitive/discrete price-level book implementation for Kalshi price
   levels.

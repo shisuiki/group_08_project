@@ -13,7 +13,10 @@ with `FEATUREPLANT_SOURCE=recording` or `--source=recording`.
 
 Live `AeronCanonicalEnvelopeSource` parses canonical envelope JSON from copied
 Aeron bytes through `CanonicalEnvelope.fromPayloadBytes`. `CanonicalEnvelope`
-still retains the exact payload string for `payload()` compatibility. DB and
+still retains the exact payload string for `payload()` compatibility. It
+fair-polls configured stream subscriptions across calls so saturated earlier
+streams do not block later streams from receiving polling turns; this is
+unit-tested with fake pollers, not a live Aeron integration test. DB and
 recording sources continue to read stored string payloads.
 
 Downstream visualization, backtesting, and research export modules should attach
@@ -99,3 +102,7 @@ legacy/debug/demo/import workflows.
 - `feature_module_lag_ms`
 
 Expose those metrics from the module host that embeds `FeaturePlantService`.
+Metric handles are cached per module and stream. Latency and lag distributions
+sample the first accepted dispatch and every 64th after; counters remain exact.
+Unused resolved counter/distribution handles stay absent from operator output
+until used.
