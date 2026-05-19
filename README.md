@@ -8,7 +8,7 @@
 - [Akul Sharma](https://linkedin.com/in/akulsharma1) (akuls2@illinois.edu)
 
 ## Introduction
-Real-time market data feeds and stored historical market data are both crucial for ensuring that trading firms can make informed decisions when participating in the market. Real-time data feeds allow for automated trading strategies, risk monitoring, and live-updating dashboards. Historical data is needed for developing trading strategies, creating back-testing libraries, and performing post-trade analysis. Our team has developed the infrastructure to provide this market data to clients for Kalshi, an event contracts exchange, which does not supply robust historical market data.
+Real-time market data feeds and stored historical market data are both crucial for ensuring that trading firms can make informed decisions when participating in the market. Real-time data feeds support automated trading strategies, risk monitoring, and demo-grade polling dashboards; production live dashboards remain roadmap work. Historical data is needed for developing trading strategies, creating back-testing libraries, and performing post-trade analysis. This repository provides a Kalshi market-data pipeline that publishes normalized streams to Aeron subscribers and exposes a DB-backed demo frontend adapter.
 
 ### What is Kalshi?
 Kalshi is a U.S.-based exchange that allows users to trade financial contracts on the outcome of future events. Users are able to place trades on almost anything – from elections, to the weather in specific cities, to future Oscars winners. These contracts function like stock tickers, where the price reflects market sentiment; thus, Kalshi is often referred to as a “prediction market”. For example, a contract predicting that a particular politician will win an election might trade at $0.80 if they are expected to win by a large margin, while the opposing outcome trades at $0.20. Once the relevant data is released, the contract will settle either “Yes” or “No”. As a result of this type of binary trading, the prices of the two sides always sum to $1.
@@ -16,17 +16,38 @@ Kalshi is a U.S.-based exchange that allows users to trade financial contracts o
 Kalshi aims to democratize access to event-driven markets, giving participants from all backgrounds the ability to gain insights into, speculate on, or hedge against a wide range of future events. The exchange provides continuously updated pricing data on the contracts traded on its platform. This data includes contract prices, volumes, open interest, and settlement information. Traders, analysts, and researchers rely on this data to assess market sentiment, evaluate probabilities, and track developments in real time.
 
 ## Overview
-Our infrastructure is centered around an Enterprise Service Bus (ESB), acting as the “brain” of the data collection system. At a high level, the ESB facilitates communication and integration between the different entities in our system. As a whole, our system receives messages containing Kalshi market data, processes them, and then sends the processed data to interested clients.
+Our infrastructure is centered around an Enterprise Service Bus (ESB), acting as the “brain” of the data collection system. At a high level, the ESB facilitates communication and integration between the different entities in our system. As a whole, our system receives messages containing Kalshi market data, processes them, and then publishes the processed data to configured Aeron streams.
 
 To get market data, we connect to the Kalshi API with a custom WebSocket client. We subscribe to an array of markets for three types of updates: orderbook deltas, trades, and “ticker”.
 
-As stated before, our service running the WebSocket client sends data messages through the ESB orchestrator to the data processor, which processes them. Processing updates our internal copies of the order books, which lets the processor know if our custom “top of book” message type should be sent. Once the processor decides what should be published, the messages are sent to the tickerplant. The tickerplant then publishes each message to the appropriate data feed, where interested clients are able to connect and read from.
+As stated before, our service running the WebSocket client sends data messages through the ESB orchestrator to the data processor, which processes them. Processing updates our internal copies of the order books, which lets the processor know if our custom “top of book” message type should be sent. Once the processor decides what should be published, the messages are sent to the tickerplant. The tickerplant then publishes each message to the appropriate configured external Aeron stream, where Aeron subscribers such as streamtap, recorder, FeaturePlant, and the frontend adapter can read.
 
 Durable live storage is DB-primary: raw websocket input and canonical events are
 written to Postgres/Timescale through the async DB writer path. FeaturePlant,
 the frontend adapter, and research export default to the DB canonical reader.
 Canonical NDJSON remains an explicit legacy/capture/export path for recording,
 demo, import, and debug workflows.
+
+## Implementation Status
+
+| Capability | Status | Current boundary |
+| --- | --- | --- |
+| Live websocket ingestion | current | `KalshiSystem` subscribes to configured or discovered markets; reconnect/subscription restore hardening remains planned. |
+| Aeron cluster / tickerplant streams | current | Cluster ingress, processor, tickerplant routing, and external Aeron streams exist; cluster recovery restores watermarks and paused book checkpoints, not full book depth. |
+| DB raw/canonical writer | current | Async best-effort raw/canonical offers write to Timescale/Postgres; drops/disabled state are observable through `processor_db_offers_total` and `db_*` metrics. |
+| Historical REST backfill | current-basic | REST raw/canonical/metadata DB targets exist; retry taxonomy and broad operational hardening remain limited. |
+| FeaturePlant modules | current-basic | BBO, ticker snapshot, and trade tape modules run from DB, recording, or live Aeron sources; richer stateful/versioned feature streams remain planned. |
+| `feature_outputs` persistent demo path | current-demo | Schema/store, explicit FeaturePlant DB output, deterministic seed, smoke script, and frontend startup snapshot mode exist; async/batched production feature persistence remains planned. |
+| Frontend adapter/static chart | current-demo | HTTP polling adapter and TradingView static chart exist; no production realtime WS/SSE frontend or replay controls. |
+| Raw replay | current-basic | Timescale source is default; local NDJSON is explicit import/debug fallback; replay publishes byte[] ingress envelopes. |
+| Recording-capture / S3 archive | legacy/debug | Recorder and S3 sync are explicit capture/archive/import/export paths, not the live source of truth. |
+| Observability | current-basic | Backend/FeaturePlant/streamtap metrics, pure Prometheus/Grafana profile, recorder metrics only with explicit `recording-capture`, and CI deploy smoke checks exist; alert rules and tracing remain planned. |
+| Pricing model | planned | Not present as a shipped runtime feature. |
+| Arb scanner | planned | Not present as a shipped runtime feature. |
+| Semantic matching / ontology | planned | Not present as a shipped runtime feature. |
+| Durable query API | planned | Basic HTTP inspection endpoints exist; production durable query/export API is not present. |
+| Alerts | planned-basic | Runbook/metrics groundwork exists; full alert rule set is incomplete. |
+| Redshift writer / old warehouse | removed/not present | Legacy diagram artifact only; current storage is DB-primary plus explicit capture/archive paths. |
 
 ## Terminology
 
@@ -44,7 +65,7 @@ Ticker - a message type that gives a summary of the market’s latest state. It 
 
 We used various tools and technologies for our project. We wanted to emphasize the low-latency requirement, so many of our technologies are HFT-related software.
 
-For our ESB, we are using Aeron Cluster, a distributed system utilizing the Raft consensus algorithm for leader election, fault tolerance, and replication. Aeron clusters also have channels through which services can communicate in a publish/subscribe (pubsub) fashion. We specifically chose Aeron for its low-latency properties, as it is able to receive the messages, process them, and send them to the tickerplant with <100 microsecond latency.
+For our ESB, we are using Aeron Cluster, a distributed system utilizing the Raft consensus algorithm for leader election, fault tolerance, and replication. Aeron clusters also have channels through which services can communicate in a publish/subscribe (pubsub) fashion. We specifically chose Aeron for its low-latency properties and keep the live path latency-first; a bounded `<100 microsecond` production end-to-end claim is not established by the current profiling and CI evidence.
 
 We use Aeron for low-latency publication and Postgres/Timescale for live raw
 ingest audit, canonical storage, replay, and FeaturePlant input. S3-backed
@@ -76,7 +97,7 @@ As stated previously, our overall architecture is centered around an Enterprise 
 
 Our system has to handle extremely high loads (potentially thousands of updates being recorded and processed per second), so we built it on top of an Aeron Cluster. The ESB receives messages from the real time market data listener and handles the message passing between the different entities in our system.
 
-The ESB architecture and business logic was purposely designed to be abstracted away from clients who may want to connect to it. For example, the ESBClusterCommunicationOrchestrator class ([cluster/ESBClusterCommunicationOrchestrator.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/cluster/ESBClusterCommunicationOrchestrator.java)) allows services like the Tickerplant to send or receive data through Aeron Channels, without having to manage the details of setting up the pubsub architecture or dealing with cluster node leaders.
+The ESB architecture and business logic was purposely designed to be abstracted away from internal services that publish to or subscribe from Aeron streams. For example, the ESBClusterCommunicationOrchestrator class ([cluster/ESBClusterCommunicationOrchestrator.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/cluster/ESBClusterCommunicationOrchestrator.java)) allows services like the Tickerplant to send or receive data through Aeron Channels, without having to manage the details of setting up the pubsub architecture or dealing with cluster node leaders.
 
 ### Data Processor
 
@@ -88,7 +109,7 @@ Each formatted message is then published to our system’s internal Aeron channe
 
 ### Tickerplant
 
-The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and sending them to clients. It publishes on one configured external Aeron channel using stream IDs 10-19, routing by each message's `stream_name`. This design keeps stream selection explicit while still allowing many subscribed clients to receive the same data at the same time.
+The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and publishing them to configured external Aeron streams. It publishes on one configured external Aeron channel using stream IDs 10-19, routing by each message's `stream_name`. This design keeps stream selection explicit while still allowing many Aeron subscribers to receive the same data at the same time.
 
 ### Real-Time Data Storage
 
@@ -114,7 +135,7 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 7. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
 8. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
 9. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.
-10. For the reproducible DB-primary demo, run `scripts/db-primary-demo-seed.sh`, follow `docs/demo_db_primary_walkthrough.md`, and run `scripts/db-primary-demo-smoke.sh` against the frontend adapter.
+10. For the reproducible DB-primary demo, run `scripts/db-primary-demo-seed.sh`, follow `docs/demo_db_primary_walkthrough.md`, use `docs/video_demo_checklist.md` for presentation boundaries, and run `scripts/db-primary-demo-smoke.sh` against the frontend adapter.
 
 Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 

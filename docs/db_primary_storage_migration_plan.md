@@ -613,7 +613,7 @@ and drop-visible through writer metrics.
 
 ## Remaining Next Batches
 
-1. Finish DB query/API migration and DB-seeded demo data.
+1. Finish DB query/API migration; maintain the landed DB-seeded demo path.
 2. Add batching/async policy for feature output persistence if it moves onto a
    latency-sensitive live path.
 3. Define the S3 archive/import/export retention and restore policy.

@@ -330,6 +330,10 @@ Current:
 - 43 test files under `src/test/java`.
 - GitHub Actions runs `mvn -B test` and uses Node 24-native
   `actions/checkout@v6` and `actions/setup-java@v5`.
+- CI validates `docker compose config` for `cluster-live`,
+  `recording-capture`, and `observability` before deploy.
+- The deploy job has bounded `cluster-live` HTTP health smoke checks for
+  `wsclient` metrics and `streamtap`.
 - Disabled live network tests exist for Kalshi wrapper.
 - EC2 deploy workflow exists.
 
@@ -337,8 +341,6 @@ Gaps:
 
 - no CI `mvn package` gate
 - no Docker build gate before deploy
-- no `docker compose config` gate
-- no container health smoke gate
 - no dependency vulnerability gate
 - no deploy rollback gate
 
@@ -365,8 +367,9 @@ Reliability risks:
 Maintainability risks:
 
 - Jackson, `org.json`, and `json-simple` are mixed.
-- Current docs mix completed features and roadmap items.
-- README contains stale or incomplete run instructions.
+- Docs require ongoing sync as roadmap items land.
+- README status and run instructions need to remain aligned with deployed
+  profiles.
 - One Maven artifact contains many runtime roles.
 
 ## Demo Readiness
@@ -384,8 +387,9 @@ Recommended demo scope:
 6. Show `/health` and `/metrics`.
 7. Optionally show raw replay dry-run.
 
-The canonical walkthrough is `docs/demo_db_primary_walkthrough.md`; the stable
-local seed is `scripts/db-primary-demo-seed.sh`; the frontend HTTP smoke is
+The canonical walkthrough is `docs/demo_db_primary_walkthrough.md`; the video
+guardrail is `docs/video_demo_checklist.md`; the stable local seed is
+`scripts/db-primary-demo-seed.sh`; the frontend HTTP smoke is
 `scripts/db-primary-demo-smoke.sh`.
 
 Do not demo as completed:
@@ -393,20 +397,26 @@ Do not demo as completed:
 - pricing model
 - arbitrage scanner
 - semantic ontology
-- durable feature store
-- full database query platform
+- production durable feature/query API
+- WebSocket/SSE realtime frontend
+- full alerting
 - production-grade reconnect/recovery
 
 ## Immediate Cleanup Plan
 
-1. Add a status table to README: current / skeleton / planned / removed.
-2. Keep stable DB-seeded demo rows aligned with frontend demo expectations.
-3. Fix README run commands for `single-node-local` and raw replay.
-4. Add Maven Wrapper.
-5. Add CI gates: `mvn test`, `mvn package`, Docker build, compose config.
-6. Add streamtap/recorder health smoke checks for non-demo profiles.
-7. Default HTTP admin endpoints to localhost or add auth.
-8. Define remaining DB migration: DB query API and recording import/export
+1. Keep the README status table aligned with current / current-basic /
+   current-demo / planned / legacy / removed boundaries.
+2. Keep stable DB-seeded demo rows and the video checklist aligned with
+   frontend demo expectations.
+3. Keep README run commands for `single-node-local`, raw replay, DB seed, and
+   frontend `feature_outputs` mode current.
+4. Add remaining CI gates: `mvn package`, Docker build, dependency scanning,
+   and rollback checks. `mvn test`, compose config validation, and
+   cluster-live health smoke checks already exist.
+5. Extend health smoke checks beyond `cluster-live` only when the target profile
+   has stable HTTP endpoints.
+6. Default HTTP admin endpoints to localhost or add auth.
+7. Define remaining DB migration: DB query API and recording import/export
    boundaries.
-9. Decide whether to split Maven modules or at least enforce package boundaries.
-10. Mark semantic/pricing/arb modules as future work only.
+8. Decide whether to split Maven modules or at least enforce package boundaries.
+9. Mark semantic/pricing/arb modules as future work only.

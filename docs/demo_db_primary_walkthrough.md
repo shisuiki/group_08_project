@@ -1,9 +1,11 @@
 # DB-Primary Demo Walkthrough
 
-This is the local video/demo path for showing the landed DB-primary frontend
-flow without Kalshi live/backfill credentials, NDJSON, S3, or external network
-dependencies. Keep credentials in environment variables or mounted secrets; do
-not print private keys, DB passwords, or `.env` contents.
+This is the local video/demo path for showing the landed DB-seeded
+persisted-feature frontend demo without Kalshi live/backfill credentials,
+NDJSON, S3, or external network dependencies. Use
+`docs/video_demo_checklist.md` as the presentation guardrail. Keep credentials
+in environment variables or mounted secrets; do not print private keys, DB
+passwords, or `.env` contents.
 
 ## Preconditions
 
