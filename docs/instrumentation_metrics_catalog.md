@@ -36,7 +36,7 @@ for success, failure, drop, parser error, and order book quality remain exact.
   generated source/order-book recovery events.
 - `backend_orderbook_delta_before_snapshot_total`: bad order book lifecycle counter.
 - `backend_orderbook_crossed_total`: crossed book counter, including generated
-  crossed `top_of_book_update` events.
+  `sequence_gap` events with `reason="crossed_book"`.
 - `backend_orderbook_negative_level_total`: invalid level counter.
 - `backend_publication_offer_total`: publication attempt/success counter.
 - `backend_publication_offer_failed_total`: publication failure counter.

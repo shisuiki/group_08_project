@@ -403,7 +403,7 @@ class DataProcessorIngressEnvelopeTest {
     }
 
     @Test
-    void generatedCrossedTopOfBookIncrementsQualityMetric() {
+    void generatedCrossedBookGapIncrementsQualityMetricWithoutTopUpdate() {
         CollectingEventPublisher publisher = new CollectingEventPublisher();
         BackendMetrics metrics = new BackendMetrics();
         DataProcessor processor = new DataProcessor(
@@ -418,19 +418,42 @@ class DataProcessorIngressEnvelopeTest {
         assertEquals(0L, qualityMetricCount(
             metrics,
             "backend_orderbook_crossed_total",
+            "system.sequence_gaps",
+            "sequence_gap"
+        ));
+        assertEquals(0L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_crossed_total",
             "derived.top_of_book",
             "top_of_book_update"
         ));
 
         processor.processMessage(envelope(ORDERBOOK_CROSSED_DELTA_SEQ3_MESSAGE));
 
+        assertEquals(6, publisher.events().size());
+        SequenceGapEvent gap = assertInstanceOf(SequenceGapEvent.class, publisher.events().get(5));
+        assertEquals("crossed_book", gap.reason());
+        assertEquals(1L, countEvents(publisher.events(), "top_of_book_update"));
+        assertEquals(1L, metrics.get("processor.generated_events.top_of_book_update"));
+        assertEquals(1L, metrics.get("processor.generated_events.sequence_gap"));
         assertEquals(1L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_sequence_gap_total",
+            "system.sequence_gaps",
+            "sequence_gap"
+        ));
+        assertEquals(1L, qualityMetricCount(
+            metrics,
+            "backend_orderbook_crossed_total",
+            "system.sequence_gaps",
+            "sequence_gap"
+        ));
+        assertEquals(0L, qualityMetricCount(
             metrics,
             "backend_orderbook_crossed_total",
             "derived.top_of_book",
             "top_of_book_update"
         ));
-        assertEquals(2L, metrics.get("processor.generated_events.top_of_book_update"));
     }
 
     @Test

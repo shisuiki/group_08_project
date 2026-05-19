@@ -5,6 +5,7 @@ import edu.illinois.group8.book.SourceSequenceMonitor;
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.CanonicalEvents;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+import edu.illinois.group8.canonical.SequenceGapEvent;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.config.BackendConfig;
 import edu.illinois.group8.ingress.KalshiIngressEnvelope;
@@ -265,7 +266,12 @@ public class DataProcessor {
             }
             case "orderbook_snapshot" -> handles.orderbookSnapshot.increment();
             case "orderbook_delta" -> handles.orderbookDelta.increment();
-            case "sequence_gap" -> handles.sequenceGap.increment();
+            case "sequence_gap" -> {
+                handles.sequenceGap.increment();
+                if (event instanceof SequenceGapEvent gap && "crossed_book".equals(gap.reason())) {
+                    handles.orderbookCrossed.increment();
+                }
+            }
             case "top_of_book_update" -> {
                 if (event instanceof edu.illinois.group8.canonical.TopOfBookUpdate topOfBook && topOfBook.crossed()) {
                     handles.orderbookCrossed.increment();

@@ -93,8 +93,8 @@ Kalshi WebSocket
   Status: live `DataProcessor` and `AeronEventPublisher` handles are cached, and
   their hot-path latency/age/backpressure distributions are sampled first-event
   plus every 64th event. Success, failure, drop, parser error, and order book
-  quality counters remain exact. Generated `sequence_gap` events and crossed
-  `top_of_book_update` events now count producer-side
+  quality counters remain exact. Generated `sequence_gap` events, including
+  `crossed_book`, now count producer-side
   `backend_orderbook_sequence_gap_total` / `backend_orderbook_crossed_total`.
   Fix: keep sampling distribution-only, precompute remaining metric keys,
   aggregate in counters, export histograms/quantiles outside the hot path.
@@ -261,8 +261,8 @@ Deliverables:
   source gap, and canonical events, but skip derived order-book apply and mark
   the market paused until a fresh snapshot. Disabled derived mode does not
   create order-book state.
-- Landed: crossed books pause after emitting the existing crossed top update
-  and recovery event.
+- Landed: crossed books suppress the invalid crossed top update, emit a
+  recovery event, and pause.
 - Remaining: automated fresh snapshot reload and cluster snapshot/restore.
 - Add primitive/discrete price-level book implementation for Kalshi price
   levels.

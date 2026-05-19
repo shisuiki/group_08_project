@@ -109,10 +109,11 @@ Current:
   publishes raw, source gap, and canonical events, but skips derived order-book
   apply and marks that market paused until a fresh snapshot. When derived
   order-book mode is disabled, the anomaly path does not create book state.
-- Crossed books still emit the existing crossed top update and recovery event,
-  then pause the market until a fresh snapshot.
-- Generated sequence-gap and crossed top-of-book events count producer-side
-  `backend_orderbook_sequence_gap_total` and `backend_orderbook_crossed_total`.
+- Crossed books suppress the invalid crossed top update, emit a recovery event,
+  and pause the market until a fresh snapshot.
+- Generated sequence-gap events count producer-side
+  `backend_orderbook_sequence_gap_total`; `crossed_book` sequence-gap events
+  also count `backend_orderbook_crossed_total`.
   Distribution metrics remain sampled; counters remain exact.
 
 Planned:
@@ -225,7 +226,7 @@ Legend:
 | Canonical event model | current | stream registry and serializer exist |
 | Kalshi WS parser | current | parser error events exist |
 | Kalshi REST parser | current | used by historical backfill |
-| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books pause after the current crossed update; automated fresh snapshot reload and cluster restore remain planned |
+| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books suppress invalid crossed top updates and pause; automated fresh snapshot reload and cluster restore remain planned |
 | Source sequence monitor | current-basic | optional monotonic subscription watermark; forward gaps advance, duplicate/older events do not rewind |
 | Tickerplant routing | current | JSON `stream_name` routing |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |

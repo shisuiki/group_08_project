@@ -74,7 +74,6 @@ public class OrderBookState {
         }
 
         TopOfBook current = currentTopOfBook();
-        CanonicalEvent topOfBookUpdate = changedTopOfBookEvent(delta.eventId(), delta.metadata(), current);
         if (current.crossed()) {
             pausedForRecovery = true;
             SequenceGapEvent gap = sequenceGap(
@@ -84,8 +83,9 @@ public class OrderBookState {
                 actualSequence,
                 "crossed_book"
             );
-            return topOfBookUpdate == null ? BookUpdateResult.single(gap) : BookUpdateResult.of(topOfBookUpdate, gap);
+            return BookUpdateResult.single(gap);
         }
+        CanonicalEvent topOfBookUpdate = changedTopOfBookEvent(delta.eventId(), delta.metadata(), current);
         return topOfBookUpdate == null ? BookUpdateResult.empty() : BookUpdateResult.single(topOfBookUpdate);
     }
 

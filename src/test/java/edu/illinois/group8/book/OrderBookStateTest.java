@@ -192,7 +192,7 @@ class OrderBookStateTest {
     }
 
     @Test
-    void crossedBookProducesTopOfBookUpdateThenSequenceGap() {
+    void crossedBookProducesSequenceGapWithoutTopOfBookUpdate() {
         OrderBookState state = new OrderBookState("M");
         state.applySnapshot(snapshot("""
             {"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
@@ -201,15 +201,25 @@ class OrderBookStateTest {
             {"type":"orderbook_delta","sid":2,"seq":3,"msg":{"market_ticker":"M","price_dollars":"0.6500","delta_fp":"1.00","side":"yes","ts_ms":1}}
             """));
 
-        assertEquals(2, result.generatedEvents().size());
-        TopOfBookUpdate top = assertInstanceOf(TopOfBookUpdate.class, result.generatedEvents().get(0));
-        assertEquals(650_000L, top.bidPriceMicros());
-        assertEquals(600_000L, top.askPriceMicros());
-        assertTrue(top.crossed());
-        SequenceGapEvent gap = assertInstanceOf(SequenceGapEvent.class, result.generatedEvents().get(1));
+        assertEquals(1, result.generatedEvents().size());
+        SequenceGapEvent gap = assertInstanceOf(SequenceGapEvent.class, result.generatedEvents().get(0));
         assertEquals("crossed_book", gap.reason());
         assertTrue(state.pausedForRecovery());
         assertEquals(Long.valueOf(3L), state.lastSequence());
+        TopOfBook crossedTop = state.currentTopOfBook();
+        assertEquals(650_000L, crossedTop.bidPriceMicros());
+        assertEquals(600_000L, crossedTop.askPriceMicros());
+        assertTrue(crossedTop.crossed());
+
+        BookUpdateResult snapshotResult = state.applySnapshot(snapshot("""
+            {"type":"orderbook_snapshot","sid":2,"seq":10,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4700","8.00"]],"no_dollars_fp":[["0.3900","4.00"]]}}
+            """));
+
+        assertFalse(state.pausedForRecovery());
+        TopOfBookUpdate snapshotTop = assertInstanceOf(TopOfBookUpdate.class, snapshotResult.generatedEvents().get(0));
+        assertEquals(470_000L, snapshotTop.bidPriceMicros());
+        assertEquals(610_000L, snapshotTop.askPriceMicros());
+        assertFalse(snapshotTop.crossed());
     }
 
     @Test
