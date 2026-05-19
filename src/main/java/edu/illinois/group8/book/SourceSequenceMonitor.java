@@ -23,19 +23,24 @@ public class SourceSequenceMonitor {
             return List.of();
         }
 
-        Long previousSequence = lastSequenceBySubscription.put(subscriptionId, actualSequence);
+        Long previousSequence = lastSequenceBySubscription.get(subscriptionId);
         if (previousSequence == null) {
+            lastSequenceBySubscription.put(subscriptionId, actualSequence);
             return List.of();
         }
 
         long expectedSequence = previousSequence + 1L;
         if (actualSequence == expectedSequence) {
+            lastSequenceBySubscription.put(subscriptionId, actualSequence);
             return List.of();
         }
 
-        String reason = actualSequence <= previousSequence
-            ? "non_monotonic_source_sequence"
-            : "source_sequence_gap";
+        boolean nonMonotonic = actualSequence <= previousSequence;
+        if (!nonMonotonic) {
+            lastSequenceBySubscription.put(subscriptionId, actualSequence);
+        }
+
+        String reason = nonMonotonic ? "non_monotonic_source_sequence" : "source_sequence_gap";
         return List.of(new SequenceGapEvent(
             KalshiCanonicalParser.eventId(
                 metadata.rawEventId(),
