@@ -7,6 +7,8 @@ COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:-.env}"
 DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-.deploy-state}"
 WSCLIENT_METRICS_HOST_PORT="${WSCLIENT_METRICS_HOST_PORT:-8091}"
 WSCLIENT_CAPTURE_METRICS_HOST_PORT="${WSCLIENT_CAPTURE_METRICS_HOST_PORT:-8093}"
+FEATUREPLANT_METRICS_HOST_PORT="${FEATUREPLANT_METRICS_HOST_PORT:-8094}"
+DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-8090}"
 STREAM_TAP_HOST_PORT="${STREAM_TAP_HOST_PORT:-8080}"
 STREAM_RECORDER_HOST_PORT="${STREAM_RECORDER_HOST_PORT:-8092}"
 WSCLIENT_START_DELAY_SECONDS="${WSCLIENT_START_DELAY_SECONDS:-20}"
@@ -17,6 +19,8 @@ down_all_profiles() {
         --profile cluster-live \
         --profile recording-capture \
         --profile observability \
+        --profile local-db \
+        --profile db-primary-product \
         --profile featureplant \
         --profile raw-replay \
         --profile historical-backfill \
@@ -43,6 +47,10 @@ diagnose_profile() {
     elif [ "$DEPLOY_PROFILE" = "recording-capture" ]; then
         log "Recent wsclient-capture/stream-recorder logs:"
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 wsclient-capture stream-recorder >&2 || true
+    elif [ "$DEPLOY_PROFILE" = "db-primary-product" ]; then
+        log "Recent db-primary-product logs:"
+        sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
+            timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary >&2 || true
     fi
 }
 
@@ -75,8 +83,35 @@ db_preflight_service() {
     case "$DEPLOY_PROFILE" in
         cluster-live) printf '%s\n' wsclient ;;
         recording-capture) printf '%s\n' wsclient-capture ;;
+        db-primary-product) printf '%s\n' featureplant-db-follower ;;
         *) printf '%s\n' "" ;;
     esac
+}
+
+db_preflight_value() {
+    env_file="$1"
+    primary_key="$2"
+    fallback_key="$3"
+    value="$(env_file_value "$env_file" "$primary_key")"
+    if [ -z "$value" ]; then
+        value="$(env_file_value "$env_file" "$fallback_key")"
+    fi
+    printf '%s\n' "$value"
+}
+
+db_preflight_product_value() {
+    env_file="$1"
+    featureplant_key="$2"
+    frontend_key="$3"
+    writer_key="$4"
+    value="$(env_file_value "$env_file" "$featureplant_key")"
+    if [ -z "$value" ]; then
+        value="$(env_file_value "$env_file" "$frontend_key")"
+    fi
+    if [ -z "$value" ]; then
+        value="$(env_file_value "$env_file" "$writer_key")"
+    fi
+    printf '%s\n' "$value"
 }
 
 run_db_release_preflight() {
@@ -91,20 +126,34 @@ run_db_release_preflight() {
     if [ -z "$required" ]; then
         required="$DEPLOY_DB_PREFLIGHT_REQUIRED"
     fi
-    db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
+    case "$DEPLOY_PROFILE" in
+        db-primary-product)
+            db_url="$(db_preflight_product_value "$env_file" FEATUREPLANT_DB_URL FRONTEND_ADAPTER_DB_URL DB_WRITER_DATABASE_URL)"
+            db_user="$(db_preflight_product_value "$env_file" FEATUREPLANT_DB_USER FRONTEND_ADAPTER_DB_USER DB_WRITER_DATABASE_USER)"
+            db_password="$(db_preflight_product_value "$env_file" FEATUREPLANT_DB_PASSWORD FRONTEND_ADAPTER_DB_PASSWORD DB_WRITER_DATABASE_PASSWORD)"
+            ;;
+        *)
+            db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
+            db_user="$(env_file_value "$env_file" DB_WRITER_DATABASE_USER)"
+            db_password="$(env_file_value "$env_file" DB_WRITER_DATABASE_PASSWORD)"
+            ;;
+    esac
 
     if [ -z "$db_url" ] && ! is_true "$required"; then
-        log "Skipping DB release preflight: DB_WRITER_DATABASE_URL is empty and DEPLOY_DB_PREFLIGHT_REQUIRED=$required."
+        log "Skipping DB release preflight: candidate DB URL is empty and DEPLOY_DB_PREFLIGHT_REQUIRED=$required."
         return 0
     fi
     if [ -z "$db_url" ]; then
-        log "DB release preflight required but DB_WRITER_DATABASE_URL is empty."
+        log "DB release preflight required but candidate DB URL is empty."
         return 1
     fi
 
     log "Running DB release preflight with candidate service $service before stopping current services."
     if ! compose_profile "$env_file" run --rm --no-deps -T \
         -e DEPLOY_DB_PREFLIGHT_REQUIRED="$required" \
+        -e DB_PREFLIGHT_DATABASE_URL="$db_url" \
+        -e DB_PREFLIGHT_DATABASE_USER="$db_user" \
+        -e DB_PREFLIGHT_DATABASE_PASSWORD="$db_password" \
         "$service" java -cp /app/app.jar edu.illinois.group8.storage.db.DbReleasePreflightCli; then
         log "DB release preflight failed."
         return 1
@@ -164,6 +213,11 @@ profile_health_smoke() {
             health_smoke_pair \
                 wsclient-capture "http://127.0.0.1:${WSCLIENT_CAPTURE_METRICS_HOST_PORT}/health" \
                 stream-recorder "http://127.0.0.1:${STREAM_RECORDER_HOST_PORT}/health"
+            ;;
+        db-primary-product)
+            health_smoke_pair \
+                featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health" \
+                frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"
             ;;
         *)
             log "Skipping health smoke checks for DEPLOY_PROFILE=$DEPLOY_PROFILE."

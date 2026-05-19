@@ -96,6 +96,37 @@ class DbPrimaryDemoScriptsTest {
         assertFalse(script.contains("docker compose --profile featureplant run"));
     }
 
+    @Test
+    void rollbackGateTreatsDbPrimaryProductAsFirstClassProfile() throws Exception {
+        String script = read("scripts/ec2-compose-rollback-gate.sh");
+
+        assertTrue(script.contains("--profile local-db"));
+        assertTrue(script.contains("--profile db-primary-product"));
+        assertTrue(script.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=\"${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-8090}\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_HOST_PORT=\"${FEATUREPLANT_METRICS_HOST_PORT:-8094}\""));
+        assertTrue(script.contains("timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary"));
+        assertTrue(script.contains("db-primary-product)"));
+        assertTrue(script.contains("featureplant-db-follower \"http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health\""));
+        assertTrue(script.contains("frontend-adapter-db-primary \"http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health\""));
+        assertTrue(script.contains("db-primary-product) printf '%s\\n' featureplant-db-follower"));
+        assertTrue(script.contains("FEATUREPLANT_DB_URL FRONTEND_ADAPTER_DB_URL DB_WRITER_DATABASE_URL"));
+        assertTrue(script.contains("DB_PREFLIGHT_DATABASE_URL=\"$db_url\""));
+    }
+
+    @Test
+    void deployWorkflowPropagatesDbPrimaryProductPortsToRollbackGate() throws Exception {
+        String workflow = read(".github/workflows/deploy-ec2.yml");
+
+        assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT: ${{ vars.DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT || '8090' }}"));
+        assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT: ${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}"));
+        assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"));
+        assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT"));
+        assertTrue(workflow.contains("printf -v q_db_primary_product_frontend_host_port '%q' \"$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT\""));
+        assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
+        assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));
+        assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port"));
+    }
+
     private static String read(String path) throws Exception {
         Path file = Path.of(path);
         Assumptions.assumeTrue(

@@ -146,6 +146,28 @@ assert_db_primary_product_defaults_aligned() {
             exit 1
         fi
     done
+    for expected in 'published: "8090"' 'target: 8090'; do
+        if ! printf '%s\n' "$frontend_rendered" | grep -q "^        ${expected}$"; then
+            printf 'db-primary-product frontend-adapter-db-primary missing frontend port %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    frontend_override_rendered="$(
+        DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=18090 service_config_for frontend-adapter-db-primary --profile db-primary-product
+    )"
+    if ! printf '%s\n' "$frontend_override_rendered" | grep -q '^        published: "18090"$'; then
+        printf 'db-primary-product frontend-adapter-db-primary host port override did not render as 18090\n' >&2
+        exit 1
+    fi
+    for expected in \
+        "DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT: \${{ vars.DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT || '8090' }}" \
+        'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT' \
+        'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port'; do
+        if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing db-primary-product frontend propagation: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
     printf 'PASS db_primary_product_defaults featureplant=follower frontend=feature_outputs\n'
 }
 
@@ -298,6 +320,20 @@ assert_release_gate_defaults_aligned() {
         printf 'rollback gate DEPLOY_DB_PREFLIGHT_REQUIRED default is not false\n' >&2
         exit 1
     fi
+    for expected in \
+        '--profile db-primary-product' \
+        'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-8090}"' \
+        'db-primary-product)' \
+        'featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health"' \
+        'frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"' \
+        'timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary' \
+        'FEATUREPLANT_DB_URL FRONTEND_ADAPTER_DB_URL DB_WRITER_DATABASE_URL' \
+        'DB_PREFLIGHT_DATABASE_URL="$db_url"'; do
+        if ! grep -Fq -- "$expected" scripts/ec2-compose-rollback-gate.sh; then
+            printf 'rollback gate missing db-primary-product behavior: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
     printf 'PASS release_gate_defaults db_preflight_required=false wsclient_capture_metrics_host_port=8093\n'
 }
 

@@ -175,6 +175,7 @@ jobs:
       FEATUREPLANT_IDLE_SLEEP_MS: ${{ vars.FEATUREPLANT_IDLE_SLEEP_MS || '1' }}
       FEATUREPLANT_RUN_ONCE: ${{ vars.FEATUREPLANT_RUN_ONCE || 'true' }}
       FEATUREPLANT_METRICS_HOST_PORT: ${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}
+      DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT: ${{ vars.DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT || '8090' }}
       FRONTEND_ADAPTER_FEATURE_SOURCE: ${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'modules' }}
       FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS: ${{ vars.FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS || '10000' }}
       FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: ${{ vars.FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED || 'true' }}
@@ -388,6 +389,7 @@ jobs:
           FEATUREPLANT_IDLE_SLEEP_MS=$FEATUREPLANT_IDLE_SLEEP_MS
           FEATUREPLANT_RUN_ONCE=$FEATUREPLANT_RUN_ONCE
           FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT
+          DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT
           FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE
           FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS=$FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS
           FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED=$FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED
@@ -412,10 +414,12 @@ jobs:
           printf -v q_wsclient_capture_metrics_host_port '%q' "$WSCLIENT_CAPTURE_METRICS_HOST_PORT"
           printf -v q_stream_tap_host_port '%q' "$STREAM_TAP_HOST_PORT"
           printf -v q_stream_recorder_host_port '%q' "$STREAM_RECORDER_HOST_PORT"
+          printf -v q_featureplant_metrics_host_port '%q' "$FEATUREPLANT_METRICS_HOST_PORT"
+          printf -v q_db_primary_product_frontend_host_port '%q' "$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"
           printf -v q_wsclient_start_delay_seconds '%q' "$WSCLIENT_START_DELAY_SECONDS"
           printf -v q_deploy_db_preflight_required '%q' "$DEPLOY_DB_PREFLIGHT_REQUIRED"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
-            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required sh scripts/ec2-compose-rollback-gate.sh"
+            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required sh scripts/ec2-compose-rollback-gate.sh"
 
       - name: Show service status
         if: always()
