@@ -18,7 +18,7 @@ public final class HistoricalBackfillService {
     private final HistoricalBackfillClient client;
     private final KalshiRestParser parser;
     private final CanonicalBackfillSink canonicalSink;
-    private final RawRestResponseWriter rawWriter;
+    private final RawRestBackfillSink rawRestSink;
     private final BackendMetrics metrics;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
 
@@ -26,13 +26,13 @@ public final class HistoricalBackfillService {
         HistoricalBackfillClient client,
         KalshiRestParser parser,
         CanonicalBackfillSink canonicalSink,
-        RawRestResponseWriter rawWriter,
+        RawRestBackfillSink rawRestSink,
         BackendMetrics metrics
     ) {
         this.client = client;
         this.parser = parser;
         this.canonicalSink = canonicalSink;
-        this.rawWriter = rawWriter;
+        this.rawRestSink = rawRestSink;
         this.metrics = metrics;
     }
 
@@ -186,8 +186,8 @@ public final class HistoricalBackfillService {
         counters.currentFetchTsNs = fetchTsNs;
         Instant fetchWallTs = Instant.now();
         try {
-            if (!config.dryRun() && rawWriter != null) {
-                rawWriter.write(endpoint, ticker, rawPayload, fetchTsNs, fetchWallTs);
+            if (!config.dryRun() && rawRestSink != null) {
+                rawRestSink.write(endpoint, ticker, rawPayload, fetchTsNs, fetchWallTs);
                 counters.rawResponsesRecorded++;
             }
             CanonicalParseResult result = parserCall.parse(rawPayload);

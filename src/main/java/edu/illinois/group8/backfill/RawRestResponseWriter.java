@@ -17,7 +17,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
 
-final class RawRestResponseWriter {
+final class RawRestResponseWriter implements RawRestBackfillSink {
     private final Path outputRoot;
     private final StreamRecordingWriter.PartitionGranularity partitionGranularity;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -27,7 +27,8 @@ final class RawRestResponseWriter {
         this.partitionGranularity = partitionGranularity;
     }
 
-    void write(String endpoint, String ticker, String rawPayload, long fetchTsNs, Instant fetchWallTs) throws IOException {
+    @Override
+    public void write(String endpoint, String ticker, String rawPayload, long fetchTsNs, Instant fetchWallTs) throws IOException {
         ObjectNode node = mapper.createObjectNode();
         node.put("schema_version", 1);
         node.put("record_type", "raw_rest_response");

@@ -99,7 +99,8 @@ This produces the key NDJSON capture views:
 - `canonical`: normalized stream records written by `TickerplantStreamRecorder`
   after it consumes the external Aeron stream like any other tickerplant client.
   Use this for e2e latency and stream-fidelity measurement.
-- `raw-rest`: exact REST responses recorded by historical backfill runs.
+- `raw-rest`: exact REST responses recorded only when historical backfill uses
+  the explicit `HISTORICAL_BACKFILL_RAW_REST_TARGET=recording` mode.
 
 The downstream `stream-recorder` is the correct place to measure
 recording-capture end-to-end latency from websocket receipt to Aeron-client
@@ -136,7 +137,8 @@ docker compose --env-file .env --profile raw-replay run --rm raw-ingress-replay 
 
 Use `--dry-run` to validate selection/order without publishing into the cluster.
 
-Historical REST backfill writes parsed canonical events to DB by default:
+Historical REST backfill writes parsed canonical events to `canonical_events`
+and raw REST response bodies to `raw_rest_responses` by default:
 
 ```bash
 docker compose --env-file .env --profile historical-backfill run --rm historical-backfill
@@ -144,8 +146,12 @@ docker compose --env-file .env --profile historical-backfill run --rm historical
 
 Set `HISTORICAL_BACKFILL_CANONICAL_TARGET=recording` only for explicit
 legacy/debug/export canonical NDJSON. Set
-`HISTORICAL_BACKFILL_RAW_REST_ENABLED=true` only when raw REST
-`responses.ndjson` should be archived under `recordings/raw-rest`.
+`HISTORICAL_BACKFILL_RAW_REST_TARGET=recording` only when raw REST
+`responses.ndjson` should be archived under `recordings/raw-rest`; set
+`HISTORICAL_BACKFILL_RAW_REST_TARGET=none` to skip raw REST response storage.
+Legacy `HISTORICAL_BACKFILL_RAW_REST_ENABLED=true` is still accepted as
+recording-target compatibility when `HISTORICAL_BACKFILL_RAW_REST_TARGET` is
+unset.
 
 Set `HISTORICAL_BACKFILL_TICKERS` for explicit contracts, or let the service
 discover markets from `GET /markets` using `HISTORICAL_BACKFILL_MARKET_STATUS`,

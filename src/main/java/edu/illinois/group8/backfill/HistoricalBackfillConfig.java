@@ -20,6 +20,7 @@ public record HistoricalBackfillConfig(
     String dbUser,
     String dbPassword,
     boolean rawRestEnabled,
+    RawRestTarget rawRestTarget,
     Path rawRestOutputRoot,
     List<String> tickers,
     String seriesTicker,
@@ -54,12 +55,29 @@ public record HistoricalBackfillConfig(
         }
     }
 
+    public enum RawRestTarget {
+        DB, RECORDING, NONE;
+
+        public static RawRestTarget from(String value, boolean legacyRawRestEnabled) {
+            if (value == null || value.isBlank()) {
+                return legacyRawRestEnabled ? RECORDING : DB;
+            }
+            return switch (value.trim().toLowerCase(Locale.ROOT)) {
+                case "db", "postgres", "postgresql", "timescale", "timescaledb" -> DB;
+                case "recording", "history", "storage", "ndjson" -> RECORDING;
+                case "none", "disabled", "off", "false" -> NONE;
+                default -> throw new IllegalArgumentException("Unknown HISTORICAL_BACKFILL_RAW_REST_TARGET: " + value);
+            };
+        }
+    }
+
     public static HistoricalBackfillConfig fromEnvironment() {
         return from(System.getenv());
     }
 
     static HistoricalBackfillConfig from(Map<String, String> env) {
         String baseDir = value(env, "BASE_DIR", "/app");
+        boolean legacyRawRestEnabled = booleanValue(env, "HISTORICAL_BACKFILL_RAW_REST_ENABLED", false);
         return new HistoricalBackfillConfig(
             value(env, "KALSHI_BASE_URL", "https://api.elections.kalshi.com"),
             value(env, "KALSHI_KEY_ID", ""),
@@ -70,7 +88,8 @@ public record HistoricalBackfillConfig(
             value(env, "HISTORICAL_BACKFILL_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
             value(env, "HISTORICAL_BACKFILL_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
             value(env, "HISTORICAL_BACKFILL_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
-            booleanValue(env, "HISTORICAL_BACKFILL_RAW_REST_ENABLED", false),
+            legacyRawRestEnabled,
+            RawRestTarget.from(env.get("HISTORICAL_BACKFILL_RAW_REST_TARGET"), legacyRawRestEnabled),
             Path.of(value(env, "HISTORICAL_BACKFILL_RAW_REST_ROOT", baseDir + "/recordings/raw-rest")),
             csv(value(env, "HISTORICAL_BACKFILL_TICKERS", value(env, "KALSHI_MARKET_TICKERS", ""))),
             value(env, "HISTORICAL_BACKFILL_SERIES_TICKER", value(env, "KALSHI_MARKET_SERIES_TICKER", "")),
@@ -100,6 +119,15 @@ public record HistoricalBackfillConfig(
             throw new IllegalArgumentException(
                 "HISTORICAL_BACKFILL_DB_URL or DB_WRITER_DATABASE_URL is required when "
                     + "HISTORICAL_BACKFILL_CANONICAL_TARGET=db."
+            );
+        }
+        if (rawRestTarget == null) {
+            throw new IllegalArgumentException("HISTORICAL_BACKFILL_RAW_REST_TARGET is required.");
+        }
+        if (rawRestTarget == RawRestTarget.DB && !dryRun && (dbUrl == null || dbUrl.isBlank())) {
+            throw new IllegalArgumentException(
+                "HISTORICAL_BACKFILL_DB_URL or DB_WRITER_DATABASE_URL is required when "
+                    + "HISTORICAL_BACKFILL_RAW_REST_TARGET=db."
             );
         }
         if (includeCandlesticks && (seriesTicker == null || seriesTicker.isBlank())) {

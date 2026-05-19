@@ -2,6 +2,8 @@ package edu.illinois.group8.backfill;
 
 import edu.illinois.group8.storage.db.AcceptedEventStore;
 import edu.illinois.group8.storage.db.CanonicalDbEvent;
+import edu.illinois.group8.storage.db.RawRestDbResponse;
+import edu.illinois.group8.storage.db.RawRestResponseStore;
 import edu.illinois.group8.storage.db.RawWsDbEvent;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.KalshiRestParser;
@@ -62,6 +64,7 @@ class HistoricalBackfillServiceTest {
             "",
             "",
             true,
+            HistoricalBackfillConfig.RawRestTarget.RECORDING,
             tempDir.resolve("raw-rest"),
             List.of(),
             "",
@@ -98,13 +101,14 @@ class HistoricalBackfillServiceTest {
     }
 
     @Test
-    void dbTargetStoresCanonicalBatchAndDoesNotWriteFilesByDefault() throws Exception {
+    void dbTargetsStoreCanonicalBatchAndRawRestResponsesWithoutFilesByDefault() throws Exception {
         CapturingAcceptedEventStore store = new CapturingAcceptedEventStore();
+        CapturingRawRestResponseStore rawRestStore = new CapturingRawRestResponseStore();
         HistoricalBackfillService service = new HistoricalBackfillService(
             new FakeClient(),
             new KalshiRestParser(),
             new DbCanonicalBackfillSink(store),
-            null,
+            new DbRawRestBackfillSink(rawRestStore),
             new BackendMetrics()
         );
         HistoricalBackfillConfig config = baseConfig(
@@ -116,10 +120,17 @@ class HistoricalBackfillServiceTest {
         HistoricalBackfillSummary summary = service.run(config);
 
         assertEquals(2L, summary.restResponsesFetched());
-        assertEquals(0L, summary.rawResponsesRecorded());
+        assertEquals(2L, summary.rawResponsesRecorded());
         assertEquals(4L, summary.canonicalEventsParsed());
         assertEquals(4L, summary.canonicalEventsRecorded());
         assertEquals(4, store.canonicalEvents.size());
+        assertEquals(2, rawRestStore.responses.size());
+        assertEquals("rest.markets", rawRestStore.responses.get(0).endpoint());
+        assertNull(rawRestStore.responses.get(0).ticker());
+        assertEquals("rest.trades", rawRestStore.responses.get(1).endpoint());
+        assertEquals("M", rawRestStore.responses.get(1).ticker());
+        assertTrue(rawRestStore.responses.stream().allMatch(response -> response.rawRestResponseId().startsWith("raw_rest_")));
+        assertTrue(rawRestStore.responses.stream().allMatch(response -> response.payloadSha256().length() == 64));
         assertTrue(store.canonicalEvents.stream().anyMatch(event -> "canonical.trade".equals(event.streamName())));
         try (var paths = Files.walk(tempDir)) {
             assertEquals(1L, paths.count(), "default DB target must not create recording files");
@@ -127,16 +138,44 @@ class HistoricalBackfillServiceTest {
     }
 
     @Test
-    void configDefaultsToDbAndRawRestDisabled() {
-        HistoricalBackfillConfig config = HistoricalBackfillConfig.from(Map.of());
+    void noneRawRestTargetDoesNotRecordRawResponses() {
+        CapturingAcceptedEventStore store = new CapturingAcceptedEventStore();
+        HistoricalBackfillService service = new HistoricalBackfillService(
+            new FakeClient(),
+            new KalshiRestParser(),
+            new DbCanonicalBackfillSink(store),
+            null,
+            new BackendMetrics()
+        );
+        HistoricalBackfillConfig config = baseConfig(
+            HistoricalBackfillConfig.CanonicalTarget.DB,
+            HistoricalBackfillConfig.RawRestTarget.NONE,
+            "jdbc:postgresql://db/kalshi",
+            false
+        );
+
+        HistoricalBackfillSummary summary = service.run(config);
+
+        assertEquals(2L, summary.restResponsesFetched());
+        assertEquals(0L, summary.rawResponsesRecorded());
+        assertEquals(4L, summary.canonicalEventsRecorded());
+    }
+
+    @Test
+    void configDefaultsToDbRawRestTarget() {
+        HistoricalBackfillConfig config = HistoricalBackfillConfig.from(Map.of(
+            "HISTORICAL_BACKFILL_DRY_RUN", "true"
+        ));
 
         assertEquals(HistoricalBackfillConfig.CanonicalTarget.DB, config.canonicalTarget());
+        assertEquals(HistoricalBackfillConfig.RawRestTarget.DB, config.rawRestTarget());
         assertEquals("", config.dbUrl());
         assertEquals("", config.dbUser());
         assertEquals("", config.dbPassword());
         assertEquals(false, config.rawRestEnabled());
         assertEquals(Path.of("/app/recordings/raw-rest"), config.rawRestOutputRoot());
         assertNull(HistoricalBackfillCli.buildRawRestWriter(config));
+        assertNotNull(HistoricalBackfillCli.buildRawRestSink(config));
     }
 
     @Test
@@ -151,6 +190,26 @@ class HistoricalBackfillServiceTest {
         HistoricalBackfillConfig dryRun = HistoricalBackfillConfig.from(Map.of("HISTORICAL_BACKFILL_DRY_RUN", "true"));
         dryRun.validate();
         assertNotNull(HistoricalBackfillCli.buildCanonicalSink(dryRun, new BackendMetrics()));
+    }
+
+    @Test
+    void rawRestDbTargetWithoutUrlFailsFastUnlessDryRun() {
+        HistoricalBackfillConfig config = HistoricalBackfillConfig.from(Map.of(
+            "HISTORICAL_BACKFILL_CANONICAL_TARGET", "recording",
+            "HISTORICAL_BACKFILL_RAW_REST_TARGET", "db"
+        ));
+
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, config::validate);
+
+        assertTrue(thrown.getMessage().contains("HISTORICAL_BACKFILL_RAW_REST_TARGET=db"));
+
+        HistoricalBackfillConfig dryRun = HistoricalBackfillConfig.from(Map.of(
+            "HISTORICAL_BACKFILL_DRY_RUN", "true",
+            "HISTORICAL_BACKFILL_CANONICAL_TARGET", "recording",
+            "HISTORICAL_BACKFILL_RAW_REST_TARGET", "db"
+        ));
+        dryRun.validate();
+        assertNotNull(HistoricalBackfillCli.buildRawRestSink(dryRun));
     }
 
     @Test
@@ -186,6 +245,7 @@ class HistoricalBackfillServiceTest {
         )).validate();
 
         assertEquals(HistoricalBackfillConfig.CanonicalTarget.RECORDING, config.canonicalTarget());
+        assertEquals(HistoricalBackfillConfig.RawRestTarget.RECORDING, config.rawRestTarget());
         assertInstanceOf(
             RecordingCanonicalBackfillSink.class,
             HistoricalBackfillCli.buildCanonicalSink(config, new BackendMetrics())
@@ -195,6 +255,15 @@ class HistoricalBackfillServiceTest {
 
     private HistoricalBackfillConfig baseConfig(
         HistoricalBackfillConfig.CanonicalTarget target,
+        String dbUrl,
+        boolean rawRestEnabled
+    ) {
+        return baseConfig(target, HistoricalBackfillConfig.RawRestTarget.DB, dbUrl, rawRestEnabled);
+    }
+
+    private HistoricalBackfillConfig baseConfig(
+        HistoricalBackfillConfig.CanonicalTarget target,
+        HistoricalBackfillConfig.RawRestTarget rawRestTarget,
         String dbUrl,
         boolean rawRestEnabled
     ) {
@@ -209,6 +278,7 @@ class HistoricalBackfillServiceTest {
             "",
             "",
             rawRestEnabled,
+            rawRestTarget,
             tempDir.resolve("raw-rest"),
             List.of(),
             "",
@@ -228,6 +298,15 @@ class HistoricalBackfillServiceTest {
             TimestampSource.from("system_nano", "/dev/null"),
             StreamRecordingWriter.PartitionGranularity.MINUTE
         ).validate();
+    }
+
+    private static final class CapturingRawRestResponseStore implements RawRestResponseStore {
+        private final List<RawRestDbResponse> responses = new ArrayList<>();
+
+        @Override
+        public void insertRawRestResponseBatch(List<RawRestDbResponse> responses) {
+            this.responses.addAll(responses);
+        }
     }
 
     private static final class CapturingAcceptedEventStore implements AcceptedEventStore {

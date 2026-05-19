@@ -23,10 +23,10 @@ The current codebase has expanded that simple path:
 - `External Aeron Channels` now mean Aeron stream IDs 10-19 on the configured
   external channel. They are protocol stream IDs, not Kalshi contract IDs.
 - `Data Warehousing Service -> Redshift` has been removed from the current
-  source tree and replaced by file/object recording: `raw-ingest` for exact
-  websocket payloads, `raw-rest` for REST backfill responses, and downstream
-  `canonical` recorder output for normalized Aeron-consumer observation and
-  backfilled canonical history.
+  source tree and replaced by DB-primary storage plus file/object recording:
+  `raw_ws_events` for accepted websocket payloads, `canonical_events` for
+  normalized events, `raw_rest_responses` for historical REST response bodies,
+  and recording files only for capture/offline/debug/export workflows.
 - New current modules not shown in the old diagram include ingress envelopes,
   raw-ingest replay, REST historical backfill with raw REST capture, stream
   recording, source-agnostic featureplant templates,
@@ -216,9 +216,10 @@ flowchart LR
     TAP["StreamTapServer<br/>/events /health /metrics"]:::current
     RECORDER["TickerplantStreamRecorder<br/>records normalized streams"]:::current
     CANONREC["recordings/canonical<br/>consumer-side Aeron validation copy"]:::storage
-    HBCFG["HistoricalBackfillConfig<br/>REST scope + canonical/raw-rest roots"]:::current
+    HBCFG["HistoricalBackfillConfig<br/>REST scope + DB/recording targets"]:::current
     RESTBACKFILL["HistoricalBackfillCli<br/>KalshiWrapper + KalshiRestParser<br/>REST markets/trades/orderbook/candles"]:::current
-    RAWREST["recordings/raw-rest<br/>raw REST response capture"]:::storage
+    RAWRESTDB["raw_rest_responses<br/>Postgres/Timescale REST response DB"]:::storage
+    RAWREST["recordings/raw-rest<br/>optional REST response export/debug"]:::storage
     S3SYNC["s3-recording-sync<br/>uploads canonical, raw-ingest,<br/>raw-rest subtrees"]:::optional
     MON["Prometheus + Grafana<br/>scrapes stream-recorder and streamtap"]:::external
     PROF["HotPathProfileCli<br/>synthetic parser/book/processor profiling"]:::current
@@ -231,8 +232,10 @@ flowchart LR
   RECORDER --> CANONREC
   HBCFG --> RESTBACKFILL
   KALSHI -->|historical REST| RESTBACKFILL
-  RESTBACKFILL --> RAWREST
-  RESTBACKFILL --> CANONREC
+  RESTBACKFILL --> CDB
+  RESTBACKFILL --> RAWRESTDB
+  RESTBACKFILL -. explicit recording target .-> CANONREC
+  RESTBACKFILL -. explicit recording target .-> RAWREST
   RAWSTORE --> S3SYNC
   CANONREC --> S3SYNC
   RAWREST --> S3SYNC
@@ -273,10 +276,11 @@ flowchart LR
     CORE["Core backend<br/>KalshiSystem + ESBClusteredService + DataProcessor"]:::current
     CANON["Canonical tickerplant streams<br/>raw.*, canonical.*, derived.top_of_book, system.*"]:::current
     CDB2["canonical_events<br/>Postgres/Timescale canonical DB"]:::current
+    RAWREST2["raw_rest_responses<br/>Postgres/Timescale REST response DB"]:::current
     RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + recordings/canonical"]:::current
     REPLAY2["RawIngressReplayCli<br/>Timescale/S3 raw selection + ingress injection"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
-    RESTBACK2["HistoricalBackfillCli<br/>current raw-rest + canonical backfill"]:::current
+    RESTBACK2["HistoricalBackfillCli<br/>DB-primary raw REST + canonical backfill"]:::current
     CURFEATURE["FeaturePlantService skeleton<br/>DB default + Aeron/recording sources<br/>stdout/buffer sinks"]:::current
     CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
   end
@@ -290,7 +294,9 @@ flowchart LR
   REPLAY2 -->|raw replay into ingress| CORE
   KALSHI2 --> RESTHELPERS
   RESTHELPERS --> RESTBACK2
-  RESTBACK2 --> RAWSTORE
+  RESTBACK2 --> CDB2
+  RESTBACK2 --> RAWREST2
+  RESTBACK2 -. explicit recording target .-> RAWSTORE
   CANON --> CURFEATURE
   RAWSTORE -->|recordings/canonical| CURFEATURE
   CANON --> CURMON

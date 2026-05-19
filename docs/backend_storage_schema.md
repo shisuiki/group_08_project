@@ -3,7 +3,8 @@
 New live storage is DB-primary. The async DB writer stores accepted raw
 websocket input in `raw_ws_events`, and the canonical DB sink stores normalized
 events in `canonical_events` from `DataProcessor` / cluster runtime. FeaturePlant
-and the frontend adapter default to the canonical DB reader. File layouts under
+and the frontend adapter default to the canonical DB reader. Historical REST
+backfill stores raw response bodies in `raw_rest_responses` by default. File layouts under
 `recordings/` remain for `recording-capture`, legacy archive/import, local
 fixtures, demos, and debug exports.
 
@@ -78,9 +79,29 @@ from websocket receipt to Aeron-client receipt.
 ## Raw REST Backfill
 
 `HistoricalBackfillCli` writes parsed REST canonical events to
-`canonical_events` by default. `raw-rest` NDJSON is disabled by default; set
-`HISTORICAL_BACKFILL_RAW_REST_ENABLED=true` when an explicit REST response
-archive/debug trail is required.
+`canonical_events` by default. Raw REST response bodies are stored in
+`raw_rest_responses` by default, using `HISTORICAL_BACKFILL_RAW_REST_TARGET=db`.
+The table is separate from `raw_ws_events`; websocket raw ingest and historical
+REST responses have different source semantics.
+
+`raw_rest_responses` contains:
+
+```text
+raw_rest_response_id text primary key
+endpoint text not null
+ticker text
+fetch_ts_ns bigint not null
+fetch_wall_ts timestamptz not null
+payload_sha256 text not null
+raw_payload text not null
+created_at timestamptz not null default now()
+```
+
+Set `HISTORICAL_BACKFILL_RAW_REST_TARGET=recording` only for explicit
+legacy/debug/export REST response NDJSON. Set
+`HISTORICAL_BACKFILL_RAW_REST_TARGET=none` to skip raw REST response storage.
+Legacy `HISTORICAL_BACKFILL_RAW_REST_ENABLED=true` maps to the recording target
+when no target is set.
 
 ```text
 recordings/raw-rest/

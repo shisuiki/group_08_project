@@ -84,6 +84,33 @@ Indexes:
 preserve malformed or non-JSON input. Parsed metadata lives in dedicated columns;
 canonical event payloads remain JSONB.
 
+### `raw_rest_responses`
+
+Authoritative raw historical REST response storage for backfill runs that keep
+the exact response body. This table is separate from `raw_ws_events`, which is
+reserved for websocket raw ingest.
+
+Required columns:
+
+- `raw_rest_response_id text primary key`
+- `endpoint text not null`
+- `ticker text`
+- `fetch_ts_ns bigint not null`
+- `fetch_wall_ts timestamptz not null`
+- `payload_sha256 text not null`
+- `raw_payload text not null`
+- `created_at timestamptz not null default now()`
+
+Indexes:
+
+- `(endpoint, fetch_ts_ns)`
+- `(ticker, fetch_ts_ns)`
+- `(payload_sha256)`
+
+The response id is derived from endpoint, ticker, and payload hash so repeated
+backfills can use `ON CONFLICT DO NOTHING` without creating unbounded duplicate
+raw REST rows.
+
 ### `canonical_events`
 
 Target authoritative normalized event log once Phase 4 is complete.
@@ -323,6 +350,8 @@ Allowed temporary roles during migration:
 
 - existing demo fixtures until DB-backed demo data exists
 - one-time import source for historical recordings already created
+- explicit raw REST recording/export/debug when
+  `HISTORICAL_BACKFILL_RAW_REST_TARGET=recording`
 - manual debug export from DB, not an ingestion fallback
 
 Not allowed:

@@ -326,7 +326,8 @@ class JdbcAcceptedEventStoreTest {
         for (String resource : List.of(
             "db/migration/V001__accepted_event_storage.sql",
             "db/migration/V002__raw_payload_text.sql",
-            "db/migration/V003__canonical_commit_cursor.sql"
+            "db/migration/V003__canonical_commit_cursor.sql",
+            "db/migration/V004__raw_rest_responses.sql"
         )) {
             String migration;
             try (InputStream inputStream = Objects.requireNonNull(

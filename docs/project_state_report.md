@@ -122,13 +122,17 @@ recordings/canonical/stream=<stream_name>/date=yyyy-mm-dd/hour=hh/events.ndjson
 recordings/raw-rest/endpoint=<rest_endpoint_with_dots_replaced_by_underscores>/date=yyyy-mm-dd/hour=hh/responses.ndjson
 ```
 
-Set `HISTORICAL_BACKFILL_PARTITION_GRANULARITY=minute` to add `minute=mm`.
+`recordings/raw-rest` is written only by the explicit historical backfill
+recording target. Default historical raw REST storage is the
+`raw_rest_responses` DB table. Set
+`HISTORICAL_BACKFILL_PARTITION_GRANULARITY=minute` to add `minute=mm`.
 
 Current database status:
 
 - Redshift hot-path writer is removed.
 - Postgres/Timescale support includes live raw writes, canonical DB sink
-  wiring, raw replay reader support, and historical REST canonical backfill.
+  wiring, raw replay reader support, historical REST canonical backfill, and
+  historical raw REST response rows in `raw_rest_responses`.
 - DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
   reader primitive exists for the current single-writer path and backs the
   default FeaturePlant, frontend adapter, and research export DB sources. Its cursor is global over
@@ -187,11 +191,11 @@ Legend:
 | Tickerplant routing | current | JSON `stream_name` routing |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
 | Canonical stream recording | current | canonical DB sink wired in `DataProcessor`/cluster runtime; downstream Aeron recording remains capture/offline/debug/export |
-| Raw REST recording | current | explicit historical backfill audit trail |
+| Raw REST backfill storage | current | DB-primary `raw_rest_responses`; `raw-rest` files are explicit recording/export/debug |
 | S3 recording sync | current-basic | sidecar/script present |
 | Object-store loader/query backfill | planned | no full loader/query path |
 | Raw ingress replay | current-basic | local NDJSON import/debug path and Timescale reader; live raw ingest is DB-primary |
-| Historical REST backfill | current-basic | canonical DB target is default; canonical/raw-rest NDJSON are explicit legacy/debug/export |
+| Historical REST backfill | current-basic | canonical DB and raw REST DB targets are default; canonical/raw-rest NDJSON are explicit legacy/debug/export |
 | FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, recording is explicit legacy/debug/demo/import |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |

@@ -4,6 +4,7 @@ import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.KalshiRestParser;
 import edu.illinois.group8.recorder.CanonicalRecordingWriter;
 import edu.illinois.group8.storage.db.JdbcAcceptedEventStore;
+import edu.illinois.group8.storage.db.JdbcRawRestResponseStore;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 
 public final class HistoricalBackfillCli {
@@ -21,7 +22,7 @@ public final class HistoricalBackfillCli {
             )),
             new KalshiRestParser(),
             buildCanonicalSink(config, metrics),
-            buildRawRestWriter(config),
+            buildRawRestSink(config),
             metrics
         );
         HistoricalBackfillSummary summary = service.run(config);
@@ -57,10 +58,24 @@ public final class HistoricalBackfillCli {
         };
     }
 
-    static RawRestResponseWriter buildRawRestWriter(HistoricalBackfillConfig config) {
-        if (config.dryRun() || !config.rawRestEnabled()) {
-            return null;
+    static RawRestBackfillSink buildRawRestSink(HistoricalBackfillConfig config) {
+        config.validate();
+        if (config.dryRun()) {
+            return (endpoint, ticker, rawPayload, fetchTsNs, fetchWallTs) -> {};
         }
-        return new RawRestResponseWriter(config.rawRestOutputRoot(), config.partitionGranularity());
+        return switch (config.rawRestTarget()) {
+            case DB -> new DbRawRestBackfillSink(JdbcRawRestResponseStore.fromDriverManager(
+                config.dbUrl(),
+                config.dbUser(),
+                config.dbPassword()
+            ));
+            case RECORDING -> new RawRestResponseWriter(config.rawRestOutputRoot(), config.partitionGranularity());
+            case NONE -> null;
+        };
+    }
+
+    static RawRestResponseWriter buildRawRestWriter(HistoricalBackfillConfig config) {
+        RawRestBackfillSink sink = buildRawRestSink(config);
+        return sink instanceof RawRestResponseWriter writer ? writer : null;
     }
 }
