@@ -25,6 +25,9 @@ public record BackendConfig(
     int orderbookMarketsPerConnection,
     int subscriptionDelayMs,
     int subscriptionAckTimeoutMs,
+    boolean orderBookRecoveryGapConsumerEnabled,
+    int orderBookRecoveryGapConsumerFragmentLimit,
+    int orderBookRecoveryGapConsumerIdleSleepMs,
     boolean sourceSequenceMonitorEnabled,
     boolean orderBookDerivedEnabled,
     List<String> clusterAddresses,
@@ -69,6 +72,9 @@ public record BackendConfig(
             intValue(env, properties, "KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION", 10000),
             intValue(env, properties, "KALSHI_WS_SUBSCRIPTION_DELAY_MS", 250),
             intValue(env, properties, "KALSHI_WS_ACK_TIMEOUT_MS", 30000),
+            booleanValue(env, properties, "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_ENABLED", false),
+            intValue(env, properties, "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT", 64),
+            intValue(env, properties, "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS", 1),
             booleanValue(env, properties, "BACKEND_SOURCE_SEQUENCE_MONITOR_ENABLED", false),
             booleanValue(env, properties, "BACKEND_ORDERBOOK_DERIVED_ENABLED", true),
             csv(value(env, properties, "CLUSTER_ADDRESSES", "127.0.0.1")),
@@ -76,7 +82,7 @@ public record BackendConfig(
             value(env, properties, "IP", "127.0.0.1"),
             baseDir,
             intValue(env, properties, "CLUSTER_PORT_BASE", 9000),
-            value(env, properties, "AERON_CHANNEL", "aeron:udp?endpoint=0.0.0.0:40456")
+            aeronChannel(env, properties)
         );
     }
 
@@ -115,6 +121,12 @@ public record BackendConfig(
         }
         if (subscriptionAckTimeoutMs < 1) {
             errors.append("KALSHI_WS_ACK_TIMEOUT_MS must be positive. ");
+        }
+        if (orderBookRecoveryGapConsumerFragmentLimit < 1) {
+            errors.append("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT must be positive. ");
+        }
+        if (orderBookRecoveryGapConsumerIdleSleepMs < 0) {
+            errors.append("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS must be zero or positive. ");
         }
         if (clusterAddresses.isEmpty()) {
             errors.append("CLUSTER_ADDRESSES must contain at least one host. ");
@@ -193,6 +205,15 @@ public record BackendConfig(
         return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value);
     }
 
+    private static String aeronChannel(Map<String, String> env, java.util.Properties properties) {
+        return value(
+            env,
+            properties,
+            "AERON_EXTERNAL_CHANNEL",
+            value(env, properties, "AERON_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")
+        );
+    }
+
     private static List<String> csv(String raw) {
         if (isBlank(raw)) {
             return List.of();
@@ -225,6 +246,6 @@ public record BackendConfig(
         nodeId = Objects.requireNonNullElse(nodeId, "");
         hostIp = Objects.requireNonNullElse(hostIp, "127.0.0.1");
         baseDir = Objects.requireNonNullElse(baseDir, "/app");
-        aeronChannel = Objects.requireNonNullElse(aeronChannel, "aeron:udp?endpoint=0.0.0.0:40456");
+        aeronChannel = Objects.requireNonNullElse(aeronChannel, "aeron:udp?endpoint=224.0.1.1:40456");
     }
 }

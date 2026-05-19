@@ -2,8 +2,12 @@ package edu.illinois.group8;
 
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.EventMetadata;
+import edu.illinois.group8.canonical.EventType;
 import edu.illinois.group8.canonical.SequenceGapEvent;
+import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.feature.CanonicalEnvelopeHandler;
+import edu.illinois.group8.feature.CanonicalEnvelopeSource;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.AsyncDbWriter;
 import edu.illinois.group8.storage.db.CanonicalDbEvent;
@@ -14,14 +18,17 @@ import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController.RequestStatus;
+import edu.illinois.group8.wrapper.OrderBookRecoveryGapConsumer;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -29,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KalshiSystemTest {
@@ -64,6 +72,36 @@ class KalshiSystemTest {
         assertFalse(config.sourceSequenceMonitorEnabled());
         assertTrue(config.orderBookDerivedEnabled());
         assertDoesNotThrow(config::validateForLiveIngestion);
+    }
+
+    @Test
+    void backendConfigDefaultsGapConsumerDisabledAndPrefersExternalAeronChannel() {
+        BackendConfig config = BackendConfig.from(Map.of(
+            "AERON_CHANNEL", "aeron:udp?endpoint=legacy:40456",
+            "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=external:40456"
+        ));
+
+        assertFalse(config.orderBookRecoveryGapConsumerEnabled());
+        assertEquals(64, config.orderBookRecoveryGapConsumerFragmentLimit());
+        assertEquals(1, config.orderBookRecoveryGapConsumerIdleSleepMs());
+        assertEquals("aeron:udp?endpoint=external:40456", config.aeronChannel());
+    }
+
+    @Test
+    void backendConfigRejectsInvalidGapConsumerValues() {
+        IllegalStateException badFragmentLimit = assertThrows(
+            IllegalStateException.class,
+            () -> liveConfig(Map.of("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT", "0"))
+                .validateForLiveIngestion()
+        );
+        assertTrue(badFragmentLimit.getMessage().contains("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT"));
+
+        IllegalStateException badIdleSleep = assertThrows(
+            IllegalStateException.class,
+            () -> liveConfig(Map.of("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS", "-1"))
+                .validateForLiveIngestion()
+        );
+        assertTrue(badIdleSleep.getMessage().contains("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS"));
     }
 
     @Test
@@ -183,6 +221,63 @@ class KalshiSystemTest {
     }
 
     @Test
+    void orderBookRecoveryGapConsumerFactoryNoopsWhenDisabled() {
+        BackendConfig config = BackendConfig.from(Map.of());
+        AtomicInteger factoryCalls = new AtomicInteger();
+
+        assertNull(KalshiSystem.createOrderBookRecoveryGapConsumer(config, null, (channel, streams) -> {
+            factoryCalls.incrementAndGet();
+            return new RecordingCanonicalEnvelopeSource();
+        }));
+
+        assertEquals(0, factoryCalls.get());
+    }
+
+    @Test
+    void orderBookRecoveryGapConsumerFactoryUsesSequenceGapStreamAndConfiguredPollLimit() {
+        BackendConfig config = BackendConfig.from(Map.of(
+            "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_ENABLED", "true",
+            "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT", "7",
+            "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS", "0",
+            "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=external:40456"
+        ));
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750);
+        RecordingCanonicalEnvelopeSource source = new RecordingCanonicalEnvelopeSource();
+        AtomicReference<List<StreamContract>> capturedStreams = new AtomicReference<>();
+        AtomicReference<String> capturedChannel = new AtomicReference<>();
+
+        OrderBookRecoveryGapConsumer consumer = KalshiSystem.createOrderBookRecoveryGapConsumer(
+            config,
+            controller,
+            (channel, streams) -> {
+                capturedChannel.set(channel);
+                capturedStreams.set(streams);
+                return source;
+            }
+        );
+
+        assertNotNull(consumer);
+        assertEquals("aeron:udp?endpoint=external:40456", capturedChannel.get());
+        assertEquals(1, capturedStreams.get().size());
+        assertEquals(EventType.SEQUENCE_GAP.streamName(), capturedStreams.get().get(0).streamName());
+
+        assertEquals(0, consumer.pollOnce());
+
+        assertEquals(7, source.lastFragmentLimit);
+        consumer.close();
+    }
+
+    @Test
+    void orderBookRecoveryGapConsumerThreadIsDaemonAndNamed() {
+        Thread thread = KalshiSystem.newOrderBookRecoveryGapConsumerThread(() -> {
+        });
+
+        assertTrue(thread.isDaemon());
+        assertEquals("orderbook-recovery-gap-consumer", thread.getName());
+    }
+
+    @Test
     void registerRecoveryMarketsRegistersMultipleMarketsAndSchedulesSnapshots() {
         FakeExecutor executor = new FakeExecutor();
         OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750);
@@ -215,6 +310,15 @@ class KalshiSystemTest {
         assertEquals(RequestStatus.SKIPPED_UNKNOWN_MARKET, controller.handleGap(sequenceGap("M1")));
         assertEquals(0, executor.pendingCount());
         assertTrue(requester.calls.isEmpty());
+    }
+
+    private static BackendConfig liveConfig(Map<String, String> overrides) {
+        Map<String, String> env = new HashMap<>();
+        env.put("KALSHI_KEY_ID", "key");
+        env.put("KALSHI_KEY_PATH", "/tmp/key.pem");
+        env.put("KALSHI_MARKET_TICKERS", "M1");
+        env.putAll(overrides);
+        return BackendConfig.from(env);
     }
 
     private static void assertSnapshotCall(SnapshotCall call, long sid, String marketTicker, int timeoutMs) {
@@ -262,6 +366,16 @@ class KalshiSystemTest {
             while (!tasks.isEmpty()) {
                 tasks.removeFirst().run();
             }
+        }
+    }
+
+    private static final class RecordingCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
+        private int lastFragmentLimit;
+
+        @Override
+        public int poll(CanonicalEnvelopeHandler handler, int fragmentLimit) {
+            lastFragmentLimit = fragmentLimit;
+            return 0;
         }
     }
 

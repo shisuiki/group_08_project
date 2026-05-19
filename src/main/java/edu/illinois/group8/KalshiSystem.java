@@ -1,7 +1,12 @@
 package edu.illinois.group8;
 
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.canonical.EventType;
+import edu.illinois.group8.canonical.StreamContract;
+import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.cluster.ClientClusterOrchestrator;
+import edu.illinois.group8.feature.AeronCanonicalEnvelopeSource;
+import edu.illinois.group8.feature.CanonicalEnvelopeSource;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.recorder.RawIngestRecorder;
 import edu.illinois.group8.storage.db.AsyncDbWriter;
@@ -10,6 +15,8 @@ import edu.illinois.group8.storage.db.DbWriterConfig;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.wrapper.KalshiWebSocketClient;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController;
+import edu.illinois.group8.wrapper.OrderBookRecoveryGapConsumer;
+import edu.illinois.group8.wrapper.OrderBookRecoveryGapHandler;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import edu.illinois.group8.wrapper.RequestParameters;
 import org.json.simple.JSONArray;
@@ -49,6 +56,16 @@ public class KalshiSystem {
         OrderBookRecoveryController orderBookRecoveryController = new OrderBookRecoveryController(
             orderBookRecoveryExecutor,
             config.subscriptionAckTimeoutMs()
+        );
+        OrderBookRecoveryGapConsumer orderBookRecoveryGapConsumer = createOrderBookRecoveryGapConsumer(
+            config,
+            orderBookRecoveryController,
+            KalshiSystem::newOrderBookRecoveryGapSource
+        );
+        Thread orderBookRecoveryGapConsumerThread = startOrderBookRecoveryGapConsumer(orderBookRecoveryGapConsumer);
+        registerOrderBookRecoveryGapConsumerShutdownHook(
+            orderBookRecoveryGapConsumer,
+            orderBookRecoveryGapConsumerThread
         );
 
         KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
@@ -380,6 +397,40 @@ public class KalshiSystem {
         return new RawDbIngestSink(writer, config.rawSource(), config.rawCaptureId());
     }
 
+    static OrderBookRecoveryGapConsumer createOrderBookRecoveryGapConsumer(
+        BackendConfig config,
+        OrderBookRecoveryController controller,
+        OrderBookRecoveryGapSourceFactory sourceFactory
+    ) {
+        Objects.requireNonNull(config, "config");
+        if (!config.orderBookRecoveryGapConsumerEnabled()) {
+            return null;
+        }
+        Objects.requireNonNull(controller, "controller");
+        Objects.requireNonNull(sourceFactory, "sourceFactory");
+        List<StreamContract> streams = List.of(StreamRegistry.byName(EventType.SEQUENCE_GAP.streamName())
+            .orElseThrow(() -> new IllegalStateException("system.sequence_gaps stream is not registered.")));
+        CanonicalEnvelopeSource source = sourceFactory.create(config.aeronChannel(), streams);
+        return new OrderBookRecoveryGapConsumer(
+            source,
+            new OrderBookRecoveryGapHandler(controller),
+            config.orderBookRecoveryGapConsumerFragmentLimit(),
+            config.orderBookRecoveryGapConsumerIdleSleepMs()
+        );
+    }
+
+    private static CanonicalEnvelopeSource newOrderBookRecoveryGapSource(
+        String aeronChannel,
+        List<StreamContract> streams
+    ) {
+        return new AeronCanonicalEnvelopeSource(aeronChannel, streams);
+    }
+
+    @FunctionalInterface
+    interface OrderBookRecoveryGapSourceFactory {
+        CanonicalEnvelopeSource create(String aeronChannel, List<StreamContract> streams);
+    }
+
     private static RawDbIngestSink.RawDbIngestConnection newRawDbConnection(RawDbIngestSink rawDbSink) {
         return rawDbSink == null ? null : rawDbSink.newConnection();
     }
@@ -400,6 +451,34 @@ public class KalshiSystem {
 
     private static void registerOrderBookRecoveryShutdownHook(ExecutorService executor) {
         Runtime.getRuntime().addShutdownHook(new Thread(executor::shutdownNow, "orderbook-recovery-shutdown"));
+    }
+
+    static Thread newOrderBookRecoveryGapConsumerThread(Runnable target) {
+        Thread thread = new Thread(Objects.requireNonNull(target, "target"), "orderbook-recovery-gap-consumer");
+        thread.setDaemon(true);
+        return thread;
+    }
+
+    private static Thread startOrderBookRecoveryGapConsumer(OrderBookRecoveryGapConsumer consumer) {
+        if (consumer == null) {
+            return null;
+        }
+        Thread thread = newOrderBookRecoveryGapConsumerThread(consumer::runUntilStopped);
+        thread.start();
+        return thread;
+    }
+
+    private static void registerOrderBookRecoveryGapConsumerShutdownHook(
+        OrderBookRecoveryGapConsumer consumer,
+        Thread thread
+    ) {
+        if (consumer == null || thread == null) {
+            return;
+        }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            consumer.close();
+            thread.interrupt();
+        }, "orderbook-recovery-gap-consumer-shutdown"));
     }
 
     private static OrderbookSubscriptionState subscribeDiscoveredChunk(
