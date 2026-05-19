@@ -18,10 +18,13 @@ import edu.illinois.group8.storage.db.DbWriterConfig;
 import edu.illinois.group8.storage.db.DbWriterStats;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
+import edu.illinois.group8.wrapper.KalshiLiveWebSocketSession;
+import edu.illinois.group8.wrapper.KalshiWrapper;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController.RequestStatus;
 import edu.illinois.group8.wrapper.OrderBookRecoveryGapConsumer;
 import edu.illinois.group8.wrapper.OrderBookRecoveryMetrics;
+import edu.illinois.group8.wrapper.RequestParameters;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -30,6 +33,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -89,6 +94,54 @@ class KalshiSystemTest {
         assertEquals(64, config.orderBookRecoveryGapConsumerFragmentLimit());
         assertEquals(1, config.orderBookRecoveryGapConsumerIdleSleepMs());
         assertEquals("aeron:udp?endpoint=external:40456", config.aeronChannel());
+    }
+
+    @Test
+    void backendConfigDefaultsReconnectEnabledAndParsesOverrides() {
+        BackendConfig defaults = BackendConfig.from(Map.of());
+
+        assertTrue(defaults.websocketReconnectEnabled());
+        assertEquals(1000, defaults.websocketReconnectInitialBackoffMs());
+        assertEquals(30000, defaults.websocketReconnectMaxBackoffMs());
+        assertEquals(0, defaults.websocketReconnectMaxAttempts());
+
+        BackendConfig overrides = BackendConfig.from(Map.of(
+            "BACKEND_WS_RECONNECT_ENABLED", "false",
+            "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "10",
+            "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", "50",
+            "BACKEND_WS_RECONNECT_MAX_ATTEMPTS", "3"
+        ));
+
+        assertFalse(overrides.websocketReconnectEnabled());
+        assertEquals(10, overrides.websocketReconnectInitialBackoffMs());
+        assertEquals(50, overrides.websocketReconnectMaxBackoffMs());
+        assertEquals(3, overrides.websocketReconnectMaxAttempts());
+    }
+
+    @Test
+    void backendConfigRejectsInvalidReconnectValues() {
+        IllegalStateException badInitialBackoff = assertThrows(
+            IllegalStateException.class,
+            () -> liveConfig(Map.of("BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "-1"))
+                .validateForLiveIngestion()
+        );
+        assertTrue(badInitialBackoff.getMessage().contains("BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS"));
+
+        IllegalStateException badMaxBackoff = assertThrows(
+            IllegalStateException.class,
+            () -> liveConfig(Map.of(
+                "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "100",
+                "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", "99"
+            )).validateForLiveIngestion()
+        );
+        assertTrue(badMaxBackoff.getMessage().contains("BACKEND_WS_RECONNECT_MAX_BACKOFF_MS"));
+
+        IllegalStateException badMaxAttempts = assertThrows(
+            IllegalStateException.class,
+            () -> liveConfig(Map.of("BACKEND_WS_RECONNECT_MAX_ATTEMPTS", "-1"))
+                .validateForLiveIngestion()
+        );
+        assertTrue(badMaxAttempts.getMessage().contains("BACKEND_WS_RECONNECT_MAX_ATTEMPTS"));
     }
 
     @Test
@@ -249,14 +302,14 @@ class KalshiSystemTest {
         RawDbIngestSink sink = new RawDbIngestSink(new RecordingAsyncDbWriter(), "kalshi.websocket", "live");
         List<RawDbIngestSink.RawDbIngestConnection> connections = new ArrayList<>();
         AtomicInteger factoryCalls = new AtomicInteger();
-        KalshiSystem.OpenMarketWebSocketClientFactory factory = (wrapper, rawDbConnection, recorder) -> {
+        KalshiSystem.LiveWebSocketSessionFactory factory = (wrapper, rawDbConnection, recorder) -> {
             factoryCalls.incrementAndGet();
             connections.add(rawDbConnection);
             assertNull(recorder);
             return null;
         };
 
-        assertNull(KalshiSystem.newOpenMarketWebSocketClient(null, sink, null, factory));
+        assertNull(KalshiSystem.newOpenMarketWebSocketSession(null, sink, null, factory));
         assertNull(KalshiSystem.openOrderbookConnection(null, 2, sink, null, factory));
 
         assertEquals(2, factoryCalls.get());
@@ -419,6 +472,165 @@ class KalshiSystemTest {
         assertTrue(requester.calls.isEmpty());
     }
 
+    @Test
+    void configuredSessionSupervisorResubscribesAndReplacesRecoverySidAfterClose() throws Exception {
+        BackendConfig config = liveConfig(Map.of(
+            "KALSHI_WS_CHANNELS", "market_lifecycle_v2,orderbook_delta",
+            "KALSHI_WS_SUBSCRIPTION_DELAY_MS", "0",
+            "KALSHI_WS_ACK_TIMEOUT_MS", "500",
+            "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "0",
+            "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", "0",
+            "BACKEND_WS_RECONNECT_MAX_ATTEMPTS", "2"
+        ));
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 500);
+        RecordingSessionFactory sessionFactory = new RecordingSessionFactory(10L, 20L);
+        BackendMetrics metrics = new BackendMetrics();
+
+        IllegalStateException exhausted = assertThrows(
+            IllegalStateException.class,
+            () -> KalshiSystem.runLiveSessionSupervisor(
+                config,
+                () -> KalshiSystem.startLiveSessionAttempt(
+                    config,
+                    new FakeKalshiWrapper(),
+                    null,
+                    null,
+                    controller,
+                    sessionFactory
+                ),
+                metrics,
+                millis -> {
+                }
+            )
+        );
+
+        assertTrue(exhausted.getMessage().contains("BACKEND_WS_RECONNECT_MAX_ATTEMPTS"));
+        assertEquals(2, sessionFactory.sessions.size());
+        RecordingLiveWebSocketSession first = sessionFactory.sessions.get(0);
+        RecordingLiveWebSocketSession second = sessionFactory.sessions.get(1);
+        assertEquals(List.of(List.of("market_lifecycle_v2")), first.globalSubscriptions);
+        assertEquals(List.of(List.of("market_lifecycle_v2")), second.globalSubscriptions);
+        assertEquals(List.of(new MarketSubscription(List.of("orderbook_delta"), List.of("M1"))), first.marketSubscriptions);
+        assertEquals(List.of(new MarketSubscription(List.of("orderbook_delta"), List.of("M1"))), second.marketSubscriptions);
+        assertTrue(first.closeCalls > 0);
+        assertTrue(second.closeCalls > 0);
+
+        assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(sequenceGap("M1")));
+        executor.runAll();
+
+        assertTrue(first.snapshotCalls.isEmpty());
+        assertEquals(1, second.snapshotCalls.size());
+        assertSnapshotCall(second.snapshotCalls.get(0), 20L, "M1", 500);
+        var labels = BackendMetrics.labels("service", "wsclient");
+        assertEquals(2L, metrics.get("backend_ws_session_attempts_total", labels));
+        assertEquals(2L, metrics.get("backend_ws_session_established_total", labels));
+        assertEquals(2L, metrics.get("backend_ws_session_closes_total", labels));
+        assertEquals(1L, metrics.get("backend_ws_session_retries_total", labels));
+        assertEquals(1L, metrics.get(
+            "backend_ws_session_failures_total",
+            BackendMetrics.labels("service", "wsclient", "reason", "max_attempts_exhausted")
+        ));
+    }
+
+    @Test
+    void sessionSupervisorClosesFailedAttemptAndRetriesSubscriptionFailure() {
+        BackendConfig config = liveConfig(Map.of(
+            "KALSHI_WS_CHANNELS", "orderbook_delta",
+            "KALSHI_WS_SUBSCRIPTION_DELAY_MS", "0",
+            "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "0",
+            "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", "0",
+            "BACKEND_WS_RECONNECT_MAX_ATTEMPTS", "2"
+        ));
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750);
+        RecordingSessionFactory sessionFactory = new RecordingSessionFactory(11L, 22L);
+        sessionFactory.failSubscribeAttempts.add(1);
+        BackendMetrics metrics = new BackendMetrics();
+
+        IllegalStateException exhausted = assertThrows(
+            IllegalStateException.class,
+            () -> KalshiSystem.runLiveSessionSupervisor(
+                config,
+                () -> KalshiSystem.startLiveSessionAttempt(
+                    config,
+                    new FakeKalshiWrapper(),
+                    null,
+                    null,
+                    controller,
+                    sessionFactory
+                ),
+                metrics,
+                millis -> {
+                }
+            )
+        );
+
+        assertTrue(exhausted.getMessage().contains("BACKEND_WS_RECONNECT_MAX_ATTEMPTS"));
+        assertEquals(2, sessionFactory.sessions.size());
+        assertEquals(1, sessionFactory.sessions.get(0).closeCalls);
+        assertEquals(List.of(new MarketSubscription(List.of("orderbook_delta"), List.of("M1"))),
+            sessionFactory.sessions.get(1).marketSubscriptions);
+        assertEquals(1L, metrics.get(
+            "backend_ws_session_failures_total",
+            BackendMetrics.labels("service", "wsclient", "reason", "subscription")
+        ));
+    }
+
+    @Test
+    void openMarketSessionReconnectsDiscoverySubscriptionsAndRawConnections() {
+        BackendConfig config = liveConfig(Map.ofEntries(
+            Map.entry("KALSHI_MARKET_SELECTION_MODE", "open_markets"),
+            Map.entry("KALSHI_MARKET_TICKERS", ""),
+            Map.entry("KALSHI_WS_CHANNELS", "orderbook_delta"),
+            Map.entry("KALSHI_ORDERBOOK_SUBSCRIPTION_CHUNK_SIZE", "2"),
+            Map.entry("KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION", "10000"),
+            Map.entry("KALSHI_MARKET_DISCOVERY_MAX_MARKETS", "3"),
+            Map.entry("KALSHI_WS_SUBSCRIPTION_DELAY_MS", "0"),
+            Map.entry("KALSHI_WS_ACK_TIMEOUT_MS", "500"),
+            Map.entry("BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", "0"),
+            Map.entry("BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", "0"),
+            Map.entry("BACKEND_WS_RECONNECT_MAX_ATTEMPTS", "2")
+        ));
+        RawDbIngestSink sink = new RawDbIngestSink(new RecordingAsyncDbWriter(), "kalshi.websocket", "live");
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 500);
+        RecordingSessionFactory sessionFactory = new RecordingSessionFactory(100L, 200L);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> KalshiSystem.runLiveSessionSupervisor(
+                config,
+                () -> KalshiSystem.startLiveSessionAttempt(
+                    config,
+                    new FakeKalshiWrapper(marketsResponse("M1", "M2", "M3")),
+                    sink,
+                    null,
+                    controller,
+                    sessionFactory
+                ),
+                new BackendMetrics(),
+                millis -> {
+                }
+            )
+        );
+
+        assertEquals(2, sessionFactory.sessions.size());
+        assertEquals(List.of("live-1", "live-2"), sessionFactory.rawConnectionIds);
+        for (RecordingLiveWebSocketSession session : sessionFactory.sessions) {
+            assertEquals(List.of(new MarketSubscription(List.of("orderbook_delta"), List.of("M1", "M2"))),
+                session.marketSubscriptions);
+            assertEquals(List.of(new UpdateSubscription(session.sid, "add_markets", List.of("M3"))), session.updates);
+        }
+
+        assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(sequenceGap("M3")));
+        executor.runAll();
+
+        assertTrue(sessionFactory.sessions.get(0).snapshotCalls.isEmpty());
+        assertEquals(1, sessionFactory.sessions.get(1).snapshotCalls.size());
+        assertSnapshotCall(sessionFactory.sessions.get(1).snapshotCalls.get(0), 200L, "M3", 500);
+    }
+
     private static BackendConfig liveConfig(Map<String, String> overrides) {
         Map<String, String> env = new HashMap<>();
         env.put("KALSHI_KEY_ID", "key");
@@ -455,6 +667,17 @@ class KalshiSystemTest {
             "crossed_book",
             "pause_market_and_request_fresh_snapshot"
         );
+    }
+
+    private static String marketsResponse(String... tickers) {
+        StringBuilder markets = new StringBuilder();
+        for (int index = 0; index < tickers.length; index++) {
+            if (index > 0) {
+                markets.append(',');
+            }
+            markets.append("{\"ticker\":\"").append(tickers[index]).append("\"}");
+        }
+        return "{\"markets\":[" + markets + "],\"cursor\":\"\"}";
     }
 
     private static final class FakeExecutor implements java.util.concurrent.Executor {
@@ -499,12 +722,135 @@ class KalshiSystemTest {
     private record SnapshotCall(long sid, String[] marketTickers, int timeoutMs) {
     }
 
+    private record MarketSubscription(List<String> channels, List<String> marketTickers) {
+        private MarketSubscription(String[] channels, String[] marketTickers) {
+            this(List.of(channels), List.of(marketTickers));
+        }
+    }
+
+    private record UpdateSubscription(long sid, String action, List<String> marketTickers) {
+        private UpdateSubscription(long sid, String action, String[] marketTickers) {
+            this(sid, action, List.of(marketTickers));
+        }
+    }
+
     private static final class RecordingSnapshotRequester implements OrderBookRecoveryController.SnapshotRequester {
         private final List<SnapshotCall> calls = new ArrayList<>();
 
         @Override
         public void requestSnapshotAndAwaitOk(long sid, String[] marketTickers, int timeoutMs) {
             calls.add(new SnapshotCall(sid, marketTickers, timeoutMs));
+        }
+    }
+
+    private static final class FakeKalshiWrapper extends KalshiWrapper {
+        private final String marketsResponse;
+
+        private FakeKalshiWrapper() {
+            this("{\"markets\":[],\"cursor\":\"\"}");
+        }
+
+        private FakeKalshiWrapper(String marketsResponse) {
+            super("https://example.test", "", "");
+            this.marketsResponse = marketsResponse;
+        }
+
+        @Override
+        public String getMarkets(RequestParameters params) {
+            return marketsResponse;
+        }
+    }
+
+    private static final class RecordingSessionFactory implements KalshiSystem.LiveWebSocketSessionFactory {
+        private final ArrayDeque<Long> sids = new ArrayDeque<>();
+        private final List<RecordingLiveWebSocketSession> sessions = new ArrayList<>();
+        private final List<String> rawConnectionIds = new ArrayList<>();
+        private final List<Integer> failSubscribeAttempts = new ArrayList<>();
+        private int createCalls;
+
+        private RecordingSessionFactory(Long... sids) {
+            this.sids.addAll(List.of(sids));
+        }
+
+        @Override
+        public KalshiLiveWebSocketSession create(
+            KalshiWrapper wrapper,
+            RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+            edu.illinois.group8.recorder.RawIngestRecorder rawIngestRecorder
+        ) {
+            createCalls++;
+            if (rawDbConnection != null) {
+                rawConnectionIds.add(rawDbConnection.connectionId());
+            }
+            long sid = sids.isEmpty() ? createCalls : sids.removeFirst();
+            RecordingLiveWebSocketSession session = new RecordingLiveWebSocketSession(
+                sid,
+                failSubscribeAttempts.contains(createCalls)
+            );
+            sessions.add(session);
+            return session;
+        }
+    }
+
+    private static final class RecordingLiveWebSocketSession implements KalshiLiveWebSocketSession {
+        private final long sid;
+        private final boolean failSubscribeAndAwait;
+        private final CompletableFuture<Void> closed = CompletableFuture.completedFuture(null);
+        private final List<List<String>> globalSubscriptions = new ArrayList<>();
+        private final List<MarketSubscription> marketSubscriptions = new ArrayList<>();
+        private final List<UpdateSubscription> updates = new ArrayList<>();
+        private final List<SnapshotCall> snapshotCalls = new ArrayList<>();
+        private int closeCalls;
+
+        private RecordingLiveWebSocketSession(long sid, boolean failSubscribeAndAwait) {
+            this.sid = sid;
+            this.failSubscribeAndAwait = failSubscribeAndAwait;
+        }
+
+        @Override
+        public boolean subscribe(String[] channels) {
+            globalSubscriptions.add(List.of(channels));
+            return true;
+        }
+
+        @Override
+        public boolean subscribe(String[] channels, String[] marketTickers) {
+            marketSubscriptions.add(new MarketSubscription(channels, marketTickers));
+            return true;
+        }
+
+        @Override
+        public long subscribeAndAwaitSid(String[] channels, String[] marketTickers, int timeoutMs) {
+            if (failSubscribeAndAwait) {
+                throw new IllegalStateException("subscribe failed");
+            }
+            marketSubscriptions.add(new MarketSubscription(channels, marketTickers));
+            return sid;
+        }
+
+        @Override
+        public void updateAndAwaitOk(long subscriptionId, String action, String[] marketTickers, int timeoutMs) {
+            updates.add(new UpdateSubscription(subscriptionId, action, marketTickers));
+        }
+
+        @Override
+        public void requestSnapshotAndAwaitOk(long subscriptionId, String[] marketTickers, int timeoutMs) {
+            snapshotCalls.add(new SnapshotCall(subscriptionId, marketTickers, timeoutMs));
+        }
+
+        @Override
+        public CompletionStage<Void> closed() {
+            return closed;
+        }
+
+        @Override
+        public boolean isClosed() {
+            return closed.isDone();
+        }
+
+        @Override
+        public void close() {
+            closeCalls++;
         }
     }
 

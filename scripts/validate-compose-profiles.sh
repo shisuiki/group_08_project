@@ -160,6 +160,35 @@ assert_raw_replay_table_defaults_aligned() {
     printf 'PASS raw_replay_table_defaults table=raw_ws_events\n'
 }
 
+assert_ws_reconnect_defaults_aligned() {
+    for service_profile in "wsclient:cluster-live" "wsclient-capture:recording-capture"; do
+        service="${service_profile%%:*}"
+        profile="${service_profile#*:}"
+        rendered="$(service_config_for "$service" --profile "$profile")"
+        for expected in \
+            "BACKEND_WS_RECONNECT_ENABLED: \"true\"" \
+            "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS: \"1000\"" \
+            "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS: \"30000\"" \
+            "BACKEND_WS_RECONNECT_MAX_ATTEMPTS: \"0\""; do
+            if ! printf '%s\n' "$rendered" | grep -q "^      ${expected}$"; then
+                printf 'profile %s service %s missing reconnect default %s\n' "$profile" "$service" "$expected" >&2
+                exit 1
+            fi
+        done
+    done
+    for fallback in \
+        "BACKEND_WS_RECONNECT_ENABLED: \${{ vars.BACKEND_WS_RECONNECT_ENABLED || 'true' }}" \
+        "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS: \${{ vars.BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS || '1000' }}" \
+        "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS: \${{ vars.BACKEND_WS_RECONNECT_MAX_BACKOFF_MS || '30000' }}" \
+        "BACKEND_WS_RECONNECT_MAX_ATTEMPTS: \${{ vars.BACKEND_WS_RECONNECT_MAX_ATTEMPTS || '0' }}"; do
+        if ! grep -Fq "$fallback" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing reconnect fallback: %s\n' "$fallback" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS ws_reconnect_defaults enabled=true initial_ms=1000 max_ms=30000 max_attempts=0\n'
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -182,3 +211,4 @@ assert_published_ports_loopback "historical-backfill" --profile historical-backf
 assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
 assert_raw_replay_table_defaults_aligned
+assert_ws_reconnect_defaults_aligned

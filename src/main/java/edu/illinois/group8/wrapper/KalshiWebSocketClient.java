@@ -14,13 +14,14 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class KalshiWebSocketClient extends WebSocketClient {
+public class KalshiWebSocketClient extends WebSocketClient implements KalshiLiveWebSocketSession {
 
     private final KalshiWrapper wrapper;
     private static final String PATH = "/trade-api/ws/v2";
@@ -32,6 +33,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
     private final KalshiInboundMessageHandler inboundMessageHandler;
     private final Map<Long, CompletableFuture<Long>> subscriptionAcks = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<Void>> updateAcks = new ConcurrentHashMap<>();
+    private final CompletableFuture<Void> closed = new CompletableFuture<>();
     
     private long nonce = 1;
 
@@ -143,6 +145,7 @@ public class KalshiWebSocketClient extends WebSocketClient {
 
             this.connect(PATH, headers);
         } catch (Exception e) {
+            closed.complete(null);
             System.err.println("Signing websocket handshake request threw exception: " + e.getMessage());
         }
     }
@@ -193,15 +196,36 @@ public class KalshiWebSocketClient extends WebSocketClient {
     public void onError(Exception e) {
         System.err.println("An error occurred: " + e.getMessage());
         e.printStackTrace();
+        if (closed != null && isClosed()) {
+            closed.complete(null);
+        }
     }
 
     @Override
     public void onClose() {
-        completePendingAcksExceptionally("Kalshi websocket closed: " + closeDescription());
-        if (closeClusterOnClose) {
-            this.cluster.close();
+        try {
+            completePendingAcksExceptionally("Kalshi websocket closed: " + closeDescription());
+            if (closeClusterOnClose) {
+                this.cluster.close();
+            }
+        } finally {
+            closed.complete(null);
         }
         System.out.println("Connection closed (" + closeDescription() + ").");
+    }
+
+    @Override
+    public CompletionStage<Void> closed() {
+        return closed;
+    }
+
+    @Override
+    public void close() {
+        try {
+            super.close();
+        } finally {
+            closed.complete(null);
+        }
     }
 
     public boolean subscribe(String[] channels, String marketTicker) {

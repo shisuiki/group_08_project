@@ -25,6 +25,10 @@ public record BackendConfig(
     int orderbookMarketsPerConnection,
     int subscriptionDelayMs,
     int subscriptionAckTimeoutMs,
+    boolean websocketReconnectEnabled,
+    int websocketReconnectInitialBackoffMs,
+    int websocketReconnectMaxBackoffMs,
+    int websocketReconnectMaxAttempts,
     boolean orderBookRecoveryGapConsumerEnabled,
     int orderBookRecoveryGapConsumerFragmentLimit,
     int orderBookRecoveryGapConsumerIdleSleepMs,
@@ -74,6 +78,10 @@ public record BackendConfig(
             intValue(env, properties, "KALSHI_ORDERBOOK_MARKETS_PER_CONNECTION", 10000),
             intValue(env, properties, "KALSHI_WS_SUBSCRIPTION_DELAY_MS", 250),
             intValue(env, properties, "KALSHI_WS_ACK_TIMEOUT_MS", 30000),
+            booleanValue(env, properties, "BACKEND_WS_RECONNECT_ENABLED", true),
+            intValue(env, properties, "BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS", 1000),
+            intValue(env, properties, "BACKEND_WS_RECONNECT_MAX_BACKOFF_MS", 30000),
+            intValue(env, properties, "BACKEND_WS_RECONNECT_MAX_ATTEMPTS", 0),
             booleanValue(env, properties, "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_ENABLED", false),
             intValue(env, properties, "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT", 64),
             intValue(env, properties, "BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS", 1),
@@ -125,6 +133,15 @@ public record BackendConfig(
         }
         if (subscriptionAckTimeoutMs < 1) {
             errors.append("KALSHI_WS_ACK_TIMEOUT_MS must be positive. ");
+        }
+        if (websocketReconnectInitialBackoffMs < 0) {
+            errors.append("BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS must be zero or positive. ");
+        }
+        if (websocketReconnectMaxBackoffMs < websocketReconnectInitialBackoffMs) {
+            errors.append("BACKEND_WS_RECONNECT_MAX_BACKOFF_MS must be at least BACKEND_WS_RECONNECT_INITIAL_BACKOFF_MS. ");
+        }
+        if (websocketReconnectMaxAttempts < 0) {
+            errors.append("BACKEND_WS_RECONNECT_MAX_ATTEMPTS must be zero or positive. ");
         }
         if (orderBookRecoveryGapConsumerFragmentLimit < 1) {
             errors.append("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_FRAGMENT_LIMIT must be positive. ");

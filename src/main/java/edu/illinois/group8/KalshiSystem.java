@@ -12,6 +12,7 @@ import edu.illinois.group8.storage.db.AsyncDbWriter;
 import edu.illinois.group8.storage.db.AsyncDbWriterFactory;
 import edu.illinois.group8.storage.db.DbWriterConfig;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
+import edu.illinois.group8.wrapper.KalshiLiveWebSocketSession;
 import edu.illinois.group8.wrapper.KalshiWebSocketClient;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController;
 import edu.illinois.group8.wrapper.OrderBookRecoveryGapConsumer;
@@ -30,6 +31,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
@@ -80,12 +83,49 @@ public class KalshiSystem {
 
         KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
         try {
+            LiveSessionAttemptFactory attemptFactory = () -> startLiveSessionAttempt(
+                config,
+                wrapper,
+                rawDbSink,
+                rawIngestRecorder,
+                orderBookRecoveryController,
+                KalshiSystem::newWebSocketSession
+            );
+            if (config.websocketReconnectEnabled()) {
+                runLiveSessionSupervisor(config, attemptFactory, backendMetrics, Thread::sleep);
+            } else {
+                attemptFactory.start();
+            }
+        } catch (InterruptedException exc) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while sending Kalshi subscription commands.", exc);
+        }
+    }
+
+    static LiveSessionHandle startLiveSessionAttempt(
+        BackendConfig config,
+        KalshiWrapper wrapper,
+        RawDbIngestSink rawDbSink,
+        RawIngestRecorder rawIngestRecorder,
+        OrderBookRecoveryController orderBookRecoveryController,
+        LiveWebSocketSessionFactory sessionFactory
+    ) throws InterruptedException {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(wrapper, "wrapper");
+        Objects.requireNonNull(sessionFactory, "sessionFactory");
+        List<KalshiLiveWebSocketSession> sessions = new ArrayList<>();
+        LiveWebSocketSessionFactory trackingFactory = (sessionWrapper, rawDbConnection, recorder) -> {
+            KalshiLiveWebSocketSession session = sessionFactory.create(sessionWrapper, rawDbConnection, recorder);
+            sessions.add(Objects.requireNonNull(session, "sessionFactory result"));
+            return session;
+        };
+        try {
             if (config.openMarketSelectionEnabled()) {
-                KalshiWebSocketClient wsClient = newOpenMarketWebSocketClient(
+                KalshiLiveWebSocketSession wsClient = newOpenMarketWebSocketSession(
                     wrapper,
                     rawDbSink,
                     rawIngestRecorder,
-                    KalshiSystem::newWebSocketClient
+                    trackingFactory
                 );
                 subscribeOpenMarketCapture(
                     config,
@@ -94,34 +134,194 @@ public class KalshiSystem {
                     rawDbSink,
                     rawIngestRecorder,
                     orderBookRecoveryController,
-                    KalshiSystem::newWebSocketClient
+                    trackingFactory
                 );
             } else {
                 List<String> tickers = resolveMarketTickers(config, wrapper);
                 if (tickers.isEmpty()) {
                     throw new IllegalStateException("No market tickers resolved for live subscription.");
                 }
-                KalshiWebSocketClient wsClient = newWebSocketClient(
+                KalshiLiveWebSocketSession wsClient = newWebSocketSession(
                     wrapper,
                     newRawDbConnection(rawDbSink),
-                    rawIngestRecorder
+                    rawIngestRecorder,
+                    trackingFactory
                 );
                 subscribeConfiguredMarketCapture(config, wsClient, tickers, orderBookRecoveryController);
             }
-        } catch (InterruptedException exc) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while sending Kalshi subscription commands.", exc);
+            return new LiveSessionHandle(sessions);
+        } catch (InterruptedException | RuntimeException exc) {
+            closeSessions(sessions, exc);
+            throw exc;
         }
+    }
+
+    static void runLiveSessionSupervisor(
+        BackendConfig config,
+        LiveSessionAttemptFactory attemptFactory,
+        BackendMetrics metrics,
+        Sleeper sleeper
+    ) throws InterruptedException {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(attemptFactory, "attemptFactory");
+        Objects.requireNonNull(metrics, "metrics");
+        Objects.requireNonNull(sleeper, "sleeper");
+        WsReconnectMetricHandles handles = wsReconnectMetricHandles(metrics);
+        int attempts = 0;
+        int maxAttempts = config.websocketReconnectMaxAttempts();
+        long backoffMs = config.websocketReconnectInitialBackoffMs();
+        while (maxAttempts == 0 || attempts < maxAttempts) {
+            attempts++;
+            LiveSessionHandle session = null;
+            handles.attempts().increment();
+            try {
+                session = attemptFactory.start();
+                handles.established().increment();
+                waitForSessionClose(session);
+                handles.closes().increment();
+            } catch (InterruptedException exc) {
+                if (session != null) {
+                    session.close();
+                }
+                throw exc;
+            } catch (RuntimeException exc) {
+                handles.subscriptionFailures().increment();
+                if (session != null) {
+                    session.close();
+                }
+            }
+
+            if (session != null) {
+                session.close();
+            }
+            if (maxAttempts != 0 && attempts >= maxAttempts) {
+                handles.maxAttemptExhaustions().increment();
+                throw new IllegalStateException("BACKEND_WS_RECONNECT_MAX_ATTEMPTS exhausted after " + attempts + " attempts.");
+            }
+            handles.retries().increment();
+            if (backoffMs > 0) {
+                sleeper.sleep(backoffMs);
+            }
+            backoffMs = nextReconnectBackoffMs(backoffMs, config.websocketReconnectMaxBackoffMs());
+        }
+    }
+
+    private static void waitForSessionClose(LiveSessionHandle session) throws InterruptedException {
+        try {
+            session.closed().toCompletableFuture().get();
+        } catch (ExecutionException exc) {
+            throw new IllegalStateException("Live websocket session close signal failed.", exc.getCause());
+        }
+    }
+
+    private static long nextReconnectBackoffMs(long currentBackoffMs, long maxBackoffMs) {
+        if (currentBackoffMs <= 0) {
+            return maxBackoffMs <= 0 ? 0 : 1;
+        }
+        long doubled = currentBackoffMs > Long.MAX_VALUE / 2 ? Long.MAX_VALUE : currentBackoffMs * 2;
+        return Math.min(doubled, maxBackoffMs);
+    }
+
+    private static WsReconnectMetricHandles wsReconnectMetricHandles(BackendMetrics metrics) {
+        var labels = BackendMetrics.labels("service", "wsclient");
+        return new WsReconnectMetricHandles(
+            metrics.counter("backend_ws_session_attempts_total", labels),
+            metrics.counter("backend_ws_session_established_total", labels),
+            metrics.counter("backend_ws_session_closes_total", labels),
+            metrics.counter("backend_ws_session_retries_total", labels),
+            metrics.counter(
+                "backend_ws_session_failures_total",
+                BackendMetrics.labels("service", "wsclient", "reason", "subscription")
+            ),
+            metrics.counter(
+                "backend_ws_session_failures_total",
+                BackendMetrics.labels("service", "wsclient", "reason", "max_attempts_exhausted")
+            )
+        );
+    }
+
+    private static void closeSessions(List<KalshiLiveWebSocketSession> sessions) {
+        closeSessions(sessions, null);
+    }
+
+    private static void closeSessions(List<KalshiLiveWebSocketSession> sessions, Throwable primary) {
+        RuntimeException failure = null;
+        for (KalshiLiveWebSocketSession session : sessions) {
+            try {
+                session.close();
+            } catch (RuntimeException exc) {
+                if (failure == null) {
+                    failure = exc;
+                } else {
+                    failure.addSuppressed(exc);
+                }
+            }
+        }
+        if (failure != null) {
+            if (primary != null) {
+                primary.addSuppressed(failure);
+            } else {
+                throw failure;
+            }
+        }
+    }
+
+    static final class LiveSessionHandle implements AutoCloseable {
+        private final List<KalshiLiveWebSocketSession> sessions;
+        private final java.util.concurrent.CompletableFuture<Void> closed = new java.util.concurrent.CompletableFuture<>();
+
+        LiveSessionHandle(List<KalshiLiveWebSocketSession> sessions) {
+            if (sessions == null || sessions.isEmpty()) {
+                throw new IllegalArgumentException("Live session attempt must create at least one websocket session.");
+            }
+            this.sessions = List.copyOf(sessions);
+            for (KalshiLiveWebSocketSession session : this.sessions) {
+                session.closed().whenComplete((ignored, failure) -> closed.complete(null));
+            }
+        }
+
+        CompletionStage<Void> closed() {
+            return closed;
+        }
+
+        int sessionCount() {
+            return sessions.size();
+        }
+
+        @Override
+        public void close() {
+            closeSessions(sessions);
+        }
+    }
+
+    @FunctionalInterface
+    interface LiveSessionAttemptFactory {
+        LiveSessionHandle start() throws InterruptedException;
+    }
+
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
+
+    record WsReconnectMetricHandles(
+        BackendMetrics.Counter attempts,
+        BackendMetrics.Counter established,
+        BackendMetrics.Counter closes,
+        BackendMetrics.Counter retries,
+        BackendMetrics.Counter subscriptionFailures,
+        BackendMetrics.Counter maxAttemptExhaustions
+    ) {
     }
 
     private static void subscribeOpenMarketCapture(
         BackendConfig config,
         KalshiWrapper wrapper,
-        KalshiWebSocketClient wsClient,
+        KalshiLiveWebSocketSession wsClient,
         RawDbIngestSink rawDbSink,
         RawIngestRecorder rawIngestRecorder,
         OrderBookRecoveryController orderBookRecoveryController,
-        OpenMarketWebSocketClientFactory clientFactory
+        LiveWebSocketSessionFactory clientFactory
     ) throws InterruptedException {
         List<String> globalChannels = config.websocketGlobalChannels().isEmpty()
             ? requestedOpenMarketGlobalChannels(config.websocketChannels())
@@ -150,7 +350,7 @@ public class KalshiSystem {
 
     private static void subscribeConfiguredMarketCapture(
         BackendConfig config,
-        KalshiWebSocketClient wsClient,
+        KalshiLiveWebSocketSession wsClient,
         List<String> tickers,
         OrderBookRecoveryController orderBookRecoveryController
     ) throws InterruptedException {
@@ -171,7 +371,7 @@ public class KalshiSystem {
 
     private static void subscribeMarketChunks(
         BackendConfig config,
-        KalshiWebSocketClient wsClient,
+        KalshiLiveWebSocketSession wsClient,
         List<String> channels,
         List<String> tickers,
         OrderBookRecoveryController orderBookRecoveryController
@@ -207,13 +407,13 @@ public class KalshiSystem {
     private static void discoverAndSubscribeMarketChunks(
         BackendConfig config,
         KalshiWrapper wrapper,
-        KalshiWebSocketClient initialClient,
+        KalshiLiveWebSocketSession initialClient,
         List<String> channels,
         String seriesTicker,
         RawDbIngestSink rawDbSink,
         RawIngestRecorder rawIngestRecorder,
         OrderBookRecoveryController orderBookRecoveryController,
-        OpenMarketWebSocketClientFactory clientFactory
+        LiveWebSocketSessionFactory clientFactory
     ) throws InterruptedException {
         if (channels.isEmpty()) {
             return;
@@ -227,7 +427,7 @@ public class KalshiSystem {
         int subscribedOnCurrentConnection = 0;
         int connectionIndex = 1;
         long subscriptionSid = -1;
-        KalshiWebSocketClient orderbookClient = initialClient;
+        KalshiLiveWebSocketSession orderbookClient = initialClient;
         System.out.println("Using Kalshi websocket shard 1 for filtered orderbook subscriptions.");
         while (true) {
             String marketsStr = requestMarketDiscoveryPage(config, wrapper, seriesTicker, cursor, page);
@@ -338,25 +538,35 @@ public class KalshiSystem {
         }
     }
 
-    static KalshiWebSocketClient openOrderbookConnection(
+    static KalshiLiveWebSocketSession openOrderbookConnection(
         KalshiWrapper wrapper,
         int connectionIndex,
         RawDbIngestSink rawDbSink,
         RawIngestRecorder rawIngestRecorder,
-        OpenMarketWebSocketClientFactory clientFactory
+        LiveWebSocketSessionFactory clientFactory
     ) {
         System.out.println("Opening Kalshi orderbook websocket shard " + connectionIndex + ".");
-        return newOpenMarketWebSocketClient(wrapper, rawDbSink, rawIngestRecorder, clientFactory);
+        return newOpenMarketWebSocketSession(wrapper, rawDbSink, rawIngestRecorder, clientFactory);
     }
 
-    static KalshiWebSocketClient newOpenMarketWebSocketClient(
+    static KalshiLiveWebSocketSession newOpenMarketWebSocketSession(
         KalshiWrapper wrapper,
         RawDbIngestSink rawDbSink,
         RawIngestRecorder rawIngestRecorder,
-        OpenMarketWebSocketClientFactory clientFactory
+        LiveWebSocketSessionFactory clientFactory
     ) {
         Objects.requireNonNull(clientFactory, "clientFactory");
         return clientFactory.create(wrapper, newRawDbConnection(rawDbSink), rawIngestRecorder);
+    }
+
+    static KalshiLiveWebSocketSession newWebSocketSession(
+        KalshiWrapper wrapper,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        RawIngestRecorder rawIngestRecorder,
+        LiveWebSocketSessionFactory clientFactory
+    ) {
+        Objects.requireNonNull(clientFactory, "clientFactory");
+        return clientFactory.create(wrapper, rawDbConnection, rawIngestRecorder);
     }
 
     static RawIngestRecorder createRawIngestRecorder(BackendConfig config) {
@@ -375,7 +585,7 @@ public class KalshiSystem {
         return recorderFactory.get();
     }
 
-    private static KalshiWebSocketClient newWebSocketClient(
+    private static KalshiLiveWebSocketSession newWebSocketSession(
         KalshiWrapper wrapper,
         RawDbIngestSink.RawDbIngestConnection rawDbConnection,
         RawIngestRecorder rawIngestRecorder
@@ -387,8 +597,8 @@ public class KalshiSystem {
     }
 
     @FunctionalInterface
-    interface OpenMarketWebSocketClientFactory {
-        KalshiWebSocketClient create(
+    interface LiveWebSocketSessionFactory {
+        KalshiLiveWebSocketSession create(
             KalshiWrapper wrapper,
             RawDbIngestSink.RawDbIngestConnection rawDbConnection,
             RawIngestRecorder rawIngestRecorder
@@ -554,7 +764,7 @@ public class KalshiSystem {
 
     private static OrderbookSubscriptionState subscribeDiscoveredChunk(
         BackendConfig config,
-        KalshiWebSocketClient wsClient,
+        KalshiLiveWebSocketSession wsClient,
         List<String> channels,
         List<String> chunk,
         int alreadySubscribed,
