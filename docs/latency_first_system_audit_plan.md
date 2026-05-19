@@ -252,7 +252,7 @@ Verification:
 - `processor-serialize` p99 improves against Batch 1 baseline.
 - Allocation rate drops in JFR.
 
-### Batch 6: Optimize Order Book
+### Batch 6: Optimize Order Book And Recovery
 
 Deliverables:
 
@@ -270,7 +270,18 @@ Deliverables:
 - Landed: crossed books suppress the invalid crossed `top_of_book_update`, emit
   `SequenceGapEvent(reason="crossed_book")`, count
   `backend_orderbook_crossed_total` from the sequence-gap labels, and pause.
-- Remaining: automated fresh snapshot reload and cluster snapshot/restore.
+- Landed: `SourceSequenceMonitor` watermarks can snapshot/restore without
+  rewinding on duplicate or older source sequences.
+- Landed: `OrderBookStateManager` exports recovery checkpoints; restored books
+  fail closed in paused state and do not restore price levels/depth.
+- Landed: `DataProcessorRecoveryState` and `ESBClusterSnapshotCodec` v1 encode
+  source watermarks plus order-book recovery checkpoints.
+- Landed: `ESBClusteredService` writes/loads recovery snapshot payloads and
+  loads snapshots before starting tickerplant/demo clients.
+- Landed: cluster snapshot publication offer fails fast on terminal Aeron
+  statuses and uses bounded retry for backpressure/admin action.
+- Remaining: automated fresh snapshot reload/live `get_snapshot` actuator,
+  reconnect/subscription restore, and any full-depth book restore.
 - Add primitive/discrete price-level book implementation for Kalshi price
   levels.
 - Benchmark snapshot/delta/top-of-book update cost.

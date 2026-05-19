@@ -36,7 +36,7 @@ Plan status from the markdowns:
 
 | Plan | Current state | Where remaining planned modules belong |
 | --- | --- | --- |
-| `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket reconnect/subscription restore reliability. |
+| `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, source watermark snapshots, basic cluster recovery snapshot payloads, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: automated fresh snapshot reload/live recovery, object-store backfill, binary serialization experiments, and WebSocket reconnect/subscription restore reliability. |
 | `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, DB-backed default input, recording/Aeron sources, fair-polled live stream subscriptions, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
 | `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer` path has been removed; a current frontend adapter HTTP service and lightweight chart demo expose datafeed/search/history/quotes/health/metrics endpoints. | Production frontend work should add durable query backing, WS/SSE streaming, replay controls, and frontend hardening behind the feature/query boundary. |
 | `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, cached hot-path metric handles, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
@@ -181,12 +181,12 @@ flowchart LR
 
   subgraph ESB["Aeron Cluster / ESB Runtime"]
     CM["ClusterMain<br/>node0-node2 profiles"]:::bus
-    ECS["ESBClusteredService<br/>leader handles byte[] ingress<br/>with scratch buffer reuse"]:::bus
+    ECS["ESBClusteredService<br/>leader handles byte[] ingress<br/>scratch reuse + recovery snapshots"]:::bus
     ORCH["ESBClusterCommunicationOrchestrator<br/>internal IPC stream + external Aeron channel"]:::bus
     DP["DataProcessor<br/>normalization, publishing,<br/>metrics"]:::current
     PARSER["KalshiCanonicalParser<br/>RawSourceEvent + canonical events<br/>WS parser"]:::current
-    SEQ["SourceSequenceMonitor<br/>monotonic subscription watermark<br/>source anomalies"]:::current
-    BOOK["OrderBookStateManager<br/>interleaved seq handling<br/>pause on duplicate/backward"]:::current
+    SEQ["SourceSequenceMonitor<br/>monotonic subscription watermark<br/>snapshot/restore"]:::current
+    BOOK["OrderBookStateManager<br/>interleaved seq handling<br/>recovery checkpoints"]:::current
     PUB["AeronEventPublisher<br/>serializes canonical JSON"]:::bus
     CDB["canonical_events<br/>Postgres/Timescale canonical DB"]:::storage
     INTERNAL["Internal event bus<br/>StreamRegistry ID 20"]:::bus
@@ -287,12 +287,14 @@ flowchart LR
     RESTBACK2["HistoricalBackfillCli<br/>DB-primary raw REST + canonical backfill"]:::current
     CURFEATURE["FeaturePlantService skeleton<br/>DB default + fair-polled Aeron/recording sources<br/>stdout/buffer sinks"]:::current
     CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
+    RECBASE["Basic cluster recovery snapshot<br/>source watermarks + paused book checkpoints<br/>no depth restore"]:::current
   end
 
   KALSHI2 --> CORE
   CORE --> CANON
   CORE --> CDB2
   CORE --> RAWDB2
+  CORE --> RECBASE
   CORE -->|raw-ingest capture| RAWSTORE
   CANON -->|stream-recorder canonical copy| RAWSTORE
   RAWDB2 -->|default raw replay source| REPLAY2
@@ -311,14 +313,14 @@ flowchart LR
 
   subgraph CoreHardening["Planned Core Backend Hardening"]
     HEARTBEAT["WebSocket reconnect/subscription restore<br/>connection state metrics"]:::planned
-    RECOVERY["Order book recovery<br/>automated snapshot reload<br/>cluster snapshot/restore"]:::planned
+    RECOVERY["Live recovery hardening<br/>fresh snapshot actuator<br/>reconnect/subscription restore"]:::planned
     OBJECTBACKFILL["Object-store archive/import/export<br/>S3 retention + restore policy"]:::plannedStorage
     BINARY["Binary serialization experiment<br/>SBE, FlatBuffers, protobuf,<br/>or Agrona buffers"]:::planned
     METASTORE["Market metadata and terms store<br/>markets, events, series, rules text"]:::plannedStorage
   end
 
   CORE --> HEARTBEAT
-  CORE --> RECOVERY
+  RECBASE --> RECOVERY
   RAWSTORE --> OBJECTBACKFILL
   CANON --> BINARY
   RESTHELPERS --> METASTORE

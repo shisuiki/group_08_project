@@ -85,13 +85,13 @@ Important classes:
 - `ClientClusterOrchestrator`: byte[] Aeron Cluster ingress writer.
 - `ClusterMain`: Aeron Cluster node startup.
 - `ESBClusteredService`: leader-side cluster message handling with reusable
-  ingress scratch buffer.
+  ingress scratch buffer and recovery snapshot payloads.
 - `DataProcessor`: raw/canonical parsing, order book derived events, metrics,
   and DB offer counters.
 - `SourceSequenceMonitor`: optional monotonic subscription-wide sequence
-  watermark.
+  watermark with snapshot/restore support.
 - `OrderBookStateManager`: per-market snapshot/delta state and derived
-  top-of-book recovery pauses.
+  top-of-book recovery pauses with recovery checkpoints.
 - `Tickerplant`: routes internal canonical JSON by `stream_name`.
 - `AeronCanonicalEnvelopeSource`: live canonical consumer source for
   FeaturePlant-style modules; fair-polls stream subscriptions across calls.
@@ -119,11 +119,15 @@ Current:
   `backend_orderbook_sequence_gap_total`; `crossed_book` sequence-gap events
   also count `backend_orderbook_crossed_total` from the sequence-gap labels.
   Distribution metrics remain sampled; counters remain exact.
+- `DataProcessorRecoveryState` captures source sequence watermarks and order
+  book recovery checkpoints. Cluster snapshots restore those watermarks and
+  fail-closed paused book checkpoints; they do not restore price levels or full
+  order book depth.
 
 Planned:
 
-- Automated fresh snapshot reload and cluster snapshot/restore remain roadmap
-  work.
+- Automated fresh snapshot reload/live `get_snapshot` wiring, reconnect
+  restore, and full-depth book restore remain roadmap work.
 
 ## Stream Contracts
 
@@ -227,13 +231,13 @@ Legend:
 | WebSocket ping/pong | current-basic | ping replies exist; reconnect/restore is not complete |
 | WebSocket reconnect/subscription restore | planned | roadmap hardening |
 | REST wrapper | current | simple wrapper; weak retry/backoff/error taxonomy |
-| Aeron Cluster ESB | current | message path exists |
-| Cluster snapshot/restore | planned | current snapshot is effectively empty |
+| Aeron Cluster ESB | current | message path exists; recovery snapshots write/read processor recovery payloads and snapshot publication offer uses terminal fail-fast plus bounded retry |
+| Cluster snapshot/restore | current-basic | restores source watermarks and paused order-book recovery checkpoints; no full order book depth restore; live fresh snapshot actuator/reconnect remains planned |
 | Canonical event model | current | stream registry and serializer exist |
 | Kalshi WS parser | current | parser error events exist |
 | Kalshi REST parser | current | used by historical backfill |
-| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books suppress invalid crossed `top_of_book_update`, emit `SequenceGapEvent(reason="crossed_book")`, and pause until a fresh snapshot; automated fresh snapshot reload and cluster restore remain planned |
-| Source sequence monitor | current-basic | optional monotonic subscription watermark; forward gaps advance, duplicate/older events do not rewind |
+| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books suppress invalid crossed `top_of_book_update`, emit `SequenceGapEvent(reason="crossed_book")`, and pause until a fresh snapshot; recovery checkpoints restore paused fail-closed state without depth; automated fresh snapshot reload remains planned |
+| Source sequence monitor | current-basic | optional monotonic subscription watermark; forward gaps advance, duplicate/older events do not rewind; watermarks can snapshot/restore |
 | Tickerplant routing | current | JSON `stream_name` routing |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
 | Canonical stream recording | current | canonical DB sink wired in `DataProcessor`/cluster runtime; downstream Aeron recording remains capture/offline/debug/export |
@@ -346,7 +350,7 @@ High priority:
 
 Reliability risks:
 
-- no cluster business-state restore
+- basic cluster recovery snapshot omits full order book depth
 - no automated order book fresh snapshot reload
 - weak REST retry/backoff behavior
 - no full websocket reconnect/subscription restore

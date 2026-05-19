@@ -221,10 +221,15 @@ Symptoms: `system.sequence_gaps` events with reasons such as
 `delta_before_snapshot`, `crossed_book`, or, when explicitly enabled for a
 single-connection feed, `source_sequence_gap`.
 
+Cluster recovery snapshots preserve source watermarks and paused order-book
+checkpoints. Restored order books fail closed without depth and keep suppressing
+derived top-of-book until a fresh live snapshot arrives.
+
 Actions:
 
 - Pause consumers for the affected `market_ticker`.
 - Request a fresh orderbook snapshot through `update_subscription` with `get_snapshot` when wired to the live client.
+- Do not treat a REST orderbook response as a sequenced live resume point.
 - Resume the market after a new `orderbook_snapshot` is accepted.
 
 ### Parser Failure Spike
@@ -268,6 +273,12 @@ Symptoms: cluster logs report role changes.
 Actions:
 
 - Data processing only handles session messages on the leader.
+- `ESBClusteredService` loads the recovery snapshot payload before starting
+  tickerplant/demo clients.
+- Cluster snapshots restore source watermarks and paused order-book recovery
+  checkpoints only; they do not restore full book depth.
+- Snapshot publication fails fast on terminal Aeron publication statuses and
+  retries backpressure/admin action only up to a bounded limit.
 - Confirm follower nodes are healthy and Aeron directories are writable.
 - Consumers should reconnect to public stream subscriptions if their local subscription stalls.
 
