@@ -67,6 +67,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FEATUREPLANT_OUTPUT=db"));
         assertTrue(script.contains("FEATUREPLANT_RUN_ONCE=false"));
         assertTrue(script.contains("FEATUREPLANT_DB_INCLUDE_REPLAY=false"));
+        assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED=\"${FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED:-true}\""));
+        assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY=\"${FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY:-250000}\""));
+        assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_BATCH_SIZE=\"${FEATUREPLANT_DB_OUTPUT_BATCH_SIZE:-500}\""));
+        assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS=\"${FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS:-5000}\""));
+        assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED=\"$FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED\""));
         assertTrue(script.contains("featureplant-db-follower"));
         assertTrue(script.contains("frontend-adapter-db-primary"));
         assertTrue(script.contains("docker compose --profile db-primary-product up -d --build --force-recreate"));

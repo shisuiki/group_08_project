@@ -2,6 +2,7 @@ package edu.illinois.group8.feature;
 
 import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.canonical.StreamRegistry;
+import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputStore;
@@ -13,6 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -23,10 +25,11 @@ public final class FeaturePlantCli {
 
     public static void main(String[] args) {
         Config config = Config.fromEnvironment().withArgs(args);
-        FeatureOutputSink sink = config.outputSink();
+        BackendMetrics metrics = new BackendMetrics();
+        FeatureOutputSink sink = config.outputSink(metrics);
         CanonicalEnvelopeSource source = config.source();
         try (
-             FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink)) {
+             FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink, metrics)) {
             if (config.runOnce()) {
                 long consumed = service.runUntilExhausted(config.batchSize());
                 System.err.println("FeaturePlant consumed " + consumed + " canonical events");
@@ -42,7 +45,7 @@ public final class FeaturePlantCli {
         }
     }
 
-    private record Config(
+    record Config(
         String sourceMode,
         Path recordingRoot,
         String aeronChannel,
@@ -58,10 +61,18 @@ public final class FeaturePlantCli {
         String dbPassword,
         boolean dbIncludeReplayEvents,
         String dbReplayId,
-        String dbCursorName
+        String dbCursorName,
+        boolean dbOutputAsyncEnabled,
+        int dbOutputQueueCapacity,
+        int dbOutputBatchSize,
+        long dbOutputCloseTimeoutMs
     ) {
         static Config fromEnvironment() {
-            Map<String, String> env = System.getenv();
+            return from(System.getenv());
+        }
+
+        static Config from(Map<String, String> env) {
+            Objects.requireNonNull(env, "env");
             String baseDir = value(env, "BASE_DIR", "/app");
             return new Config(
                 value(env, "FEATUREPLANT_SOURCE", "db"),
@@ -81,7 +92,25 @@ public final class FeaturePlantCli {
                 value(env, "FEATUREPLANT_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
                 Boolean.parseBoolean(value(env, "FEATUREPLANT_DB_INCLUDE_REPLAY", "false")),
                 value(env, "FEATUREPLANT_DB_REPLAY_ID", ""),
-                value(env, "FEATUREPLANT_DB_CURSOR_NAME", "")
+                value(env, "FEATUREPLANT_DB_CURSOR_NAME", ""),
+                booleanValue(env, "FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED", false),
+                positiveIntValue(
+                    env,
+                    "FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY",
+                    value(env, "DB_WRITER_QUEUE_CAPACITY",
+                        Integer.toString(BoundedAsyncFeatureOutputSink.DEFAULT_QUEUE_CAPACITY))
+                ),
+                positiveIntValue(
+                    env,
+                    "FEATUREPLANT_DB_OUTPUT_BATCH_SIZE",
+                    value(env, "DB_WRITER_BATCH_SIZE",
+                        Integer.toString(BoundedAsyncFeatureOutputSink.DEFAULT_BATCH_SIZE))
+                ),
+                nonNegativeLongValue(
+                    env,
+                    "FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS",
+                    BoundedAsyncFeatureOutputSink.DEFAULT_CLOSE_TIMEOUT_MS
+                )
             );
         }
 
@@ -102,6 +131,10 @@ public final class FeaturePlantCli {
             boolean nextDbIncludeReplayEvents = dbIncludeReplayEvents;
             String nextDbReplayId = dbReplayId;
             String nextDbCursorName = dbCursorName;
+            boolean nextDbOutputAsyncEnabled = dbOutputAsyncEnabled;
+            int nextDbOutputQueueCapacity = dbOutputQueueCapacity;
+            int nextDbOutputBatchSize = dbOutputBatchSize;
+            long nextDbOutputCloseTimeoutMs = dbOutputCloseTimeoutMs;
 
             for (String arg : args) {
                 if ("--help".equals(arg) || "-h".equals(arg)) {
@@ -136,6 +169,25 @@ public final class FeaturePlantCli {
                     nextDbReplayId = arg.substring("--replay-id=".length());
                 } else if (arg.startsWith("--db-cursor-name=")) {
                     nextDbCursorName = arg.substring("--db-cursor-name=".length());
+                } else if ("--db-output-async".equals(arg)) {
+                    nextDbOutputAsyncEnabled = true;
+                } else if ("--db-output-sync".equals(arg)) {
+                    nextDbOutputAsyncEnabled = false;
+                } else if (arg.startsWith("--db-output-queue-capacity=")) {
+                    nextDbOutputQueueCapacity = parsePositiveInt(
+                        arg.substring("--db-output-queue-capacity=".length()),
+                        "FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY"
+                    );
+                } else if (arg.startsWith("--db-output-batch-size=")) {
+                    nextDbOutputBatchSize = parsePositiveInt(
+                        arg.substring("--db-output-batch-size=".length()),
+                        "FEATUREPLANT_DB_OUTPUT_BATCH_SIZE"
+                    );
+                } else if (arg.startsWith("--db-output-close-timeout-ms=")) {
+                    nextDbOutputCloseTimeoutMs = parseNonNegativeLong(
+                        arg.substring("--db-output-close-timeout-ms=".length()),
+                        "FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS"
+                    );
                 } else if ("--follow".equals(arg)) {
                     nextRunOnce = false;
                 } else if ("--run-once".equals(arg)) {
@@ -160,17 +212,31 @@ public final class FeaturePlantCli {
                 nextDbPassword,
                 nextDbIncludeReplayEvents,
                 nextDbReplayId,
-                nextDbCursorName
+                nextDbCursorName,
+                nextDbOutputAsyncEnabled,
+                Math.max(1, nextDbOutputQueueCapacity),
+                Math.max(1, nextDbOutputBatchSize),
+                Math.max(0L, nextDbOutputCloseTimeoutMs)
             );
         }
 
         FeatureOutputSink outputSink() {
+            return outputSink(new BackendMetrics());
+        }
+
+        FeatureOutputSink outputSink(BackendMetrics metrics) {
+            return outputSink(metrics, Config::defaultDbOutputSink);
+        }
+
+        FeatureOutputSink outputSink(BackendMetrics metrics, DbOutputSinkFactory dbSinkFactory) {
+            Objects.requireNonNull(metrics, "metrics");
+            Objects.requireNonNull(dbSinkFactory, "dbSinkFactory");
             List<FeatureOutputSink> sinks = new ArrayList<>();
             for (String mode : outputModes(outputMode)) {
                 switch (mode) {
                     case "stdout", "console" -> sinks.add(new StdoutFeatureOutputSink());
                     case "db", "postgres", "postgresql", "timescale", "timescaledb" ->
-                        sinks.add(dbOutputSink());
+                        sinks.add(dbOutputSink(dbSinkFactory, metrics));
                     default -> throw new IllegalArgumentException("Unsupported FEATUREPLANT_OUTPUT: " + mode);
                 }
             }
@@ -180,13 +246,39 @@ public final class FeaturePlantCli {
             return new CompositeFeatureOutputSink(sinks);
         }
 
-        private FeatureOutputSink dbOutputSink() {
+        private FeatureOutputSink dbOutputSink(DbOutputSinkFactory dbSinkFactory, BackendMetrics metrics) {
             if (dbUrl == null || dbUrl.isBlank()) {
                 throw new IllegalArgumentException(
                     "FEATUREPLANT_DB_URL or --db-url is required when FEATUREPLANT_OUTPUT includes db"
                 );
             }
-            return new DbFeatureOutputSink(JdbcFeatureOutputStore.fromDriverManager(dbUrl, dbUser, dbPassword));
+            return dbSinkFactory.create(
+                dbUrl,
+                dbUser,
+                dbPassword,
+                dbOutputAsyncEnabled,
+                dbOutputQueueCapacity,
+                dbOutputBatchSize,
+                dbOutputCloseTimeoutMs,
+                metrics
+            );
+        }
+
+        private static FeatureOutputSink defaultDbOutputSink(
+            String dbUrl,
+            String dbUser,
+            String dbPassword,
+            boolean asyncEnabled,
+            int queueCapacity,
+            int batchSize,
+            long closeTimeoutMs,
+            BackendMetrics metrics
+        ) {
+            JdbcFeatureOutputStore store = JdbcFeatureOutputStore.fromDriverManager(dbUrl, dbUser, dbPassword);
+            if (!asyncEnabled) {
+                return new DbFeatureOutputSink(store);
+            }
+            return new BoundedAsyncFeatureOutputSink(store, metrics, queueCapacity, batchSize, closeTimeoutMs);
         }
 
         CanonicalEnvelopeSource source() {
@@ -283,12 +375,77 @@ public final class FeaturePlantCli {
         }
 
         private static int intValue(Map<String, String> env, String key, int defaultValue) {
-            return Integer.parseInt(value(env, key, Integer.toString(defaultValue)));
+            return parseInt(value(env, key, Integer.toString(defaultValue)), key);
         }
 
         private static long longValue(Map<String, String> env, String key, long defaultValue) {
-            return Long.parseLong(value(env, key, Long.toString(defaultValue)));
+            return parseLong(value(env, key, Long.toString(defaultValue)), key);
         }
+
+        private static int positiveIntValue(Map<String, String> env, String key, String defaultValue) {
+            return parsePositiveInt(value(env, key, defaultValue), key);
+        }
+
+        private static long nonNegativeLongValue(Map<String, String> env, String key, long defaultValue) {
+            return parseNonNegativeLong(value(env, key, Long.toString(defaultValue)), key);
+        }
+
+        private static boolean booleanValue(Map<String, String> env, String key, boolean defaultValue) {
+            String raw = value(env, key, Boolean.toString(defaultValue)).trim().toLowerCase(Locale.ROOT);
+            if ("true".equals(raw)) {
+                return true;
+            }
+            if ("false".equals(raw)) {
+                return false;
+            }
+            throw new IllegalArgumentException(key + " must be true or false.");
+        }
+
+        private static int parsePositiveInt(String value, String key) {
+            int parsed = parseInt(value, key);
+            if (parsed <= 0) {
+                throw new IllegalArgumentException(key + " must be positive.");
+            }
+            return parsed;
+        }
+
+        private static long parseNonNegativeLong(String value, String key) {
+            long parsed = parseLong(value, key);
+            if (parsed < 0L) {
+                throw new IllegalArgumentException(key + " must be non-negative.");
+            }
+            return parsed;
+        }
+
+        private static int parseInt(String value, String key) {
+            try {
+                return Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(key + " must be an integer.", e);
+            }
+        }
+
+        private static long parseLong(String value, String key) {
+            try {
+                return Long.parseLong(value.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(key + " must be an integer.", e);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    interface DbOutputSinkFactory {
+        FeatureOutputSink create(
+            String dbUrl,
+            String dbUser,
+            String dbPassword,
+            boolean asyncEnabled,
+            int queueCapacity,
+            int batchSize,
+            long closeTimeoutMs,
+            BackendMetrics metrics
+        );
     }
 
     private static void printUsageAndExit() {
@@ -310,6 +467,11 @@ public final class FeaturePlantCli {
               --max-events=100000
               --batch-size=100
               --output=stdout|db|stdout,db
+              --db-output-async
+              --db-output-sync
+              --db-output-queue-capacity=250000
+              --db-output-batch-size=500
+              --db-output-close-timeout-ms=5000
               --run-once
               --follow
             """);

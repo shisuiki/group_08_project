@@ -10,7 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Types;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -119,6 +122,68 @@ class JdbcFeatureOutputStoreTest {
     }
 
     @Test
+    void batchInsertUsesOneConnectionPreparedStatementAndTransaction() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        JdbcFeatureOutputStore store = new JdbcFeatureOutputStore(jdbc::openConnection);
+
+        store.insertFeatureOutputBatch(List.of(
+            new FeatureOutputDbEvent("feature-event-1", "source-1", "feature.bbo", 1, "M1", 1L, "{}"),
+            new FeatureOutputDbEvent("feature-event-2", null, "feature.ticker_snapshot", 1, null, null, "{\"x\":1}")
+        ));
+
+        assertEquals(1, jdbc.openConnections);
+        assertEquals(0, jdbc.executeUpdateCalls);
+        assertEquals(2, jdbc.addBatchCalls);
+        assertEquals(1, jdbc.executeBatchCalls);
+        assertEquals(1, jdbc.commitCalls);
+        assertEquals(0, jdbc.rollbackCalls);
+        assertEquals(List.of(false, true), jdbc.autoCommitSetValues);
+        assertEquals(JdbcFeatureOutputStore.INSERT_SQL, jdbc.preparedSql);
+        assertEquals(2, jdbc.batchParameters.size());
+        assertEquals("feature-event-1", jdbc.batchParameters.get(0).get(1));
+        assertEquals("feature-event-2", jdbc.batchParameters.get(1).get(1));
+        assertEquals(new SqlNull(Types.BIGINT), jdbc.batchParameters.get(1).get(6));
+    }
+
+    @Test
+    void emptyBatchDoesNotOpenConnection() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        JdbcFeatureOutputStore store = new JdbcFeatureOutputStore(jdbc::openConnection);
+
+        store.insertFeatureOutputBatch(List.of());
+
+        assertEquals(0, jdbc.openConnections);
+    }
+
+    @Test
+    void batchInsertRollsBackOnFailure() {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        jdbc.executeBatchFailure = new SQLException("batch failed");
+        JdbcFeatureOutputStore store = new JdbcFeatureOutputStore(jdbc::openConnection);
+
+        assertThrows(Exception.class, () -> store.insertFeatureOutputBatch(List.of(
+            new FeatureOutputDbEvent("feature-event-1", "source-1", "feature.bbo", 1, "M1", 1L, "{}")
+        )));
+
+        assertEquals(1, jdbc.executeBatchCalls);
+        assertEquals(0, jdbc.commitCalls);
+        assertEquals(1, jdbc.rollbackCalls);
+        assertEquals(List.of(false, true), jdbc.autoCommitSetValues);
+    }
+
+    @Test
+    void defaultBatchMethodFallsBackToSingleInserts() throws Exception {
+        CapturingStore store = new CapturingStore();
+
+        store.insertFeatureOutputBatch(List.of(
+            new FeatureOutputDbEvent("feature-event-1", "source-1", "feature.bbo", 1, "M1", 1L, "{}"),
+            new FeatureOutputDbEvent("feature-event-2", "source-2", "feature.bbo", 1, "M2", 2L, "{}")
+        ));
+
+        assertEquals(List.of("feature-event-1", "feature-event-2"), store.featureEventIds);
+    }
+
+    @Test
     void recordValidationRejectsMissingIdentityNameAndValues() {
         assertThrows(
             IllegalArgumentException.class,
@@ -154,8 +219,15 @@ class JdbcFeatureOutputStoreTest {
     private static final class RecordingJdbc {
         private int openConnections;
         private int executeUpdateCalls;
+        private int addBatchCalls;
+        private int executeBatchCalls;
+        private int commitCalls;
+        private int rollbackCalls;
         private String preparedSql;
         private final Map<Integer, Object> parameters = new HashMap<>();
+        private final List<Map<Integer, Object>> batchParameters = new ArrayList<>();
+        private final List<Boolean> autoCommitSetValues = new ArrayList<>();
+        private SQLException executeBatchFailure;
 
         private Connection openConnection() {
             openConnections++;
@@ -169,6 +241,19 @@ class JdbcFeatureOutputStoreTest {
 
         private Object handleConnectionInvocation(Object proxy, Method method, Object[] args) {
             return switch (method.getName()) {
+                case "getAutoCommit" -> true;
+                case "setAutoCommit" -> {
+                    autoCommitSetValues.add((Boolean) args[0]);
+                    yield null;
+                }
+                case "commit" -> {
+                    commitCalls++;
+                    yield null;
+                }
+                case "rollback" -> {
+                    rollbackCalls++;
+                    yield null;
+                }
                 case "prepareStatement" -> {
                     preparedSql = (String) args[0];
                     yield preparedStatement();
@@ -188,7 +273,7 @@ class JdbcFeatureOutputStoreTest {
             );
         }
 
-        private Object handlePreparedStatementInvocation(Object proxy, Method method, Object[] args) {
+        private Object handlePreparedStatementInvocation(Object proxy, Method method, Object[] args) throws Throwable {
             return switch (method.getName()) {
                 case "setString", "setInt", "setLong" -> {
                     parameters.put((Integer) args[0], args[1]);
@@ -201,6 +286,18 @@ class JdbcFeatureOutputStoreTest {
                 case "executeUpdate" -> {
                     executeUpdateCalls++;
                     yield 1;
+                }
+                case "addBatch" -> {
+                    addBatchCalls++;
+                    batchParameters.add(new HashMap<>(parameters));
+                    yield null;
+                }
+                case "executeBatch" -> {
+                    executeBatchCalls++;
+                    if (executeBatchFailure != null) {
+                        throw executeBatchFailure;
+                    }
+                    yield new int[addBatchCalls];
                 }
                 case "close" -> null;
                 default -> defaultValue(method.getReturnType());
@@ -239,6 +336,15 @@ class JdbcFeatureOutputStoreTest {
                 return '\0';
             }
             return null;
+        }
+    }
+
+    private static final class CapturingStore implements FeatureOutputStore {
+        private final List<String> featureEventIds = new ArrayList<>();
+
+        @Override
+        public void insertFeatureOutput(FeatureOutputDbEvent output) {
+            featureEventIds.add(output.featureEventId());
         }
     }
 }

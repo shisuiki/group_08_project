@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.List;
 import java.util.Objects;
 
 public final class JdbcFeatureOutputStore implements FeatureOutputStore {
@@ -41,6 +42,43 @@ public final class JdbcFeatureOutputStore implements FeatureOutputStore {
         }
     }
 
+    @Override
+    public void insertFeatureOutputBatch(List<FeatureOutputDbEvent> outputs) throws Exception {
+        Objects.requireNonNull(outputs, "outputs");
+        if (outputs.isEmpty()) {
+            return;
+        }
+
+        try (Connection connection = connectionFactory.openConnection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            Exception failure = null;
+            try {
+                try (PreparedStatement statement = connection.prepareStatement(INSERT_SQL)) {
+                    for (FeatureOutputDbEvent output : outputs) {
+                        bindOutput(statement, Objects.requireNonNull(output, "output"));
+                        statement.addBatch();
+                    }
+                    statement.executeBatch();
+                }
+                connection.commit();
+            } catch (Exception e) {
+                failure = e;
+                rollback(connection, e);
+                throw e;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException e) {
+                    if (failure == null) {
+                        throw e;
+                    }
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+    }
+
     private static void bindOutput(PreparedStatement statement, FeatureOutputDbEvent output) throws SQLException {
         statement.setString(1, output.featureEventId());
         statement.setString(2, output.sourceEventId());
@@ -56,6 +94,14 @@ public final class JdbcFeatureOutputStore implements FeatureOutputStore {
             statement.setNull(index, Types.BIGINT);
         } else {
             statement.setLong(index, value);
+        }
+    }
+
+    private static void rollback(Connection connection, Exception cause) {
+        try {
+            connection.rollback();
+        } catch (SQLException rollbackException) {
+            cause.addSuppressed(rollbackException);
         }
     }
 }

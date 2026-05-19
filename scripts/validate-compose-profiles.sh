@@ -107,6 +107,10 @@ assert_db_primary_product_defaults_aligned() {
         "FEATUREPLANT_DB_USER: kalshi" \
         "FEATUREPLANT_DB_INCLUDE_REPLAY: \"false\"" \
         "FEATUREPLANT_DB_CURSOR_NAME: db-primary-product-featureplant" \
+        "FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED: \"true\"" \
+        "FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY: \"250000\"" \
+        "FEATUREPLANT_DB_OUTPUT_BATCH_SIZE: \"500\"" \
+        "FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS: \"5000\"" \
         "FEATUREPLANT_RUN_ONCE: \"false\""; do
         if ! printf '%s\n' "$featureplant_rendered" | grep -q "^      ${expected}$"; then
             printf 'db-primary-product featureplant-db-follower missing default %s\n' "$expected" >&2
@@ -283,10 +287,17 @@ assert_release_gate_defaults_aligned() {
 
 assert_featureplant_cursor_config_propagated() {
     rendered="$(service_config_for featureplant --profile featureplant)"
-    if ! printf '%s\n' "$rendered" | grep -q '^      FEATUREPLANT_DB_CURSOR_NAME: ""$'; then
-        printf 'featureplant service is missing default FEATUREPLANT_DB_CURSOR_NAME\n' >&2
-        exit 1
-    fi
+    for expected in \
+        'FEATUREPLANT_DB_CURSOR_NAME: ""' \
+        'FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED: "false"' \
+        'FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY: "250000"' \
+        'FEATUREPLANT_DB_OUTPUT_BATCH_SIZE: "500"' \
+        'FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS: "5000"'; do
+        if ! printf '%s\n' "$rendered" | grep -q "^      ${expected}$"; then
+            printf 'featureplant service is missing default %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
     for expected in \
         "FEATUREPLANT_DB_CURSOR_NAME: \${{ vars.FEATUREPLANT_DB_CURSOR_NAME }}" \
         'FEATUREPLANT_DB_CURSOR_NAME=$FEATUREPLANT_DB_CURSOR_NAME'; do
