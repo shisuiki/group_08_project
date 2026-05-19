@@ -187,8 +187,8 @@ Current database status:
   default FeaturePlant, frontend adapter, and research export DB sources. Its
   cursor is global over `canonical_commit_seq`; replay rows are excluded unless
   a replay id or include-replay option is supplied.
-- `market_metadata` schema, isolated JDBC store boundary, and historical REST
-  market discovery upsert wiring exist; live/runtime writes are not wired.
+- `market_metadata` schema, isolated JDBC store/read boundaries, and historical
+  REST market discovery upsert wiring exist; live/runtime writes are not wired.
 - `feature_outputs` schema, isolated JDBC store boundary, deterministic mapper,
   and explicit FeaturePlant DB output mode exist. Stdout remains the default;
   feature output batching/async writes are not wired.
@@ -258,7 +258,7 @@ Legend:
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
 | Persistent feature store | current-basic | `feature_outputs` schema/store plus explicit `FEATUREPLANT_OUTPUT=db` FeaturePlant sink exist; stdout remains default and async/batched feature writes are absent |
-| MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` schema/store plus historical REST metadata upsert wiring exists |
+| MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` schema/store/reader plus historical REST metadata upsert wiring exists |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
 | Feature/query API | current-basic | `/features` inspection endpoint serves buffered feature outputs; `/bars` and WS features absent |
 | Frontend adapter | current-demo | HTTP polling datafeed demo; module-driven canonical DB source remains default, recording is explicit legacy/debug/demo; optional `feature_outputs` startup snapshot mode reads persisted feature rows |

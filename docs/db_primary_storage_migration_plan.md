@@ -172,9 +172,9 @@ Required columns:
 - `market_payload jsonb not null`
 - `updated_at timestamptz not null default now()`
 
-Status: schema, JDBC store boundary, REST markets mapper, and historical
-backfill DB upsert wiring are landed. Live/runtime metadata writes are not
-wired.
+Status: schema, JDBC store boundary, bounded JDBC read boundary, REST markets
+mapper, and historical backfill DB upsert wiring are landed. Live/runtime
+metadata writes are not wired.
 
 ### `feature_outputs`
 
@@ -506,6 +506,8 @@ Baseline delivered:
   `RAW_REPLAY_SOURCE=local-ndjson` for explicit import/debug.
 - FeaturePlant, frontend adapter, and research export default to canonical DB
   rows.
+- Market metadata has a bounded read boundary for exact ticker lookup and
+  series/status discovery queries, defaulting to 100 rows and clamping at 1,000.
 
 Remaining:
 
@@ -608,8 +610,9 @@ and drop-visible through writer metrics.
   response capture, timestamp-fenced `latest_market_state`, and
   `feature_outputs` plus `market_metadata`.
 - `AsyncDbWriter`, bounded DB writer queues, raw/canonical JDBC writes, raw REST
-  JDBC storage, canonical DB reads, DB-default replay/feature/frontend/export
-  sources, and explicit FeaturePlant DB output writes exist.
+  JDBC storage, canonical DB reads, market metadata DB reads, DB-default
+  replay/feature/frontend/export sources, and explicit FeaturePlant DB output
+  writes exist.
 
 ## Remaining Next Batches
 

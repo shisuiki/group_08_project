@@ -281,7 +281,7 @@ flowchart LR
     CDB2["canonical_events<br/>Postgres/Timescale canonical DB"]:::current
     RAWDB2["raw_ws_events<br/>Postgres/Timescale raw DB"]:::current
     RAWREST2["raw_rest_responses<br/>Postgres/Timescale REST response DB"]:::current
-    METADB2["market_metadata<br/>schema + JDBC upsert boundary<br/>historical markets backfill writes"]:::current
+    METADB2["market_metadata<br/>schema + JDBC upsert/read boundary<br/>historical markets backfill writes"]:::current
     RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + recordings/canonical"]:::current
     REPLAY2["RawIngressReplayCli<br/>Timescale raw rows by default<br/>+ explicit local NDJSON import/debug"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current

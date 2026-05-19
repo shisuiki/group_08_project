@@ -120,7 +120,11 @@ legacy/debug/export canonical NDJSON under `recordings/canonical`.
 `market_metadata` is the DB table for market/event/series metadata discovered
 through REST workflows. Historical REST market discovery writes this table when
 a DB URL is configured. Live/runtime writes are not wired in the current code
-path.
+path. `JdbcMarketMetadataReader` provides a bounded read boundary for exact
+`market_ticker` lookup and `series_ticker` / `status` filtered queries. The
+reader defaults to 100 rows and clamps requests at 1,000 rows. It returns DB
+records with JSONB payloads as JSON strings; it is not a public production query
+API.
 
 ```text
 market_ticker text primary key
