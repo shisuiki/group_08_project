@@ -81,6 +81,54 @@ assert_frontend_adapter_metadata_env_present() {
     printf 'PASS compose_service_environment profiles=%s service=frontend-adapter env=feature-output-refresh,metadata\n' "$label"
 }
 
+assert_db_primary_product_services_present() {
+    services="$(services_for --profile db-primary-product)"
+    for service in timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary; do
+        if ! printf '%s\n' "$services" | grep -qx "$service"; then
+            printf 'profile db-primary-product is missing %s\n' "$service" >&2
+            exit 1
+        fi
+    done
+    for service in featureplant frontend-adapter; do
+        if printf '%s\n' "$services" | grep -qx "$service"; then
+            printf 'profile db-primary-product unexpectedly includes legacy demo service %s\n' "$service" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS compose_services_present profiles=db-primary-product services=timescaledb,db-migrate,featureplant-db-follower,frontend-adapter-db-primary\n'
+}
+
+assert_db_primary_product_defaults_aligned() {
+    featureplant_rendered="$(service_config_for featureplant-db-follower --profile db-primary-product)"
+    for expected in \
+        "FEATUREPLANT_SOURCE: db" \
+        "FEATUREPLANT_OUTPUT: db" \
+        "FEATUREPLANT_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
+        "FEATUREPLANT_DB_USER: kalshi" \
+        "FEATUREPLANT_DB_INCLUDE_REPLAY: \"false\"" \
+        "FEATUREPLANT_DB_CURSOR_NAME: db-primary-product-featureplant" \
+        "FEATUREPLANT_RUN_ONCE: \"false\""; do
+        if ! printf '%s\n' "$featureplant_rendered" | grep -q "^      ${expected}$"; then
+            printf 'db-primary-product featureplant-db-follower missing default %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    frontend_rendered="$(service_config_for frontend-adapter-db-primary --profile db-primary-product)"
+    for expected in \
+        "FRONTEND_ADAPTER_SOURCE: db" \
+        "FRONTEND_ADAPTER_FEATURE_SOURCE: feature_outputs" \
+        "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: \"true\"" \
+        "FRONTEND_ADAPTER_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
+        "FRONTEND_ADAPTER_DB_USER: kalshi"; do
+        if ! printf '%s\n' "$frontend_rendered" | grep -q "^      ${expected}$"; then
+            printf 'db-primary-product frontend-adapter-db-primary missing default %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS db_primary_product_defaults featureplant=follower frontend=feature_outputs\n'
+}
+
 assert_published_ports_loopback() {
     label="$1"
     shift
@@ -258,10 +306,13 @@ validate_config "local-db,frontend-integration" --profile local-db --profile fro
 validate_config "historical-backfill" --profile historical-backfill
 validate_config "featureplant" --profile featureplant
 validate_config "raw-replay" --profile raw-replay
+validate_config "db-primary-product" --profile db-primary-product
 
 assert_services_absent "observability" --profile observability
 assert_services_absent "cluster-live,observability" --profile cluster-live --profile observability
 assert_services_present "recording-capture" --profile recording-capture
+assert_db_primary_product_services_present
+assert_db_primary_product_defaults_aligned
 assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration
 assert_published_ports_loopback "cluster-live" --profile cluster-live
 assert_published_ports_loopback "single-node-local" --profile single-node-local
@@ -271,6 +322,7 @@ assert_published_ports_loopback "local-db,frontend-integration" --profile local-
 assert_published_ports_loopback "historical-backfill" --profile historical-backfill
 assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
+assert_published_ports_loopback "db-primary-product" --profile db-primary-product
 assert_no_default_network "cluster-live" --profile cluster-live
 assert_no_default_network "recording-capture" --profile recording-capture
 assert_no_default_network "observability" --profile observability
@@ -278,6 +330,7 @@ assert_no_default_network "local-db,frontend-integration" --profile local-db --p
 assert_no_default_network "historical-backfill" --profile historical-backfill
 assert_no_default_network "featureplant" --profile featureplant
 assert_no_default_network "raw-replay" --profile raw-replay
+assert_no_default_network "db-primary-product" --profile db-primary-product
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned

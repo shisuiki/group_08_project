@@ -58,6 +58,28 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("EXPECTED_FRONTEND_STARTED_AT"));
     }
 
+    @Test
+    void productSmokeUsesLongRunningFeaturePlantFollowerAndDurableCursor() throws Exception {
+        String script = read("scripts/db-primary-product-smoke.sh");
+
+        assertTrue(script.contains("FEATUREPLANT_DB_CURSOR_NAME=\"${FEATUREPLANT_DB_CURSOR_NAME:-db-primary-product-smoke}\""));
+        assertTrue(script.contains("FEATUREPLANT_SOURCE=db"));
+        assertTrue(script.contains("FEATUREPLANT_OUTPUT=db"));
+        assertTrue(script.contains("FEATUREPLANT_RUN_ONCE=false"));
+        assertTrue(script.contains("FEATUREPLANT_DB_INCLUDE_REPLAY=false"));
+        assertTrue(script.contains("featureplant-db-follower"));
+        assertTrue(script.contains("frontend-adapter-db-primary"));
+        assertTrue(script.contains("docker compose --profile db-primary-product up -d --build --force-recreate"));
+        assertTrue(script.contains("featureplant_cursors"));
+        assertTrue(script.contains("last_commit_seq"));
+        assertTrue(script.contains("feature_outputs"));
+        assertTrue(script.contains("source_event_id like 'demo-db-primary-canonical-%'"));
+        assertTrue(script.contains("EXPECTED_FRONTEND_STARTED_AT"));
+        assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN=1"));
+        assertFalse(script.contains("db-primary-demo-run-featureplant.sh"));
+        assertFalse(script.contains("docker compose --profile featureplant run"));
+    }
+
     private static String read(String path) throws Exception {
         Path file = Path.of(path);
         Assumptions.assumeTrue(

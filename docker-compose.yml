@@ -304,7 +304,7 @@ services:
 
   timescaledb:
     image: timescale/timescaledb:2.17.2-pg16
-    profiles: ["local-db"]
+    profiles: ["local-db", "db-primary-product"]
     environment:
       POSTGRES_DB: ${LOCAL_DB_NAME:-kalshi_test}
       POSTGRES_USER: ${LOCAL_DB_USER:-kalshi}
@@ -323,7 +323,7 @@ services:
 
   db-migrate:
     image: flyway/flyway:10.20.1
-    profiles: ["local-db"]
+    profiles: ["local-db", "db-primary-product"]
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -491,6 +491,84 @@ services:
     shm_size: "512mb"
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.feature.FeaturePlantCli"
+
+  featureplant-db-follower:
+    build: .
+    profiles: ["db-primary-product"]
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      BASE_DIR: /app
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      FEATUREPLANT_SOURCE: db
+      FEATUREPLANT_OUTPUT: db
+      FEATUREPLANT_DB_URL: ${FEATUREPLANT_DB_URL:-jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME:-kalshi_test}}
+      FEATUREPLANT_DB_USER: ${FEATUREPLANT_DB_USER:-${LOCAL_DB_USER:-kalshi}}
+      FEATUREPLANT_DB_PASSWORD: ${FEATUREPLANT_DB_PASSWORD:-${LOCAL_DB_PASSWORD:-kalshi}}
+      FEATUREPLANT_DB_INCLUDE_REPLAY: ${FEATUREPLANT_DB_INCLUDE_REPLAY:-false}
+      FEATUREPLANT_DB_REPLAY_ID: ${FEATUREPLANT_DB_REPLAY_ID:-}
+      FEATUREPLANT_DB_CURSOR_NAME: ${FEATUREPLANT_DB_CURSOR_NAME:-db-primary-product-featureplant}
+      FEATUREPLANT_RECORDING_ROOT: ${FEATUREPLANT_RECORDING_ROOT:-/app/recordings}
+      FEATUREPLANT_AERON_CHANNEL: ${FEATUREPLANT_AERON_CHANNEL:-}
+      FEATUREPLANT_STREAMS: ${FEATUREPLANT_STREAMS:-canonical.trade,canonical.ticker,derived.top_of_book}
+      FEATUREPLANT_MODULES: ${FEATUREPLANT_MODULES:-bbo,ticker_snapshot,trade_tape}
+      FEATUREPLANT_MAX_EVENTS: ${FEATUREPLANT_MAX_EVENTS:-0}
+      FEATUREPLANT_BATCH_SIZE: ${FEATUREPLANT_BATCH_SIZE:-100}
+      FEATUREPLANT_IDLE_SLEEP_MS: ${FEATUREPLANT_IDLE_SLEEP_MS:-1}
+      FEATUREPLANT_RUN_ONCE: false
+    networks:
+      - cluster_net
+    volumes:
+      - ./recordings:/app/recordings:ro
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.feature.FeaturePlantCli"
+
+  frontend-adapter-db-primary:
+    build: .
+    profiles: ["db-primary-product"]
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      BASE_DIR: /app
+      AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
+      FRONTEND_ADAPTER_HOST: ${FRONTEND_ADAPTER_HOST:-0.0.0.0}
+      FRONTEND_ADAPTER_PORT: ${FRONTEND_ADAPTER_PORT:-8090}
+      FRONTEND_ADAPTER_SOURCE: ${FRONTEND_ADAPTER_SOURCE:-db}
+      FRONTEND_ADAPTER_FEATURE_SOURCE: ${FRONTEND_ADAPTER_FEATURE_SOURCE:-feature_outputs}
+      FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS: ${FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS:-10000}
+      FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: ${FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED:-true}
+      FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS: ${FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS:-1000}
+      FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS: ${FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS:-10000}
+      FRONTEND_ADAPTER_METADATA_SOURCE: ${FRONTEND_ADAPTER_METADATA_SOURCE:-auto}
+      FRONTEND_ADAPTER_METADATA_MAX_ROWS: ${FRONTEND_ADAPTER_METADATA_MAX_ROWS:-1000}
+      FRONTEND_ADAPTER_DB_URL: ${FRONTEND_ADAPTER_DB_URL:-jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME:-kalshi_test}}
+      FRONTEND_ADAPTER_DB_USER: ${FRONTEND_ADAPTER_DB_USER:-${LOCAL_DB_USER:-kalshi}}
+      FRONTEND_ADAPTER_DB_PASSWORD: ${FRONTEND_ADAPTER_DB_PASSWORD:-${LOCAL_DB_PASSWORD:-kalshi}}
+      FRONTEND_ADAPTER_DB_INCLUDE_REPLAY: ${FRONTEND_ADAPTER_DB_INCLUDE_REPLAY:-false}
+      FRONTEND_ADAPTER_DB_REPLAY_ID: ${FRONTEND_ADAPTER_DB_REPLAY_ID:-}
+      FRONTEND_ADAPTER_RECORDING_ROOT: ${FRONTEND_ADAPTER_RECORDING_ROOT:-/app/recordings}
+      FRONTEND_ADAPTER_AERON_CHANNEL: ${FRONTEND_ADAPTER_AERON_CHANNEL:-}
+      FRONTEND_ADAPTER_STREAMS: ${FRONTEND_ADAPTER_STREAMS:-canonical.trade,canonical.ticker,derived.top_of_book}
+      FRONTEND_ADAPTER_MODULES: ${FRONTEND_ADAPTER_MODULES:-bbo,ticker_snapshot,trade_tape}
+      FRONTEND_ADAPTER_MAX_FEATURES_PER_MARKET: ${FRONTEND_ADAPTER_MAX_FEATURES_PER_MARKET:-10000}
+      FRONTEND_ADAPTER_MAX_SYMBOLS_INDEXED: ${FRONTEND_ADAPTER_MAX_SYMBOLS_INDEXED:-5000}
+      FRONTEND_ADAPTER_FRAGMENT_LIMIT: ${FRONTEND_ADAPTER_FRAGMENT_LIMIT:-64}
+      FRONTEND_ADAPTER_IDLE_SLEEP_MS: ${FRONTEND_ADAPTER_IDLE_SLEEP_MS:-1}
+      FRONTEND_ADAPTER_RECORDING_MAX_EVENTS: ${FRONTEND_ADAPTER_RECORDING_MAX_EVENTS:-0}
+    networks:
+      - cluster_net
+    ports:
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-8090}:8090"
+    volumes:
+      - ./recordings:/app/recordings:ro
+    shm_size: "512mb"
+    command: >
+      sh -c "java -cp /app/app.jar edu.illinois.group8.frontend.FrontendAdapterMain"
 
   frontend-adapter:
     build: .
