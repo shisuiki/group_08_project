@@ -8,6 +8,7 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Objects;
 
 public final class KalshiIngressEnvelope {
     private static final ObjectMapper MAPPER = new JsonCanonicalSerializer().mapper();
@@ -103,8 +104,18 @@ public final class KalshiIngressEnvelope {
     }
 
     public static KalshiIngressEnvelope parse(byte[] wirePayloadBytes, long fallbackReceiveTsNs) {
+        return parse(wirePayloadBytes, 0, wirePayloadBytes.length, fallbackReceiveTsNs);
+    }
+
+    public static KalshiIngressEnvelope parse(
+        byte[] wirePayloadBytes,
+        int offset,
+        int length,
+        long fallbackReceiveTsNs
+    ) {
+        Objects.checkFromIndexSize(offset, length, wirePayloadBytes.length);
         try {
-            JsonNode root = MAPPER.readTree(wirePayloadBytes);
+            JsonNode root = MAPPER.readTree(wirePayloadBytes, offset, length);
             KalshiIngressEnvelope envelope = parseEnvelope(root, fallbackReceiveTsNs);
             if (envelope != null) {
                 return envelope;
@@ -112,7 +123,7 @@ public final class KalshiIngressEnvelope {
         } catch (IOException ignored) {
         }
         return new KalshiIngressEnvelope(
-            new String(wirePayloadBytes, StandardCharsets.UTF_8),
+            new String(wirePayloadBytes, offset, length, StandardCharsets.UTF_8),
             fallbackReceiveTsNs,
             null,
             null,

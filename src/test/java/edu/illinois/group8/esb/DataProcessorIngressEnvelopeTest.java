@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -96,6 +97,40 @@ class DataProcessorIngressEnvelopeTest {
 
         MarketTrade trade = assertInstanceOf(MarketTrade.class, publisher.events().get(1));
         assertEquals(123_456_789L, trade.metadata().ingestTsNs());
+        Map<String, String> backendKalshiLabels = BackendMetrics.labels("service", "backend", "source", "kalshi");
+        assertEquals(1L, metrics.get("backend_ws_messages_total", backendKalshiLabels));
+        assertEquals(envelopedMessage.length, metrics.get("backend_ws_bytes_total", backendKalshiLabels));
+        assertEquals(1L, metrics.get("backend_parser_messages_total", backendKalshiLabels));
+        assertEquals(1L, metrics.get("processor.raw_events"));
+    }
+
+    @Test
+    void paddedByteArrayEnvelopeSliceParsesAndCountsLogicalWireBytes() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        BackendMetrics metrics = new BackendMetrics();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            publisher,
+            metrics
+        );
+        byte[] envelopedMessage = KalshiIngressEnvelope.wrapBytes(
+            TRADE_MESSAGE,
+            123_456_789L,
+            Instant.parse("2026-05-08T00:00:00Z"),
+            "live-1",
+            null
+        );
+        byte[] paddedMessage = new byte[envelopedMessage.length + 9];
+        Arrays.fill(paddedMessage, (byte) '#');
+        int offset = 4;
+        System.arraycopy(envelopedMessage, 0, paddedMessage, offset, envelopedMessage.length);
+
+        processor.processMessage(paddedMessage, offset, envelopedMessage.length);
+
+        MarketTrade trade = assertInstanceOf(MarketTrade.class, publisher.events().get(1));
+        assertEquals(123_456_789L, trade.metadata().ingestTsNs());
+        assertEquals("M", trade.metadata().marketTicker());
         Map<String, String> backendKalshiLabels = BackendMetrics.labels("service", "backend", "source", "kalshi");
         assertEquals(1L, metrics.get("backend_ws_messages_total", backendKalshiLabels));
         assertEquals(envelopedMessage.length, metrics.get("backend_ws_bytes_total", backendKalshiLabels));

@@ -45,6 +45,7 @@ public class ESBClusteredService implements ClusteredService {
     private Thread clientThread;
     private final Supplier<DbWriterConfig> dbWriterConfigSupplier;
     private final BiFunction<DbWriterConfig, BackendMetrics, AsyncDbWriter> dbWriterFactory;
+    private byte[] sessionMessageScratch = new byte[0];
 
     public ESBClusteredService(String aeronDirName, String hostname) {
         this(aeronDirName, hostname, DbWriterConfig::fromEnvironment, AsyncDbWriterFactory::create);
@@ -60,6 +61,11 @@ public class ESBClusteredService implements ClusteredService {
         this.hostname = hostname;
         this.dbWriterConfigSupplier = Objects.requireNonNull(dbWriterConfigSupplier, "dbWriterConfigSupplier");
         this.dbWriterFactory = Objects.requireNonNull(dbWriterFactory, "dbWriterFactory");
+    }
+
+    ESBClusteredService(String aeronDirName, String hostname, DataProcessor processor) {
+        this(aeronDirName, hostname);
+        this.processor = Objects.requireNonNull(processor, "processor");
     }
     
     private void loadSnapshot(final Cluster cluster, final Image snapshotImage) {
@@ -146,10 +152,18 @@ public class ESBClusteredService implements ClusteredService {
             return;
         }
         
-        byte[] messageBytes = new byte[length];
-        buffer.getBytes(offset, messageBytes);
+        byte[] messageBytes = ensureSessionMessageScratch(length);
+        buffer.getBytes(offset, messageBytes, 0, length);
 
-        processor.processMessage(messageBytes);
+        // DataProcessor synchronously parses the borrowed slice and does not retain this scratch buffer.
+        processor.processMessage(messageBytes, 0, length);
+    }
+
+    private byte[] ensureSessionMessageScratch(int length) {
+        if (sessionMessageScratch.length < length) {
+            sessionMessageScratch = new byte[length];
+        }
+        return sessionMessageScratch;
     }
 
     @Override

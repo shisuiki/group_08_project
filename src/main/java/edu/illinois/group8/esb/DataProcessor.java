@@ -159,8 +159,13 @@ public class DataProcessor {
     }
 
     public void processMessage(byte[] messageBytes) {
-        long parseStartTsNs = recordBackendIngress(messageBytes.length);
-        processIngress(KalshiIngressEnvelope.parse(messageBytes, parseStartTsNs), parseStartTsNs);
+        processMessage(messageBytes, 0, messageBytes.length);
+    }
+
+    public void processMessage(byte[] messageBytes, int offset, int length) {
+        Objects.checkFromIndexSize(offset, length, messageBytes.length);
+        long parseStartTsNs = recordBackendIngress(length);
+        processIngress(KalshiIngressEnvelope.parse(messageBytes, offset, length, parseStartTsNs), parseStartTsNs);
     }
 
     private long recordBackendIngress(long byteCount) {
