@@ -41,7 +41,7 @@ demo, import, and debug workflows.
 | Frontend adapter/static chart | current-demo | HTTP polling adapter, startup-bounded market metadata search/catalog support, and TradingView static chart exist; no production realtime WS/SSE frontend or replay controls. |
 | Raw replay | current-basic | Timescale source is default; local NDJSON is explicit import/debug fallback; replay publishes byte[] ingress envelopes. |
 | Recording-capture / S3 archive | legacy/debug | Recorder and S3 sync are explicit capture/archive/import/export paths, not the live source of truth. |
-| Observability | current-basic | Backend/FeaturePlant/streamtap metrics, pure Prometheus/Grafana profile, recorder metrics only with explicit `recording-capture`, CI compose profile gates, and deploy smoke checks exist; alert rules and tracing remain planned. |
+| Observability | current-basic | Backend/FeaturePlant/streamtap metrics, pure Prometheus/Grafana profile, recorder metrics only with explicit `recording-capture`, CI compose gates, exact-SHA EC2 deploy, candidate prebuild, last-success rollback state, and deploy smoke checks exist; dependency scanning, alert rules, and tracing remain planned. |
 | Pricing model | planned | Not present as a shipped runtime feature. |
 | Arb scanner | planned | Not present as a shipped runtime feature. |
 | Semantic matching / ontology | planned | Not present as a shipped runtime feature. |

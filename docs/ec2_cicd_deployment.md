@@ -106,7 +106,17 @@ The workflow bootstraps an Amazon Linux host by installing:
 - `docker`
 - Docker Compose plugin
 
-It then clones or resets the repo at `DEPLOY_PATH`, writes runtime secrets into `DEPLOY_PATH/secrets`, writes `.env`, and starts the configured Docker Compose profile.
+It checks out the exact tested workflow SHA at `DEPLOY_PATH`, writes runtime
+secrets into `DEPLOY_PATH/secrets`, uploads the candidate environment as
+`.env.next`, validates and builds the candidate Compose profile before stopping
+the current services, then promotes `.env.next` to `.env` and starts the
+configured profile. A successful deploy records `.deploy-state/last_success.ref`
+and `.deploy-state/last_success.env` after the health smoke check passes.
+
+If candidate deploy or health smoke fails, the rollback gate restores the last
+successful ref and env when present, redeploys and smokes that previous state,
+then still fails the workflow for operator review. First deploys or hosts with
+no last-success state log that rollback is unavailable.
 
 ## Optional EC2 PTP Clock
 

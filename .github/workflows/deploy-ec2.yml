@@ -41,6 +41,8 @@ jobs:
           sh -n scripts/db-primary-demo-seed.sh
           bash -n scripts/db-primary-demo-smoke.sh
           sh -n scripts/db-primary-demo-smoke.sh
+          bash -n scripts/ec2-compose-rollback-gate.sh
+          sh -n scripts/ec2-compose-rollback-gate.sh
           bash -n scripts/validate-compose-profiles.sh
           sh -n scripts/validate-compose-profiles.sh
 
@@ -213,17 +215,27 @@ jobs:
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "bash -s" <<REMOTE
           set -euo pipefail
           APP_DIR="$DEPLOY_PATH"
+          TARGET_SHA="${GITHUB_SHA}"
           sudo mkdir -p "\$APP_DIR"
           sudo chown "$EC2_USER:$EC2_USER" "\$APP_DIR"
 
           if [ -d "\$APP_DIR/.git" ]; then
             git -C "\$APP_DIR" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
             git -C "\$APP_DIR" fetch --prune origin
-            git -C "\$APP_DIR" checkout main
-            git -C "\$APP_DIR" reset --hard origin/main
+            git -C "\$APP_DIR" checkout --detach "\$TARGET_SHA"
+            git -C "\$APP_DIR" reset --hard "\$TARGET_SHA"
           else
             sudo find "\$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-            git clone --branch main "https://github.com/${GITHUB_REPOSITORY}.git" "\$APP_DIR"
+            git clone "https://github.com/${GITHUB_REPOSITORY}.git" "\$APP_DIR"
+            git -C "\$APP_DIR" fetch --prune origin
+            git -C "\$APP_DIR" checkout --detach "\$TARGET_SHA"
+            git -C "\$APP_DIR" reset --hard "\$TARGET_SHA"
+          fi
+
+          current_sha="\$(git -C "\$APP_DIR" rev-parse HEAD)"
+          if [ "\$current_sha" != "\$TARGET_SHA" ]; then
+            echo "EC2 checkout mismatch: got \$current_sha expected \$TARGET_SHA" >&2
+            exit 1
           fi
 
           sudo mkdir -p "\$APP_DIR/secrets" "\$APP_DIR/logs" "\$APP_DIR/recordings"
@@ -356,73 +368,22 @@ jobs:
           BACKEND_START_DEMO_CLIENT=false
           EOF
 
-          scp -i ~/.ssh/ec2_key deploy.env "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/.env"
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+          scp -i ~/.ssh/ec2_key deploy.env "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/.env.next"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "chmod 600 '$DEPLOY_PATH/.env.next'"
 
-      - name: Deploy Docker Compose stack
-        run: |
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile cluster-live --profile recording-capture --profile observability --profile featureplant --profile raw-replay --profile historical-backfill down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
-
-      - name: Smoke test deployed health endpoints
+      - name: Deploy Docker Compose stack with rollback gate
         run: |
           printf -v q_deploy_path '%q' "$DEPLOY_PATH"
           printf -v q_deploy_profile '%q' "$DEPLOY_PROFILE"
           printf -v q_wsclient_metrics_host_port '%q' "$WSCLIENT_METRICS_HOST_PORT"
           printf -v q_stream_tap_host_port '%q' "$STREAM_TAP_HOST_PORT"
           printf -v q_wsclient_start_delay_seconds '%q' "$WSCLIENT_START_DELAY_SECONDS"
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "DEPLOY_PATH=$q_deploy_path DEPLOY_PROFILE=$q_deploy_profile WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds bash -s" <<'REMOTE'
-          set -euo pipefail
-
-          if [ "$DEPLOY_PROFILE" != "cluster-live" ]; then
-            echo "Skipping cluster-live health smoke checks for DEPLOY_PROFILE=$DEPLOY_PROFILE."
-            exit 0
-          fi
-
-          cd "$DEPLOY_PATH"
-
-          wsclient_url="http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT:-8091}/health"
-          streamtap_url="http://127.0.0.1:${STREAM_TAP_HOST_PORT:-8080}/health"
-          start_delay="${WSCLIENT_START_DELAY_SECONDS:-20}"
-          if ! [[ "$start_delay" =~ ^[0-9]+$ ]]; then
-            start_delay=20
-          fi
-          if [ "$start_delay" -gt 120 ]; then
-            start_delay=120
-          fi
-
-          interval_seconds=5
-          timeout_seconds=$((start_delay + 120))
-          attempts=$(((timeout_seconds + interval_seconds - 1) / interval_seconds))
-          wsclient_ok=0
-          streamtap_ok=0
-
-          for attempt in $(seq 1 "$attempts"); do
-            if [ "$wsclient_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$wsclient_url" >/dev/null 2>&1; then
-              echo "wsclient health check passed: $wsclient_url"
-              wsclient_ok=1
-            fi
-            if [ "$streamtap_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$streamtap_url" >/dev/null 2>&1; then
-              echo "streamtap health check passed: $streamtap_url"
-              streamtap_ok=1
-            fi
-            if [ "$wsclient_ok" -eq 1 ] && [ "$streamtap_ok" -eq 1 ]; then
-              exit 0
-            fi
-
-            echo "Health checks pending ($attempt/$attempts): wsclient=$wsclient_ok streamtap=$streamtap_ok"
-            if [ "$attempt" -lt "$attempts" ]; then
-              sleep "$interval_seconds"
-            fi
-          done
-
-          echo "Health smoke check failed after ${timeout_seconds}s." >&2
-          echo "Docker Compose status:" >&2
-          sudo docker compose --env-file .env --profile "$DEPLOY_PROFILE" ps --all >&2 || true
-          echo "Recent wsclient/streamtap logs:" >&2
-          sudo docker compose --env-file .env --profile "$DEPLOY_PROFILE" logs --tail=120 wsclient streamtap >&2 || true
-          exit 1
-          REMOTE
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
+            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds sh scripts/ec2-compose-rollback-gate.sh"
 
       - name: Show service status
+        if: always()
         run: |
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' ps"
+          printf -v q_deploy_path '%q' "$DEPLOY_PATH"
+          printf -v q_deploy_profile '%q' "$DEPLOY_PROFILE"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd $q_deploy_path && sudo docker compose --env-file .env --profile $q_deploy_profile ps" || true

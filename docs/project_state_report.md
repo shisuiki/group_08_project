@@ -344,15 +344,19 @@ Current:
 - CI checks observability service-list boundaries: pure observability profiles
   exclude `stream-recorder`/`s3-recording-sync`, while `recording-capture`
   includes them.
-- The deploy job has bounded `cluster-live` HTTP health smoke checks for
-  `wsclient` metrics and `streamtap`.
+- The deploy job checks out the exact tested SHA on EC2, uploads a candidate
+  `.env.next`, validates and builds the candidate profile before stopping
+  current services, then runs bounded `cluster-live` HTTP health smoke checks
+  for `wsclient` metrics and `streamtap`.
+- Successful EC2 deploys record last-success ref/env state. Candidate failures
+  attempt to restore and smoke that previous state, while the workflow still
+  fails for operator review.
 - Disabled live network tests exist for Kalshi wrapper.
 - EC2 deploy workflow exists.
 
 Gaps:
 
 - no dependency vulnerability gate
-- no deploy rollback gate
 
 ## Security And Operations Risks
 
@@ -426,9 +430,10 @@ Do not demo as completed:
    frontend demo expectations.
 3. Keep README run commands for `single-node-local`, raw replay, DB seed, and
    frontend `feature_outputs` mode current.
-4. Add remaining CI gates: dependency scanning and rollback checks. `mvn test`,
-   `mvn package`, Docker build, compose config validation, and cluster-live
-   health smoke checks already exist.
+4. Add remaining CI gates such as dependency scanning. `mvn test`,
+   `mvn package`, Docker build, compose config validation, exact-SHA deploy,
+   candidate prebuild, last-success rollback state, and cluster-live health
+   smoke checks already exist.
 5. Extend health smoke checks beyond `cluster-live` only when the target profile
    has stable HTTP endpoints.
 6. Keep host-published HTTP/admin/data/metrics/cluster ports loopback by default

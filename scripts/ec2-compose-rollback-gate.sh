@@ -1,0 +1,217 @@
+#!/bin/sh
+set -eu
+
+DEPLOY_PROFILE="${DEPLOY_PROFILE:-cluster-live}"
+CANDIDATE_ENV_FILE="${CANDIDATE_ENV_FILE:-.env.next}"
+COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:-.env}"
+DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-.deploy-state}"
+WSCLIENT_METRICS_HOST_PORT="${WSCLIENT_METRICS_HOST_PORT:-8091}"
+STREAM_TAP_HOST_PORT="${STREAM_TAP_HOST_PORT:-8080}"
+WSCLIENT_START_DELAY_SECONDS="${WSCLIENT_START_DELAY_SECONDS:-20}"
+
+down_all_profiles() {
+    sudo docker compose --env-file "$1" \
+        --profile cluster-live \
+        --profile recording-capture \
+        --profile observability \
+        --profile featureplant \
+        --profile raw-replay \
+        --profile historical-backfill \
+        down --remove-orphans
+}
+
+compose_profile() {
+    env_file="$1"
+    shift
+    sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" "$@"
+}
+
+log() {
+    printf '%s\n' "$*"
+}
+
+diagnose_profile() {
+    env_file="$1"
+    log "Docker Compose status for DEPLOY_PROFILE=$DEPLOY_PROFILE:"
+    sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" ps --all >&2 || true
+    if [ "$DEPLOY_PROFILE" = "cluster-live" ]; then
+        log "Recent wsclient/streamtap logs:"
+        sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 wsclient streamtap >&2 || true
+    fi
+}
+
+numeric_or_default() {
+    value="$1"
+    fallback="$2"
+    case "$value" in
+        ''|*[!0-9]*) printf '%s\n' "$fallback" ;;
+        *) printf '%s\n' "$value" ;;
+    esac
+}
+
+cluster_live_health_smoke() {
+    if [ "$DEPLOY_PROFILE" != "cluster-live" ]; then
+        log "Skipping cluster-live health smoke checks for DEPLOY_PROFILE=$DEPLOY_PROFILE."
+        return 0
+    fi
+
+    wsclient_url="http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health"
+    streamtap_url="http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"
+    start_delay="$(numeric_or_default "$WSCLIENT_START_DELAY_SECONDS" 20)"
+    if [ "$start_delay" -gt 120 ]; then
+        start_delay=120
+    fi
+
+    interval_seconds=5
+    timeout_seconds=$((start_delay + 120))
+    attempts=$(((timeout_seconds + interval_seconds - 1) / interval_seconds))
+    attempt=1
+    wsclient_ok=0
+    streamtap_ok=0
+
+    while [ "$attempt" -le "$attempts" ]; do
+        if [ "$wsclient_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$wsclient_url" >/dev/null 2>&1; then
+            log "wsclient health check passed: $wsclient_url"
+            wsclient_ok=1
+        fi
+        if [ "$streamtap_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$streamtap_url" >/dev/null 2>&1; then
+            log "streamtap health check passed: $streamtap_url"
+            streamtap_ok=1
+        fi
+        if [ "$wsclient_ok" -eq 1 ] && [ "$streamtap_ok" -eq 1 ]; then
+            return 0
+        fi
+
+        log "Health checks pending ($attempt/$attempts): wsclient=$wsclient_ok streamtap=$streamtap_ok"
+        if [ "$attempt" -lt "$attempts" ]; then
+            sleep "$interval_seconds"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    log "Health smoke check failed after ${timeout_seconds}s."
+    return 1
+}
+
+deploy_env() {
+    env_file="$1"
+    candidate="$2"
+
+    log "Validating Docker Compose config for DEPLOY_PROFILE=$DEPLOY_PROFILE."
+    if ! compose_profile "$env_file" config --quiet; then
+        log "Docker Compose config validation failed."
+        return 1
+    fi
+
+    log "Building Docker Compose services for DEPLOY_PROFILE=$DEPLOY_PROFILE before stopping current services."
+    if ! compose_profile "$env_file" build; then
+        log "Docker Compose build failed."
+        return 1
+    fi
+
+    if [ "$candidate" = "true" ]; then
+        cp "$env_file" "$COMPOSE_ENV_FILE"
+        chmod 600 "$COMPOSE_ENV_FILE"
+        env_file="$COMPOSE_ENV_FILE"
+        log "Promoted candidate environment to $COMPOSE_ENV_FILE."
+    fi
+
+    log "Stopping existing Compose services for controlled deploy."
+    if ! down_all_profiles "$env_file"; then
+        log "Docker Compose down failed."
+        return 1
+    fi
+
+    log "Starting DEPLOY_PROFILE=$DEPLOY_PROFILE with prebuilt image."
+    if ! compose_profile "$env_file" up -d --no-build --remove-orphans; then
+        log "Docker Compose up failed."
+        return 1
+    fi
+
+    if ! cluster_live_health_smoke; then
+        diagnose_profile "$env_file"
+        return 1
+    fi
+
+    return 0
+}
+
+record_success() {
+    mkdir -p "$DEPLOY_STATE_DIR"
+    git rev-parse HEAD > "$DEPLOY_STATE_DIR/last_success.ref"
+    cp "$COMPOSE_ENV_FILE" "$DEPLOY_STATE_DIR/last_success.env"
+    chmod 600 "$DEPLOY_STATE_DIR/last_success.env"
+    printf '%s\n' "$DEPLOY_PROFILE" > "$DEPLOY_STATE_DIR/last_success.profile"
+    rm -f "$CANDIDATE_ENV_FILE"
+    log "Recorded last-success deploy state in $DEPLOY_STATE_DIR."
+}
+
+restore_last_success_checkout() {
+    previous_ref="$1"
+    if ! git cat-file -e "${previous_ref}^{commit}" >/dev/null 2>&1; then
+        git fetch --prune origin
+    fi
+    git checkout --detach "$previous_ref"
+    git reset --hard "$previous_ref"
+}
+
+rollback_to_last_success() {
+    ref_file="$DEPLOY_STATE_DIR/last_success.ref"
+    env_file="$DEPLOY_STATE_DIR/last_success.env"
+    if [ ! -s "$ref_file" ] || [ ! -s "$env_file" ]; then
+        log "No last-success deploy state exists; cannot rollback this first/unknown deploy."
+        return 1
+    fi
+
+    previous_ref="$(sed -n '1p' "$ref_file")"
+    if [ -z "$previous_ref" ]; then
+        log "Last-success ref is empty; cannot rollback."
+        return 1
+    fi
+    if [ -s "$DEPLOY_STATE_DIR/last_success.profile" ]; then
+        DEPLOY_PROFILE="$(sed -n '1p' "$DEPLOY_STATE_DIR/last_success.profile")"
+        if [ -z "$DEPLOY_PROFILE" ]; then
+            log "Last-success profile is empty; cannot rollback."
+            return 1
+        fi
+    fi
+
+    log "Rolling back to previous successful ref $previous_ref with DEPLOY_PROFILE=$DEPLOY_PROFILE."
+    if ! restore_last_success_checkout "$previous_ref"; then
+        log "Rollback checkout failed."
+        return 1
+    fi
+
+    cp "$env_file" "$COMPOSE_ENV_FILE"
+    chmod 600 "$COMPOSE_ENV_FILE"
+
+    if ! deploy_env "$COMPOSE_ENV_FILE" false; then
+        log "Rollback deploy failed."
+        return 1
+    fi
+
+    log "Rollback succeeded; candidate failed but previous deploy was restored."
+    return 0
+}
+
+if [ ! -f "$CANDIDATE_ENV_FILE" ]; then
+    log "Candidate env file is missing: $CANDIDATE_ENV_FILE"
+    exit 1
+fi
+
+candidate_ref="$(git rev-parse HEAD)"
+log "Deploying candidate ref $candidate_ref with DEPLOY_PROFILE=$DEPLOY_PROFILE."
+
+if deploy_env "$CANDIDATE_ENV_FILE" true; then
+    record_success
+    log "Candidate deploy succeeded."
+    exit 0
+fi
+
+log "Candidate deploy failed; attempting rollback if last-success state exists."
+if rollback_to_last_success; then
+    exit 1
+fi
+
+log "Candidate deploy failed and rollback was unavailable or unsuccessful."
+exit 1
