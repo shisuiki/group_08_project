@@ -41,7 +41,7 @@ demo, import, and debug workflows.
 | Frontend adapter/static chart | current-demo | HTTP polling adapter and TradingView static chart exist; no production realtime WS/SSE frontend or replay controls. |
 | Raw replay | current-basic | Timescale source is default; local NDJSON is explicit import/debug fallback; replay publishes byte[] ingress envelopes. |
 | Recording-capture / S3 archive | legacy/debug | Recorder and S3 sync are explicit capture/archive/import/export paths, not the live source of truth. |
-| Observability | current-basic | Backend/FeaturePlant/streamtap metrics, pure Prometheus/Grafana profile, recorder metrics only with explicit `recording-capture`, and CI deploy smoke checks exist; alert rules and tracing remain planned. |
+| Observability | current-basic | Backend/FeaturePlant/streamtap metrics, pure Prometheus/Grafana profile, recorder metrics only with explicit `recording-capture`, CI compose profile gates, and deploy smoke checks exist; alert rules and tracing remain planned. |
 | Pricing model | planned | Not present as a shipped runtime feature. |
 | Arb scanner | planned | Not present as a shipped runtime feature. |
 | Semantic matching / ontology | planned | Not present as a shipped runtime feature. |
@@ -128,7 +128,7 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 ## How to Run
 1. Copy `.env.example` to `.env`.
 2. For live ingestion, set `KALSHI_KEY_ID`, `KALSHI_KEY_HOST_PATH`, and either `KALSHI_MARKET_TICKERS`, `KALSHI_MARKET_SERIES_TICKER`, or `KALSHI_MARKET_SELECTION_MODE=open_markets`.
-3. Use `docker compose --profile cluster-live up --build` for the three-node live stack with `wsclient`; use `docker compose --profile single-node-local up --build` only for a local node0 smoke check.
+3. Use `docker compose --profile cluster-live up --build` for the three-node live stack with `wsclient` and `streamtap`; use `docker compose --profile single-node-local up --build` only for a local node0 smoke check.
 4. For local DB smoke tests, run `docker compose --profile local-db up -d timescaledb` and `docker compose --profile local-db run --rm db-migrate`; live/EC2 deployments should still use their configured external DB URL.
 5. Raw replay defaults to DB/Timescale; use `RAW_REPLAY_SOURCE=local-ndjson` only for explicit fixture/import/debug mode.
 6. Pure observability is available with `docker compose --profile observability up --build`; it starts Prometheus/Grafana and streamtap only, without `stream-recorder`, S3 sync, or `recordings/` writes. Use `recording-capture` explicitly for NDJSON capture/archive runs.

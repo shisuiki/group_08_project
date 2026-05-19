@@ -28,12 +28,18 @@ jobs:
       - name: Run Maven tests
         run: mvn -B test
 
-      - name: Validate Docker Compose profiles
+      - name: Validate shell scripts
         run: |
           set -euo pipefail
-          for profile in cluster-live recording-capture observability; do
-            docker compose --env-file /dev/null --profile "$profile" config --quiet
-          done
+          bash -n scripts/db-primary-demo-seed.sh
+          sh -n scripts/db-primary-demo-seed.sh
+          bash -n scripts/db-primary-demo-smoke.sh
+          sh -n scripts/db-primary-demo-smoke.sh
+          bash -n scripts/validate-compose-profiles.sh
+          sh -n scripts/validate-compose-profiles.sh
+
+      - name: Validate Docker Compose profiles
+        run: scripts/validate-compose-profiles.sh
 
   deploy:
     name: Deploy

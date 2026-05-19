@@ -14,7 +14,10 @@ Sources checked:
 - `docs/backend_runbook.md`
 - `docs/featureplant_runbook.md`
 - `docs/frontend_adapter_runbook.md`
+- `.github/workflows/deploy-ec2.yml`
 - `docker-compose.yml`
+- `scripts/db-primary-demo-seed.sh`
+- `scripts/db-primary-demo-smoke.sh`
 - `src/main/java`
 - `src/test/java`
 
@@ -279,7 +282,7 @@ Legend:
 | Profile | Purpose | Status |
 | --- | --- | --- |
 | `single-node-local` | node0 only | current, not full ingestion stack |
-| `cluster-live` | 3-node cluster + wsclient | current |
+| `cluster-live` | 3-node cluster + wsclient + streamtap | current |
 | `recording-capture` | single-node capture + recorder/S3 sync | current |
 | `raw-replay` | raw replay CLI | current-basic |
 | `historical-backfill` | REST backfill CLI | current-basic |
@@ -330,8 +333,13 @@ Current:
 - 43 test files under `src/test/java`.
 - GitHub Actions runs `mvn -B test` and uses Node 24-native
   `actions/checkout@v6` and `actions/setup-java@v5`.
-- CI validates `docker compose config` for `cluster-live`,
-  `recording-capture`, and `observability` before deploy.
+- CI runs shell syntax checks for the DB-primary demo scripts and validates
+  `docker compose config` for `cluster-live`, `single-node-local`,
+  `recording-capture`, `observability`, `local-db` + `frontend-integration`,
+  `historical-backfill`, `featureplant`, and `raw-replay`.
+- CI checks observability service-list boundaries: pure observability profiles
+  exclude `stream-recorder`/`s3-recording-sync`, while `recording-capture`
+  includes them.
 - The deploy job has bounded `cluster-live` HTTP health smoke checks for
   `wsclient` metrics and `streamtap`.
 - Disabled live network tests exist for Kalshi wrapper.
