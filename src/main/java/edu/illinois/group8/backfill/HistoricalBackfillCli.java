@@ -4,6 +4,7 @@ import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.KalshiRestParser;
 import edu.illinois.group8.recorder.CanonicalRecordingWriter;
 import edu.illinois.group8.storage.db.JdbcAcceptedEventStore;
+import edu.illinois.group8.storage.db.JdbcMarketMetadataStore;
 import edu.illinois.group8.storage.db.JdbcRawRestResponseStore;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 
@@ -23,6 +24,7 @@ public final class HistoricalBackfillCli {
             new KalshiRestParser(),
             buildCanonicalSink(config, metrics),
             buildRawRestSink(config),
+            buildMarketMetadataSink(config),
             metrics
         );
         HistoricalBackfillSummary summary = service.run(config);
@@ -72,6 +74,21 @@ public final class HistoricalBackfillCli {
             case RECORDING -> new RawRestResponseWriter(config.rawRestOutputRoot(), config.partitionGranularity());
             case NONE -> null;
         };
+    }
+
+    static MarketMetadataBackfillSink buildMarketMetadataSink(HistoricalBackfillConfig config) {
+        config.validate();
+        if (config.dryRun()) {
+            return metadata -> {};
+        }
+        if (config.dbUrl() == null || config.dbUrl().isBlank()) {
+            return null;
+        }
+        return new DbMarketMetadataBackfillSink(JdbcMarketMetadataStore.fromDriverManager(
+            config.dbUrl(),
+            config.dbUser(),
+            config.dbPassword()
+        ));
     }
 
     static RawRestResponseWriter buildRawRestWriter(HistoricalBackfillConfig config) {

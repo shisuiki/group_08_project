@@ -118,8 +118,9 @@ legacy/debug/export canonical NDJSON under `recordings/canonical`.
 ## Market Metadata
 
 `market_metadata` is the DB table for market/event/series metadata discovered
-through REST workflows. The schema and JDBC upsert boundary exist, but
-historical backfill/runtime writes are not wired in the current code path.
+through REST workflows. Historical REST market discovery writes this table when
+a DB URL is configured. Live/runtime writes are not wired in the current code
+path.
 
 ```text
 market_ticker text primary key

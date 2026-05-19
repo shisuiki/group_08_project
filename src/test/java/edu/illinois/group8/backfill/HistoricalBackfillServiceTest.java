@@ -2,6 +2,8 @@ package edu.illinois.group8.backfill;
 
 import edu.illinois.group8.storage.db.AcceptedEventStore;
 import edu.illinois.group8.storage.db.CanonicalDbEvent;
+import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.MarketMetadataStore;
 import edu.illinois.group8.storage.db.RawRestDbResponse;
 import edu.illinois.group8.storage.db.RawRestResponseStore;
 import edu.illinois.group8.storage.db.RawWsDbEvent;
@@ -104,11 +106,13 @@ class HistoricalBackfillServiceTest {
     void dbTargetsStoreCanonicalBatchAndRawRestResponsesWithoutFilesByDefault() throws Exception {
         CapturingAcceptedEventStore store = new CapturingAcceptedEventStore();
         CapturingRawRestResponseStore rawRestStore = new CapturingRawRestResponseStore();
+        CapturingMarketMetadataStore marketMetadataStore = new CapturingMarketMetadataStore();
         HistoricalBackfillService service = new HistoricalBackfillService(
             new FakeClient(),
             new KalshiRestParser(),
             new DbCanonicalBackfillSink(store),
             new DbRawRestBackfillSink(rawRestStore),
+            new DbMarketMetadataBackfillSink(marketMetadataStore),
             new BackendMetrics()
         );
         HistoricalBackfillConfig config = baseConfig(
@@ -132,9 +136,49 @@ class HistoricalBackfillServiceTest {
         assertTrue(rawRestStore.responses.stream().allMatch(response -> response.rawRestResponseId().startsWith("raw_rest_")));
         assertTrue(rawRestStore.responses.stream().allMatch(response -> response.payloadSha256().length() == 64));
         assertTrue(store.canonicalEvents.stream().anyMatch(event -> "canonical.trade".equals(event.streamName())));
+        assertEquals(1, marketMetadataStore.metadata.size());
+        MarketMetadata metadata = marketMetadataStore.metadata.get(0);
+        assertEquals("M", metadata.marketTicker());
+        assertEquals("EVENT", metadata.eventTicker());
+        assertEquals("SERIES", metadata.seriesTicker());
+        assertEquals("open", metadata.status());
+        assertEquals("{\"settlement\":\"official\"}", metadata.rulesPayload());
+        assertTrue(metadata.marketPayload().contains("\"ticker\":\"M\""));
         try (var paths = Files.walk(tempDir)) {
             assertEquals(1L, paths.count(), "default DB target must not create recording files");
         }
+    }
+
+    @Test
+    void dryRunParsesButDoesNotWriteRawCanonicalOrMarketMetadata() {
+        CapturingAcceptedEventStore store = new CapturingAcceptedEventStore();
+        CapturingRawRestResponseStore rawRestStore = new CapturingRawRestResponseStore();
+        CapturingMarketMetadataStore marketMetadataStore = new CapturingMarketMetadataStore();
+        HistoricalBackfillService service = new HistoricalBackfillService(
+            new FakeClient(),
+            new KalshiRestParser(),
+            new DbCanonicalBackfillSink(store),
+            new DbRawRestBackfillSink(rawRestStore),
+            new DbMarketMetadataBackfillSink(marketMetadataStore),
+            new BackendMetrics()
+        );
+        HistoricalBackfillConfig config = baseConfig(
+            HistoricalBackfillConfig.CanonicalTarget.DB,
+            HistoricalBackfillConfig.RawRestTarget.DB,
+            "",
+            false,
+            true
+        );
+
+        HistoricalBackfillSummary summary = service.run(config);
+
+        assertEquals(2L, summary.restResponsesFetched());
+        assertEquals(0L, summary.rawResponsesRecorded());
+        assertEquals(4L, summary.canonicalEventsParsed());
+        assertEquals(0L, summary.canonicalEventsRecorded());
+        assertEquals(0, rawRestStore.responses.size());
+        assertEquals(0, store.canonicalEvents.size());
+        assertEquals(0, marketMetadataStore.metadata.size());
     }
 
     @Test
@@ -176,6 +220,7 @@ class HistoricalBackfillServiceTest {
         assertEquals(Path.of("/app/recordings/raw-rest"), config.rawRestOutputRoot());
         assertNull(HistoricalBackfillCli.buildRawRestWriter(config));
         assertNotNull(HistoricalBackfillCli.buildRawRestSink(config));
+        assertNotNull(HistoricalBackfillCli.buildMarketMetadataSink(config));
     }
 
     @Test
@@ -190,6 +235,7 @@ class HistoricalBackfillServiceTest {
         HistoricalBackfillConfig dryRun = HistoricalBackfillConfig.from(Map.of("HISTORICAL_BACKFILL_DRY_RUN", "true"));
         dryRun.validate();
         assertNotNull(HistoricalBackfillCli.buildCanonicalSink(dryRun, new BackendMetrics()));
+        assertNotNull(HistoricalBackfillCli.buildMarketMetadataSink(dryRun));
     }
 
     @Test
@@ -234,6 +280,7 @@ class HistoricalBackfillServiceTest {
         assertEquals("jdbc:postgresql://backfill/kalshi", override.dbUrl());
         assertEquals("backfill", override.dbUser());
         assertEquals("backfill-secret", override.dbPassword());
+        assertInstanceOf(DbMarketMetadataBackfillSink.class, HistoricalBackfillCli.buildMarketMetadataSink(override));
     }
 
     @Test
@@ -251,6 +298,7 @@ class HistoricalBackfillServiceTest {
             HistoricalBackfillCli.buildCanonicalSink(config, new BackendMetrics())
         );
         assertNotNull(HistoricalBackfillCli.buildRawRestWriter(config));
+        assertNull(HistoricalBackfillCli.buildMarketMetadataSink(config));
     }
 
     private HistoricalBackfillConfig baseConfig(
@@ -266,6 +314,16 @@ class HistoricalBackfillServiceTest {
         HistoricalBackfillConfig.RawRestTarget rawRestTarget,
         String dbUrl,
         boolean rawRestEnabled
+    ) {
+        return baseConfig(target, rawRestTarget, dbUrl, rawRestEnabled, false);
+    }
+
+    private HistoricalBackfillConfig baseConfig(
+        HistoricalBackfillConfig.CanonicalTarget target,
+        HistoricalBackfillConfig.RawRestTarget rawRestTarget,
+        String dbUrl,
+        boolean rawRestEnabled,
+        boolean dryRun
     ) {
         return new HistoricalBackfillConfig(
             "https://api.elections.kalshi.com",
@@ -294,7 +352,7 @@ class HistoricalBackfillServiceTest {
             true,
             false,
             false,
-            false,
+            dryRun,
             TimestampSource.from("system_nano", "/dev/null"),
             StreamRecordingWriter.PartitionGranularity.MINUTE
         ).validate();
@@ -322,11 +380,20 @@ class HistoricalBackfillServiceTest {
         }
     }
 
+    private static final class CapturingMarketMetadataStore implements MarketMetadataStore {
+        private final List<MarketMetadata> metadata = new ArrayList<>();
+
+        @Override
+        public void upsertMarketMetadata(MarketMetadata metadata) {
+            this.metadata.add(metadata);
+        }
+    }
+
     private static final class FakeClient implements HistoricalBackfillClient {
         @Override
         public String getMarkets(RequestParameters params) {
             return """
-                {"markets":[{"ticker":"M","market_id":"mid","status":"open","updated_time":"2026-05-08T00:00:00Z","last_price":56,"yes_bid":55,"yes_ask":57,"volume":10,"open_interest":20}],"cursor":""}
+                {"markets":[{"ticker":"M","market_id":"mid","event_ticker":"EVENT","series_ticker":"SERIES","status":"open","updated_time":"2026-05-08T00:00:00Z","open_time":"2026-05-08T00:00:00Z","close_time":"2026-05-09T00:00:00Z","settlement_time":"2026-05-10T00:00:00Z","rules":{"settlement":"official"},"last_price":56,"yes_bid":55,"yes_ask":57,"volume":10,"open_interest":20}],"cursor":""}
                 """;
         }
 

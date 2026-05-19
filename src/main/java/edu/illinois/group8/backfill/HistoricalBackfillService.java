@@ -6,6 +6,7 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.CanonicalParseResult;
 import edu.illinois.group8.parser.KalshiRestParser;
+import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.wrapper.RequestParameters;
 
 import java.io.IOException;
@@ -19,6 +20,8 @@ public final class HistoricalBackfillService {
     private final KalshiRestParser parser;
     private final CanonicalBackfillSink canonicalSink;
     private final RawRestBackfillSink rawRestSink;
+    private final MarketMetadataBackfillSink marketMetadataSink;
+    private final MarketMetadataMapper marketMetadataMapper;
     private final BackendMetrics metrics;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
 
@@ -29,10 +32,23 @@ public final class HistoricalBackfillService {
         RawRestBackfillSink rawRestSink,
         BackendMetrics metrics
     ) {
+        this(client, parser, canonicalSink, rawRestSink, null, metrics);
+    }
+
+    public HistoricalBackfillService(
+        HistoricalBackfillClient client,
+        KalshiRestParser parser,
+        CanonicalBackfillSink canonicalSink,
+        RawRestBackfillSink rawRestSink,
+        MarketMetadataBackfillSink marketMetadataSink,
+        BackendMetrics metrics
+    ) {
         this.client = client;
         this.parser = parser;
         this.canonicalSink = canonicalSink;
         this.rawRestSink = rawRestSink;
+        this.marketMetadataSink = marketMetadataSink;
+        this.marketMetadataMapper = new MarketMetadataMapper();
         this.metrics = metrics;
     }
 
@@ -190,12 +206,16 @@ public final class HistoricalBackfillService {
                 rawRestSink.write(endpoint, ticker, rawPayload, fetchTsNs, fetchWallTs);
                 counters.rawResponsesRecorded++;
             }
+            List<MarketMetadata> marketMetadata = marketMetadata(endpoint, rawPayload);
             CanonicalParseResult result = parserCall.parse(rawPayload);
             var canonicalEvents = result.canonicalEvents();
             counters.canonicalEventsParsed += canonicalEvents.size();
             if (!config.dryRun() && !canonicalEvents.isEmpty()) {
                 canonicalSink.writeBatch(canonicalEvents, fetchTsNs);
                 counters.canonicalEventsRecorded += canonicalEvents.size();
+            }
+            if (!config.dryRun() && !marketMetadata.isEmpty()) {
+                marketMetadataSink.writeBatch(marketMetadata);
             }
             for (var event : canonicalEvents) {
                 metrics.increment("historical_backfill_canonical_events_total",
@@ -208,6 +228,13 @@ public final class HistoricalBackfillService {
         }
     }
 
+    private List<MarketMetadata> marketMetadata(String endpoint, String rawPayload) {
+        if (!"rest.markets".equals(endpoint) || marketMetadataSink == null) {
+            return List.of();
+        }
+        return marketMetadataMapper.fromMarketsResponse(rawPayload);
+    }
+
     private List<String> extractTickers(String rawPayload) {
         try {
             JsonNode markets = mapper.readTree(rawPayload).path("markets");
@@ -216,7 +243,7 @@ public final class HistoricalBackfillService {
             }
             List<String> tickers = new ArrayList<>();
             for (JsonNode market : markets) {
-                String ticker = market.path("ticker").asText("");
+                String ticker = firstText(market, "ticker", "market_ticker");
                 if (!ticker.isBlank()) {
                     tickers.add(ticker);
                 }
@@ -233,6 +260,16 @@ public final class HistoricalBackfillService {
         } catch (IOException e) {
             return "";
         }
+    }
+
+    private static String firstText(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            String value = node.path(fieldName).asText("");
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private static List<String> limitTickers(LinkedHashSet<String> tickers, int maxTickers) {

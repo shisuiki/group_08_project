@@ -172,6 +172,10 @@ Required columns:
 - `market_payload jsonb not null`
 - `updated_at timestamptz not null default now()`
 
+Status: schema, JDBC store boundary, REST markets mapper, and historical
+backfill DB upsert wiring are landed. Live/runtime metadata writes are not
+wired.
+
 ### `feature_outputs`
 
 Durable feature store schema and isolated JDBC store boundary.
