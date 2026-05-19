@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 public final class KalshiIngressEnvelope {
@@ -92,20 +93,47 @@ public final class KalshiIngressEnvelope {
     public static KalshiIngressEnvelope parse(String wirePayload, long fallbackReceiveTsNs) {
         try {
             JsonNode root = MAPPER.readTree(wirePayload);
-            JsonNode rawPayload = root.path("raw_payload");
-            if (INGRESS_TYPE.equals(root.path("ingress_type").asText()) && rawPayload.isTextual()) {
-                return new KalshiIngressEnvelope(
-                    rawPayload.asText(),
-                    root.path("receive_ts_ns").isNumber() ? root.path("receive_ts_ns").asLong() : fallbackReceiveTsNs,
-                    root.path("receive_wall_ts").asText(null),
-                    root.path("connection_id").asText(null),
-                    root.path("replay_id").asText(null),
-                    true
-                );
+            KalshiIngressEnvelope envelope = parseEnvelope(root, fallbackReceiveTsNs);
+            if (envelope != null) {
+                return envelope;
             }
         } catch (IOException ignored) {
         }
         return new KalshiIngressEnvelope(wirePayload, fallbackReceiveTsNs, null, null, null, false);
+    }
+
+    public static KalshiIngressEnvelope parse(byte[] wirePayloadBytes, long fallbackReceiveTsNs) {
+        try {
+            JsonNode root = MAPPER.readTree(wirePayloadBytes);
+            KalshiIngressEnvelope envelope = parseEnvelope(root, fallbackReceiveTsNs);
+            if (envelope != null) {
+                return envelope;
+            }
+        } catch (IOException ignored) {
+        }
+        return new KalshiIngressEnvelope(
+            new String(wirePayloadBytes, StandardCharsets.UTF_8),
+            fallbackReceiveTsNs,
+            null,
+            null,
+            null,
+            false
+        );
+    }
+
+    private static KalshiIngressEnvelope parseEnvelope(JsonNode root, long fallbackReceiveTsNs) {
+        JsonNode rawPayload = root.path("raw_payload");
+        if (!INGRESS_TYPE.equals(root.path("ingress_type").asText()) || !rawPayload.isTextual()) {
+            return null;
+        }
+        return new KalshiIngressEnvelope(
+            rawPayload.asText(),
+            root.path("receive_ts_ns").isNumber() ? root.path("receive_ts_ns").asLong() : fallbackReceiveTsNs,
+            root.path("receive_wall_ts").asText(null),
+            root.path("connection_id").asText(null),
+            root.path("replay_id").asText(null),
+            true
+        );
     }
 
     public String rawPayload() {

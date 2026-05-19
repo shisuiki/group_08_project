@@ -19,6 +19,7 @@ import edu.illinois.group8.storage.db.DbWriterStats;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,6 +72,35 @@ class DataProcessorIngressEnvelopeTest {
         assertTrue(metrics.prometheusText().contains(
             "backend_ws_message_age_ms_count{event_type=\"market_trade\",schema_version=\"1\",service=\"backend\",source=\"kalshi\",stream=\"canonical.trade\"} 1\n"
         ));
+    }
+
+    @Test
+    void byteArrayEnvelopeReceiveTimestampBecomesCanonicalIngestTimestampAndCountsWireBytes() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        BackendMetrics metrics = new BackendMetrics();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            publisher,
+            metrics
+        );
+        byte[] envelopedMessage = KalshiIngressEnvelope.wrapBytes(
+            TRADE_MESSAGE,
+            123_456_789L,
+            Instant.parse("2026-05-08T00:00:00Z"),
+            "live-1",
+            null
+        );
+
+        processor.processMessage(envelopedMessage);
+
+        MarketTrade trade = assertInstanceOf(MarketTrade.class, publisher.events().get(1));
+        assertEquals(123_456_789L, trade.metadata().ingestTsNs());
+        Map<String, String> backendKalshiLabels = BackendMetrics.labels("service", "backend", "source", "kalshi");
+        assertEquals(1L, metrics.get("backend_ws_messages_total", backendKalshiLabels));
+        assertEquals(envelopedMessage.length, metrics.get("backend_ws_bytes_total", backendKalshiLabels));
+        assertEquals(1L, metrics.get("backend_parser_messages_total", backendKalshiLabels));
+        assertEquals(1L, metrics.get("processor.raw_events"));
     }
 
     @Test
@@ -175,7 +205,7 @@ class DataProcessorIngressEnvelopeTest {
         assertSame(publisher.events().get(1), writer.serializedCanonicalEvents.get(1).event());
         assertTrue(new String(
             writer.serializedCanonicalEvents.get(1).utf8Json(),
-            java.nio.charset.StandardCharsets.UTF_8
+            StandardCharsets.UTF_8
         ).contains("\"stream_name\":\"canonical.trade\""));
     }
 

@@ -154,10 +154,23 @@ public class DataProcessor {
     }
 
     public void processMessage(String message) {
+        long parseStartTsNs = recordBackendIngress(message.length());
+        processIngress(KalshiIngressEnvelope.parse(message, parseStartTsNs), parseStartTsNs);
+    }
+
+    public void processMessage(byte[] messageBytes) {
+        long parseStartTsNs = recordBackendIngress(messageBytes.length);
+        processIngress(KalshiIngressEnvelope.parse(messageBytes, parseStartTsNs), parseStartTsNs);
+    }
+
+    private long recordBackendIngress(long byteCount) {
         long parseStartTsNs = System.nanoTime();
         backendWsMessages.increment();
-        backendWsBytes.add(message.length());
-        KalshiIngressEnvelope ingress = KalshiIngressEnvelope.parse(message, parseStartTsNs);
+        backendWsBytes.add(byteCount);
+        return parseStartTsNs;
+    }
+
+    private void processIngress(KalshiIngressEnvelope ingress, long parseStartTsNs) {
         CanonicalParseResult parseResult = parser.parseWebSocketMessage(
             ingress.rawPayload(),
             ingress.receiveTsNs(),

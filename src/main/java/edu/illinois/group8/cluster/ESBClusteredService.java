@@ -148,11 +148,8 @@ public class ESBClusteredService implements ClusteredService {
         
         byte[] messageBytes = new byte[length];
         buffer.getBytes(offset, messageBytes);
-        String payload = new String(messageBytes, StandardCharsets.UTF_8);
 
-        // System.out.println("ESB: received message "+payload);
-
-        processor.processMessage(payload);
+        processor.processMessage(messageBytes);
     }
 
     @Override
