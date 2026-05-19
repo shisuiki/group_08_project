@@ -1,6 +1,7 @@
 package edu.illinois.group8.storage.db;
 
 import edu.illinois.group8.canonical.CanonicalEvent;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 
 public interface AsyncDbWriter extends AutoCloseable {
     DbOfferResult offerRaw(RawWsDbEventInput input);
@@ -8,6 +9,10 @@ public interface AsyncDbWriter extends AutoCloseable {
     DbOfferResult offerCanonical(CanonicalDbEvent event);
 
     DbOfferResult offerCanonicalEvent(CanonicalEvent event);
+
+    default DbOfferResult offerSerializedCanonicalEvent(SerializedCanonicalEvent event) {
+        return offerCanonicalEvent(event.event());
+    }
 
     DbWriterStats stats();
 

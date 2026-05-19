@@ -2,12 +2,15 @@ package edu.illinois.group8.esb;
 
 import edu.illinois.group8.book.OrderBookStateManager;
 import edu.illinois.group8.canonical.CanonicalEvent;
+import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.canonical.MarketTrade;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 import edu.illinois.group8.ingress.KalshiIngressEnvelope;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
 import edu.illinois.group8.publication.CollectingEventPublisher;
 import edu.illinois.group8.publication.EventPublisher;
+import edu.illinois.group8.publication.EventPublisher.PublicationResult;
 import edu.illinois.group8.storage.db.AsyncDbWriter;
 import edu.illinois.group8.storage.db.CanonicalDbEvent;
 import edu.illinois.group8.storage.db.CanonicalDbSink;
@@ -143,6 +146,40 @@ class DataProcessorIngressEnvelopeTest {
     }
 
     @Test
+    void canonicalDbSinkReceivesSerializedPayloadAfterPublisherReturns() {
+        RecordingEventPublisher publisher = new RecordingEventPublisher(true, true);
+        RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        writer.beforeOffer = () -> {
+            assertFalse(publisher.inPublish);
+            assertEquals(writer.serializedCanonicalEvents.size() + 1, publisher.returnedCalls);
+        };
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            publisher,
+            new BackendMetrics(),
+            new CanonicalDbSink(writer)
+        );
+
+        processor.processMessage(KalshiIngressEnvelope.wrap(
+            TRADE_MESSAGE,
+            123_456_789L,
+            Instant.parse("2026-05-08T00:00:00Z"),
+            "live-1",
+            null
+        ));
+
+        assertEquals(publisher.events().size(), writer.serializedCanonicalEvents.size());
+        assertEquals(publisher.events().size(), publisher.returnedCalls);
+        assertFalse(publisher.inPublish);
+        assertSame(publisher.events().get(1), writer.serializedCanonicalEvents.get(1).event());
+        assertTrue(new String(
+            writer.serializedCanonicalEvents.get(1).utf8Json(),
+            java.nio.charset.StandardCharsets.UTF_8
+        ).contains("\"stream_name\":\"canonical.trade\""));
+    }
+
+    @Test
     void canonicalDbOfferDropDoesNotAffectPublishSuccessMetric() {
         RecordingEventPublisher publisher = new RecordingEventPublisher(true);
         RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
@@ -199,11 +236,18 @@ class DataProcessorIngressEnvelopeTest {
     private static final class RecordingEventPublisher implements EventPublisher {
         private final List<CanonicalEvent> events = new ArrayList<>();
         private final boolean result;
+        private final boolean returnSerialized;
+        private final JsonCanonicalSerializer serializer = new JsonCanonicalSerializer();
         private boolean inPublish;
         private int returnedCalls;
 
         private RecordingEventPublisher(boolean result) {
+            this(result, false);
+        }
+
+        private RecordingEventPublisher(boolean result, boolean returnSerialized) {
             this.result = result;
+            this.returnSerialized = returnSerialized;
         }
 
         @Override
@@ -215,6 +259,15 @@ class DataProcessorIngressEnvelopeTest {
             return result;
         }
 
+        @Override
+        public PublicationResult publishSerialized(CanonicalEvent event) {
+            if (!returnSerialized) {
+                return EventPublisher.super.publishSerialized(event);
+            }
+            boolean success = publish(event);
+            return new PublicationResult(event, SerializedCanonicalEvent.from(event, serializer), success);
+        }
+
         private List<CanonicalEvent> events() {
             return Collections.unmodifiableList(events);
         }
@@ -222,6 +275,7 @@ class DataProcessorIngressEnvelopeTest {
 
     private static final class RecordingAsyncDbWriter implements AsyncDbWriter {
         private final List<CanonicalEvent> canonicalEvents = new ArrayList<>();
+        private final List<SerializedCanonicalEvent> serializedCanonicalEvents = new ArrayList<>();
         private DbOfferResult canonicalResult = DbOfferResult.ACCEPTED;
         private Runnable beforeOffer = () -> {
         };
@@ -240,6 +294,13 @@ class DataProcessorIngressEnvelopeTest {
         public DbOfferResult offerCanonicalEvent(CanonicalEvent event) {
             beforeOffer.run();
             canonicalEvents.add(event);
+            return canonicalResult;
+        }
+
+        @Override
+        public DbOfferResult offerSerializedCanonicalEvent(SerializedCanonicalEvent event) {
+            beforeOffer.run();
+            serializedCanonicalEvents.add(event);
             return canonicalResult;
         }
 

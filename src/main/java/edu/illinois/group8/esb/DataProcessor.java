@@ -13,6 +13,7 @@ import edu.illinois.group8.parser.CanonicalParseResult;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
 import edu.illinois.group8.publication.AeronEventPublisher;
 import edu.illinois.group8.publication.EventPublisher;
+import edu.illinois.group8.publication.EventPublisher.PublicationResult;
 import edu.illinois.group8.storage.db.CanonicalDbSink;
 
 import java.util.Map;
@@ -204,13 +205,17 @@ public class DataProcessor {
 
     private void publish(CanonicalEvent event) {
         CanonicalEvent publishedEvent = CanonicalEvents.withPublishTsNs(event, System.nanoTime());
-        boolean success = publisher.publish(publishedEvent);
-        if (success) {
+        PublicationResult result = publisher.publishSerialized(publishedEvent);
+        if (result.success()) {
             publishSuccess.increment();
         } else {
             publishFailure.increment();
         }
-        canonicalDbSink.offer(publishedEvent);
+        if (result.serializedEvent() == null) {
+            canonicalDbSink.offer(publishedEvent);
+        } else {
+            canonicalDbSink.offer(result.serializedEvent());
+        }
     }
 
     private void observeEventMetrics(CanonicalEvent event) {

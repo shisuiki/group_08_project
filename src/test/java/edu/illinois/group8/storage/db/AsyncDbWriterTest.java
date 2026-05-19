@@ -5,6 +5,7 @@ import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.EventType;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 import edu.illinois.group8.canonical.TickerUpdate;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
@@ -34,6 +35,7 @@ class AsyncDbWriterTest {
         assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput(rawPayload("disabled"))));
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonical(canonicalDbEvent("canonical-disabled")));
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonicalEvent(canonicalEvent("canonical-event-disabled")));
+        assertEquals(DbOfferResult.DISABLED, writer.offerSerializedCanonicalEvent(serializedCanonicalEvent("serialized-disabled")));
         writer.close();
 
         assertEquals(0, store.rawInsertCalls);
@@ -146,6 +148,41 @@ class AsyncDbWriterTest {
     }
 
     @Test
+    void acceptedSerializedCanonicalEventUsesPayloadWithoutSerializer() throws Exception {
+        RecordingStore store = new RecordingStore();
+        BackendMetrics metrics = new BackendMetrics();
+        CanonicalDbEventMapper mapper = new CanonicalDbEventMapper(new ThrowingJsonCanonicalSerializer());
+
+        try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(
+            store,
+            8,
+            4,
+            metrics,
+            new RawWsDbEventMapper(),
+            mapper
+        )) {
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerSerializedCanonicalEvent(
+                serializedCanonicalEvent("serialized-canonical-ok")
+            ));
+
+            assertEventually(
+                () -> writer.stats().canonicalWritten() == 1L,
+                "worker should map serialized canonical event without reserializing"
+            );
+
+            CanonicalDbEvent dbEvent = store.canonicalEvents.get(0);
+            assertEquals("serialized-canonical-ok", dbEvent.eventId());
+            JsonNode payload = new JsonCanonicalSerializer().mapper().readTree(dbEvent.payload());
+            assertEquals("serialized-canonical-ok", payload.path("event_id").asText());
+            assertEquals(EventType.TICKER_UPDATE.streamName(), payload.path("stream_name").asText());
+            assertEquals(1L, writer.stats().canonicalAccepted());
+            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.CANONICAL_ACCEPTED_COUNTER));
+            assertEquals(1L, metrics.get(BoundedAsyncDbWriter.CANONICAL_WRITTEN_COUNTER));
+            assertEquals(0L, writer.stats().failedBatches());
+        }
+    }
+
+    @Test
     void closeDrainsAcceptedEventsAndCountsFinalStats() throws Exception {
         RecordingStore store = new RecordingStore();
         store.blockRaw.set(true);
@@ -237,6 +274,7 @@ class AsyncDbWriterTest {
         assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput(rawPayload("after-close"))));
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonical(canonicalDbEvent("canonical-after-close")));
         assertEquals(DbOfferResult.DISABLED, writer.offerCanonicalEvent(canonicalEvent("canonical-event-after-close")));
+        assertEquals(DbOfferResult.DISABLED, writer.offerSerializedCanonicalEvent(serializedCanonicalEvent("serialized-after-close")));
         assertEquals(0L, writer.stats().rawAccepted());
         assertEquals(0L, writer.stats().canonicalAccepted());
     }
@@ -465,6 +503,10 @@ class AsyncDbWriterTest {
         );
     }
 
+    private static SerializedCanonicalEvent serializedCanonicalEvent(String eventId) {
+        return SerializedCanonicalEvent.from(canonicalEvent(eventId), new JsonCanonicalSerializer());
+    }
+
     private static CanonicalEvent canonicalEventWithoutMetadata(String eventId) {
         return new TickerUpdate(
             eventId,
@@ -531,6 +573,18 @@ class AsyncDbWriterTest {
         public synchronized void insertCanonicalBatch(List<CanonicalDbEvent> events) {
             canonicalInsertCalls++;
             canonicalEvents.addAll(events);
+        }
+    }
+
+    private static final class ThrowingJsonCanonicalSerializer extends JsonCanonicalSerializer {
+        @Override
+        public byte[] toBytes(CanonicalEvent event) {
+            throw new IllegalStateException("serialized path must not call toBytes");
+        }
+
+        @Override
+        public String toJson(CanonicalEvent event) {
+            throw new IllegalStateException("serialized path must not call toJson");
         }
     }
 }

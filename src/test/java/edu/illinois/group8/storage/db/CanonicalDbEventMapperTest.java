@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.EventType;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 import edu.illinois.group8.canonical.TickerUpdate;
 
 import org.junit.jupiter.api.Test;
@@ -45,10 +46,27 @@ class CanonicalDbEventMapperTest {
     }
 
     @Test
+    void mapsSerializedCanonicalEventPayloadWithoutSerializer() {
+        CanonicalDbEventMapper mapper = new CanonicalDbEventMapper(new ThrowingJsonCanonicalSerializer());
+        TickerUpdate event = tickerEvent();
+        String payload = "{\"event_id\":\"event-1\",\"stream_name\":\"canonical.ticker\",\"sentinel\":true}";
+        SerializedCanonicalEvent serializedEvent = new SerializedCanonicalEvent(
+            event,
+            payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+
+        CanonicalDbEvent dbEvent = mapper.toDbEvent(serializedEvent);
+
+        assertEquals("event-1", dbEvent.eventId());
+        assertEquals(EventType.TICKER_UPDATE.streamName(), dbEvent.streamName());
+        assertEquals(payload, dbEvent.payload());
+    }
+
+    @Test
     void nullEventThrows() {
         CanonicalDbEventMapper mapper = new CanonicalDbEventMapper();
 
-        assertThrows(NullPointerException.class, () -> mapper.toDbEvent(null));
+        assertThrows(NullPointerException.class, () -> mapper.toDbEvent((TickerUpdate) null));
     }
 
     private static TickerUpdate tickerEvent() {
@@ -76,5 +94,12 @@ class CanonicalDbEventMapperTest {
             null,
             null
         );
+    }
+
+    private static final class ThrowingJsonCanonicalSerializer extends JsonCanonicalSerializer {
+        @Override
+        public String toJson(edu.illinois.group8.canonical.CanonicalEvent event) {
+            throw new IllegalStateException("serialized path must not call toJson");
+        }
     }
 }

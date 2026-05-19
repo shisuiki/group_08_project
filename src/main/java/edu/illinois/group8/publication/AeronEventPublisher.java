@@ -2,6 +2,7 @@ package edu.illinois.group8.publication;
 
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.metrics.BackendMetrics;
 import org.agrona.ExpandableArrayBuffer;
@@ -32,7 +33,39 @@ public class AeronEventPublisher implements EventPublisher {
     public boolean publish(CanonicalEvent event) {
         boolean sampleDistributions = shouldSamplePublicationDistribution();
         long offerStartTsNs = sampleDistributions ? System.nanoTime() : 0L;
-        byte[] bytes = serializer.toBytes(event);
+        return publish(
+            SerializedCanonicalEvent.from(event, serializer),
+            offerStartTsNs,
+            sampleDistributions
+        );
+    }
+
+    @Override
+    public PublicationResult publishSerialized(CanonicalEvent event) {
+        boolean sampleDistributions = shouldSamplePublicationDistribution();
+        long offerStartTsNs = sampleDistributions ? System.nanoTime() : 0L;
+        SerializedCanonicalEvent serializedEvent = SerializedCanonicalEvent.from(event, serializer);
+        return new PublicationResult(
+            event,
+            serializedEvent,
+            publish(serializedEvent, offerStartTsNs, sampleDistributions)
+        );
+    }
+
+    @Override
+    public boolean publish(SerializedCanonicalEvent serializedEvent) {
+        boolean sampleDistributions = shouldSamplePublicationDistribution();
+        long offerStartTsNs = sampleDistributions ? System.nanoTime() : 0L;
+        return publish(serializedEvent, offerStartTsNs, sampleDistributions);
+    }
+
+    private boolean publish(
+        SerializedCanonicalEvent serializedEvent,
+        long offerStartTsNs,
+        boolean sampleDistributions
+    ) {
+        CanonicalEvent event = serializedEvent.event();
+        byte[] bytes = serializedEvent.utf8Json();
         buffer.putBytes(0, bytes);
         PublicationMetricHandles handles = metricHandles.computeIfAbsent(
             new PublicationMetricKey(event.streamName()),

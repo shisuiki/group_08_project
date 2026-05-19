@@ -3,6 +3,7 @@ package edu.illinois.group8.storage.db;
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 
 import java.util.Objects;
 
@@ -19,8 +20,16 @@ public final class CanonicalDbEventMapper {
 
     public CanonicalDbEvent toDbEvent(CanonicalEvent event) {
         Objects.requireNonNull(event, "event");
+        return toDbEvent(event, serializer.toJson(event));
+    }
+
+    public CanonicalDbEvent toDbEvent(SerializedCanonicalEvent serializedEvent) {
+        Objects.requireNonNull(serializedEvent, "serializedEvent");
+        return toDbEvent(serializedEvent.event(), serializedEvent.payloadJson());
+    }
+
+    private CanonicalDbEvent toDbEvent(CanonicalEvent event, String payload) {
         EventMetadata metadata = Objects.requireNonNull(event.metadata(), "event.metadata");
-        String payload = serializer.toJson(event);
         return new CanonicalDbEvent(
             event.eventId(),
             metadata.rawEventId(),

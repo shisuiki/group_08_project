@@ -1,6 +1,7 @@
 package edu.illinois.group8.storage.db;
 
 import edu.illinois.group8.canonical.CanonicalEvent;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -15,6 +16,10 @@ public final class CanonicalDbSink implements AutoCloseable {
 
     public DbOfferResult offer(CanonicalEvent event) {
         return writer.offerCanonicalEvent(event);
+    }
+
+    public DbOfferResult offer(SerializedCanonicalEvent event) {
+        return writer.offerSerializedCanonicalEvent(event);
     }
 
     @Override
