@@ -88,28 +88,39 @@ scripts/db-primary-demo-smoke.sh
 Expected output shape:
 
 ```text
-PASS health service=frontend-adapter feature_source=feature_outputs expected_feature_source=feature_outputs
+PASS health service=frontend-adapter feature_source=feature_outputs expected_feature_source=feature_outputs market_metadata_status=loaded market_metadata_rows=2
 PASS symbols selected=DEMO-DBPRIMARY-26MAY19-T50
+PASS datafeed_symbols symbol=DEMO-DBPRIMARY-26MAY19-T50 event=DEMO-DBPRIMARY-26MAY19 series=DEMO-DBPRIMARY status=open
+PASS datafeed_search query=DEMO-DBPRIMARY count=2
+PASS markets query=DEMO-DBPRIMARY count=2
 PASS features symbol=DEMO-DBPRIMARY-26MAY19-T50 feature=feature.bbo count=<n>
 PASS quotes symbol=DEMO-DBPRIMARY-26MAY19-T50
 PASS datafeed_history symbol=DEMO-DBPRIMARY-26MAY19-T50 resolution=1 bars=<n>
 PASS datafeed_config
-PASS db_primary_demo_smoke base_url=http://127.0.0.1:8090 symbol=DEMO-DBPRIMARY-26MAY19-T50 feature=feature.bbo count=<n> history_bars=<n>
+PASS db_primary_demo_smoke base_url=http://127.0.0.1:8090 symbol=DEMO-DBPRIMARY-26MAY19-T50 feature=feature.bbo count=<n> history_bars=<n> market_metadata_rows=2
 ```
 
 Set `DEMO_SYMBOL` only when pinning the video to a known market. Without it,
-the script selects the first symbol from `/symbols`. The smoke script uses
-`curl` and Python stdlib JSON parsing; it does not require `jq`. By default it
-requires `/health` to report `feature_source=feature_outputs`, so it will fail
-instead of passing against the frontend adapter's default module-driven mode. It
-retries HTTP fetches briefly so it can be run immediately after Compose starts
-the adapter.
+the script selects the first `/symbols` entry matching `DEMO_METADATA_QUERY`,
+then falls back to the first symbol. The smoke script uses `curl` and Python
+stdlib JSON parsing; it does not require `jq`. By default it
+requires `/health` to report `feature_source=feature_outputs` and
+`market_metadata.status=loaded` with rows, so it will fail instead of passing
+against the frontend adapter's default module-driven mode or a missing metadata
+startup snapshot. It also verifies metadata-backed `/datafeed/search`,
+`/datafeed/symbols`, and `/markets` responses. It retries HTTP fetches briefly
+so it can be run immediately after Compose starts the adapter.
+For non-standard demo fixtures, override `EXPECTED_MARKET_METADATA_STATUS`,
+`EXPECTED_MARKET_METADATA_MIN_ROWS`, `DEMO_METADATA_QUERY`, or the expected
+metadata ticker fields.
 
 ## Curl Checks
 
 ```bash
 curl -fsS http://127.0.0.1:8090/health
 curl -fsS http://127.0.0.1:8090/symbols
+curl -fsS 'http://127.0.0.1:8090/datafeed/search?query=DEMO-DBPRIMARY&limit=5'
+curl -fsS 'http://127.0.0.1:8090/datafeed/symbols?symbol=DEMO-DBPRIMARY-26MAY19-T50'
 curl -fsS 'http://127.0.0.1:8090/markets?query=DEMO-DBPRIMARY&limit=5'
 curl -fsS 'http://127.0.0.1:8090/features?symbol=DEMO-DBPRIMARY-26MAY19-T50&feature=feature.bbo&limit=5'
 curl -fsS 'http://127.0.0.1:8090/quotes?symbols=DEMO-DBPRIMARY-26MAY19-T50'

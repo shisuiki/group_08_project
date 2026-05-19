@@ -394,9 +394,13 @@ Recommended demo scope:
 2. Seed local Timescale/Postgres demo rows with `scripts/db-primary-demo-seed.sh`.
 3. Optionally run `featureplant` from the DB default source for real market rows.
 4. Run `frontend-adapter` from persisted `feature_outputs` startup snapshot mode.
-5. Open `frontend/tradingview-lightweight/index.html` against the DB-backed adapter.
-6. Show `/health` and `/metrics`.
-7. Optionally show raw replay dry-run.
+5. Run `scripts/db-primary-demo-smoke.sh` and show DB-primary proof:
+   `feature_source=feature_outputs`, loaded `/health.market_metadata` with
+   nonzero `markets`, metadata-backed `/datafeed/search`, `/markets`, features,
+   quotes, and history.
+6. Open `frontend/tradingview-lightweight/index.html` against the DB-backed adapter.
+7. Show `/health` and `/metrics`.
+8. Optionally show raw replay dry-run.
 
 The canonical walkthrough is `docs/demo_db_primary_walkthrough.md`; the video
 guardrail is `docs/video_demo_checklist.md`; the stable local seed is

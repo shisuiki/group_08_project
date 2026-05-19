@@ -122,9 +122,12 @@ ordered by recent event time, and serves that startup snapshot without refresh.
 
 For the persisted-feature demo path, `scripts/db-primary-demo-seed.sh` creates
 local DB rows for two demo symbols, and `scripts/db-primary-demo-smoke.sh` wraps
-the `/health`, `/symbols`, `/features`, `/quotes`, `/datafeed/history`, and
-`/datafeed/config` checks without requiring `jq`. The smoke defaults to
-`EXPECTED_FEATURE_SOURCE=feature_outputs` so module-driven frontend runs do not
+the `/health`, `/symbols`, `/datafeed/search`, `/datafeed/symbols`, `/markets`,
+`/features`, `/quotes`, `/datafeed/history`, and `/datafeed/config` checks
+without requiring `jq`. The smoke defaults to
+`EXPECTED_FEATURE_SOURCE=feature_outputs` and also requires
+`/health.market_metadata.status=loaded` with a nonzero `markets` count, so
+module-driven frontend runs or missing metadata startup snapshots do not
 accidentally pass the persisted-feature demo.
 
 ```bash

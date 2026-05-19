@@ -4,9 +4,17 @@ set -eu
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:8090}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 EXPECTED_FEATURE_SOURCE="${EXPECTED_FEATURE_SOURCE:-feature_outputs}"
+EXPECTED_MARKET_METADATA_STATUS="${EXPECTED_MARKET_METADATA_STATUS:-loaded}"
+EXPECTED_MARKET_METADATA_MIN_ROWS="${EXPECTED_MARKET_METADATA_MIN_ROWS:-1}"
 DEMO_FEATURE="${DEMO_FEATURE:-feature.bbo}"
 DEMO_LIMIT="${DEMO_LIMIT:-5}"
 DEMO_HISTORY_RESOLUTION="${DEMO_HISTORY_RESOLUTION:-1}"
+DEMO_METADATA_QUERY="${DEMO_METADATA_QUERY:-DEMO-DBPRIMARY}"
+DEMO_METADATA_SEARCH_QUERY="${DEMO_METADATA_SEARCH_QUERY:-$DEMO_METADATA_QUERY}"
+DEMO_MARKET_EVENT_TICKER="${DEMO_MARKET_EVENT_TICKER:-DEMO-DBPRIMARY-26MAY19}"
+DEMO_MARKET_SERIES_TICKER="${DEMO_MARKET_SERIES_TICKER:-DEMO-DBPRIMARY}"
+DEMO_MARKET_STATUS="${DEMO_MARKET_STATUS:-open}"
+DEMO_MARKET_LIMIT="${DEMO_MARKET_LIMIT:-5}"
 SMOKE_HTTP_ATTEMPTS="${SMOKE_HTTP_ATTEMPTS:-20}"
 SMOKE_HTTP_RETRY_SLEEP_SECONDS="${SMOKE_HTTP_RETRY_SLEEP_SECONDS:-1}"
 
@@ -45,7 +53,8 @@ PY
 
 health_json="$tmpdir/health.json"
 fetch_json "/health" "$health_json"
-feature_source="$(python3 - "$health_json" "$EXPECTED_FEATURE_SOURCE" <<'PY'
+health_selection="$tmpdir/health-selection.txt"
+python3 - "$health_json" "$EXPECTED_FEATURE_SOURCE" "$EXPECTED_MARKET_METADATA_STATUS" "$EXPECTED_MARKET_METADATA_MIN_ROWS" > "$health_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -61,16 +70,43 @@ if expected and feature_source != expected:
         f"health check failed: feature_source is {feature_source!r}, expected {expected!r}; "
         "restart frontend-adapter with FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"
     )
+metadata = body.get("market_metadata")
+if not isinstance(metadata, dict):
+    raise SystemExit("health check failed: market_metadata is missing")
+metadata_status = metadata.get("status")
+if not metadata_status:
+    raise SystemExit("health check failed: market_metadata.status is missing")
+expected_metadata_status = sys.argv[3].strip() if len(sys.argv) > 3 else ""
+if expected_metadata_status and metadata_status != expected_metadata_status:
+    raise SystemExit(
+        f"health check failed: market_metadata.status is {metadata_status!r}, "
+        f"expected {expected_metadata_status!r}; restart frontend-adapter after seeding metadata"
+    )
+raw_rows = metadata.get("markets")
+if isinstance(raw_rows, bool) or not isinstance(raw_rows, int):
+    raise SystemExit("health check failed: market_metadata.markets is not an integer")
+try:
+    min_rows = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4].strip() else 0
+except ValueError as exc:
+    raise SystemExit("health check failed: EXPECTED_MARKET_METADATA_MIN_ROWS must be an integer") from exc
+if raw_rows < min_rows:
+    raise SystemExit(
+        f"health check failed: market_metadata.markets is {raw_rows}, expected at least {min_rows}"
+    )
 print(feature_source)
+print(metadata_status)
+print(raw_rows)
 PY
-)"
-printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s\n' \
-    "$feature_source" "$EXPECTED_FEATURE_SOURCE"
+feature_source="$(sed -n '1p' "$health_selection")"
+market_metadata_status="$(sed -n '2p' "$health_selection")"
+market_metadata_rows="$(sed -n '3p' "$health_selection")"
+printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s market_metadata_status=%s market_metadata_rows=%s\n' \
+    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$market_metadata_status" "$market_metadata_rows"
 
 symbols_json="$tmpdir/symbols.json"
 fetch_json "/symbols" "$symbols_json"
 symbol_selection="$tmpdir/symbol-selection.txt"
-python3 - "$symbols_json" "${DEMO_SYMBOL:-}" > "$symbol_selection" <<'PY'
+python3 - "$symbols_json" "${DEMO_SYMBOL:-}" "$DEMO_METADATA_QUERY" > "$symbol_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -79,8 +115,15 @@ symbols = body.get("symbols")
 if not isinstance(symbols, list) or not symbols:
     raise SystemExit("symbols check failed: /symbols returned no symbols")
 override = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+preferred_query = sys.argv[3].strip() if len(sys.argv) > 3 else ""
 selected = override
 latest = ""
+if not selected:
+    for entry in symbols:
+        candidate = entry.get("symbol") if isinstance(entry, dict) else None
+        if candidate and preferred_query and preferred_query in candidate:
+            selected = candidate
+            break
 if not selected:
     first = symbols[0]
     selected = first.get("symbol") if isinstance(first, dict) else None
@@ -102,6 +145,111 @@ printf 'PASS symbols selected=%s\n' "$selected_symbol"
 encoded_symbol="$(urlencode "$selected_symbol")"
 encoded_feature="$(urlencode "$DEMO_FEATURE")"
 encoded_limit="$(urlencode "$DEMO_LIMIT")"
+encoded_metadata_query="$(urlencode "$DEMO_METADATA_QUERY")"
+encoded_metadata_search_query="$(urlencode "$DEMO_METADATA_SEARCH_QUERY")"
+encoded_market_limit="$(urlencode "$DEMO_MARKET_LIMIT")"
+
+if [ "$market_metadata_status" = "loaded" ]; then
+    datafeed_symbol_json="$tmpdir/datafeed-symbol.json"
+    fetch_json "/datafeed/symbols?symbol=${encoded_symbol}" "$datafeed_symbol_json"
+    datafeed_symbol_metadata="$tmpdir/datafeed-symbol-metadata.txt"
+    python3 - "$datafeed_symbol_json" "$selected_symbol" "$DEMO_MARKET_EVENT_TICKER" "$DEMO_MARKET_SERIES_TICKER" "$DEMO_MARKET_STATUS" > "$datafeed_symbol_metadata" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+expected_symbol = sys.argv[2]
+expected_event = sys.argv[3]
+expected_series = sys.argv[4]
+expected_status = sys.argv[5]
+if body.get("ticker") != expected_symbol or body.get("name") != expected_symbol:
+    raise SystemExit("datafeed symbols metadata check failed: selected symbol mismatch")
+for key, expected in (
+    ("event_ticker", expected_event),
+    ("series_ticker", expected_series),
+    ("status", expected_status),
+):
+    if body.get(key) != expected:
+        raise SystemExit(
+            f"datafeed symbols metadata check failed: {key} is {body.get(key)!r}, expected {expected!r}"
+        )
+if "market_payload" in body or "rules_payload" in body:
+    raise SystemExit("datafeed symbols metadata check failed: raw metadata payload leaked")
+print(body.get("event_ticker"))
+print(body.get("series_ticker"))
+print(body.get("status"))
+PY
+    symbol_event_ticker="$(sed -n '1p' "$datafeed_symbol_metadata")"
+    symbol_series_ticker="$(sed -n '2p' "$datafeed_symbol_metadata")"
+    symbol_market_status="$(sed -n '3p' "$datafeed_symbol_metadata")"
+    printf 'PASS datafeed_symbols symbol=%s event=%s series=%s status=%s\n' \
+        "$selected_symbol" "$symbol_event_ticker" "$symbol_series_ticker" "$symbol_market_status"
+
+    search_json="$tmpdir/datafeed-search.json"
+    fetch_json "/datafeed/search?query=${encoded_metadata_search_query}&limit=${encoded_market_limit}" "$search_json"
+    search_count="$(python3 - "$search_json" "$selected_symbol" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+expected_symbol = sys.argv[2]
+if not isinstance(body, list) or not body:
+    raise SystemExit("datafeed search metadata check failed: no results")
+found = any(
+    isinstance(entry, dict)
+    and (entry.get("symbol") == expected_symbol or entry.get("ticker") == expected_symbol)
+    for entry in body
+)
+if not found:
+    raise SystemExit("datafeed search metadata check failed: selected metadata-backed market missing")
+print(len(body))
+PY
+)"
+    printf 'PASS datafeed_search query=%s count=%s\n' "$DEMO_METADATA_SEARCH_QUERY" "$search_count"
+
+    markets_json="$tmpdir/markets.json"
+    fetch_json "/markets?query=${encoded_metadata_query}&limit=${encoded_market_limit}" "$markets_json"
+    market_count="$(python3 - "$markets_json" "$selected_symbol" "$DEMO_MARKET_EVENT_TICKER" "$DEMO_MARKET_SERIES_TICKER" "$DEMO_MARKET_STATUS" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+expected_symbol = sys.argv[2]
+expected_event = sys.argv[3]
+expected_series = sys.argv[4]
+expected_status = sys.argv[5]
+count = body.get("count")
+markets = body.get("markets")
+if not isinstance(count, int) or count <= 0:
+    raise SystemExit("markets metadata check failed: count is not positive")
+if not isinstance(markets, list) or not markets:
+    raise SystemExit("markets metadata check failed: markets are empty")
+selected = None
+for row in markets:
+    if isinstance(row, dict) and row.get("market_ticker") == expected_symbol:
+        selected = row
+        break
+if selected is None:
+    raise SystemExit("markets metadata check failed: selected market missing")
+for key, expected in (
+    ("event_ticker", expected_event),
+    ("series_ticker", expected_series),
+    ("status", expected_status),
+):
+    if selected.get(key) != expected:
+        raise SystemExit(
+            f"markets metadata check failed: {key} is {selected.get(key)!r}, expected {expected!r}"
+        )
+for forbidden in ("market_payload", "rules_payload", "payload"):
+    if forbidden in selected:
+        raise SystemExit(f"markets metadata check failed: compact response leaked {forbidden}")
+print(count)
+PY
+)"
+    printf 'PASS markets query=%s count=%s\n' "$DEMO_METADATA_QUERY" "$market_count"
+else
+    printf 'PASS market_metadata_checks_skipped status=%s\n' "$market_metadata_status"
+fi
 
 features_json="$tmpdir/features.json"
 fetch_json "/features?symbol=${encoded_symbol}&feature=${encoded_feature}&limit=${encoded_limit}" "$features_json"
@@ -195,5 +343,5 @@ if not isinstance(resolutions, list) or not resolutions:
 PY
 printf 'PASS datafeed_config\n'
 
-printf 'PASS db_primary_demo_smoke base_url=%s symbol=%s feature=%s count=%s history_bars=%s\n' \
-    "$FRONTEND_BASE_URL" "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$history_bars"
+printf 'PASS db_primary_demo_smoke base_url=%s symbol=%s feature=%s count=%s history_bars=%s market_metadata_rows=%s\n' \
+    "$FRONTEND_BASE_URL" "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$history_bars" "$market_metadata_rows"
