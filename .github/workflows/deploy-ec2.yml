@@ -42,6 +42,10 @@ jobs:
           set -euo pipefail
           bash -n scripts/db-primary-demo-seed.sh
           sh -n scripts/db-primary-demo-seed.sh
+          bash -n scripts/db-primary-demo-run-featureplant.sh
+          sh -n scripts/db-primary-demo-run-featureplant.sh
+          bash -n scripts/db-primary-demo-pipeline.sh
+          sh -n scripts/db-primary-demo-pipeline.sh
           bash -n scripts/db-primary-demo-smoke.sh
           sh -n scripts/db-primary-demo-smoke.sh
           bash -n scripts/ec2-compose-rollback-gate.sh

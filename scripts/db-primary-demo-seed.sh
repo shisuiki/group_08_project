@@ -29,10 +29,16 @@ printf 'Applying DB-primary demo seed...\n'
 docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
     psql -q -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 < "$SEED_SQL"
 
+canonical_count="$(
+    docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
+        psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
+        -c "select count(*) from canonical_events where event_id like 'demo-db-primary-canonical-%'"
+)"
+
 feature_count="$(
     docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
         psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
-        -c "select count(*) from feature_outputs where feature_event_id like 'demo-db-primary-%'"
+        -c "select count(*) from feature_outputs where source_event_id like 'demo-db-primary-canonical-%'"
 )"
 
 market_count="$(
@@ -44,11 +50,16 @@ market_count="$(
 symbols="$(
     docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
         psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
-        -c "select string_agg(market_ticker, ', ' order by market_ticker) from (select distinct market_ticker from feature_outputs where feature_event_id like 'demo-db-primary-%') seeded"
+        -c "select string_agg(market_ticker, ', ' order by market_ticker) from (select distinct market_ticker from canonical_events where event_id like 'demo-db-primary-canonical-%') seeded"
 )"
 
-printf 'PASS demo_seed feature_outputs=%s market_metadata=%s symbols=%s\n' \
-    "$feature_count" "$market_count" "$symbols"
+if [ "$feature_count" != "0" ]; then
+    printf 'demo seed expected feature_outputs=0 before FeaturePlant, got %s\n' "$feature_count" >&2
+    exit 1
+fi
+
+printf 'PASS demo_seed canonical_events=%s feature_outputs=%s market_metadata=%s symbols=%s\n' \
+    "$canonical_count" "$feature_count" "$market_count" "$symbols"
 
 cat <<EOF
 
@@ -59,7 +70,12 @@ Next local demo commands:
   FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs \\
   docker compose --profile frontend-integration up -d --build frontend-adapter
 
+  scripts/db-primary-demo-run-featureplant.sh
+
   DEMO_SYMBOL=DEMO-DBPRIMARY-26MAY19-T50 scripts/db-primary-demo-smoke.sh
+
+Or run the full local no-credential pipeline:
+  scripts/db-primary-demo-pipeline.sh
 
 Host psql tools can use 127.0.0.1:${POSTGRES_HOST_PORT}; containers use timescaledb:5432.
 EOF

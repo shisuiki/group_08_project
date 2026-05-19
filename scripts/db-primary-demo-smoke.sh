@@ -1,10 +1,13 @@
 #!/bin/sh
 set -eu
 
-FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:8090}"
+FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:${FRONTEND_ADAPTER_HOST_PORT:-8090}}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 EXPECTED_FEATURE_SOURCE="${EXPECTED_FEATURE_SOURCE:-feature_outputs}"
 EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED="${EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED:-true}"
+EXPECTED_FEATURE_OUTPUT_REFRESH_RUNNING="${EXPECTED_FEATURE_OUTPUT_REFRESH_RUNNING:-$EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED}"
+EXPECTED_FRONTEND_STARTED_AT="${EXPECTED_FRONTEND_STARTED_AT:-}"
+EXPECTED_REFRESH_TOTAL_LOADED_MIN="${EXPECTED_REFRESH_TOTAL_LOADED_MIN:-}"
 EXPECTED_MARKET_METADATA_STATUS="${EXPECTED_MARKET_METADATA_STATUS:-loaded}"
 EXPECTED_MARKET_METADATA_MIN_ROWS="${EXPECTED_MARKET_METADATA_MIN_ROWS:-1}"
 DEMO_FEATURE="${DEMO_FEATURE:-feature.bbo}"
@@ -53,9 +56,17 @@ PY
 }
 
 health_json="$tmpdir/health.json"
-fetch_json "/health" "$health_json"
 health_selection="$tmpdir/health-selection.txt"
-python3 - "$health_json" "$EXPECTED_FEATURE_SOURCE" "$EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED" "$EXPECTED_MARKET_METADATA_STATUS" "$EXPECTED_MARKET_METADATA_MIN_ROWS" > "$health_selection" <<'PY'
+health_attempt=1
+while :; do
+    if fetch_json "/health" "$health_json" && python3 - "$health_json" \
+        "$EXPECTED_FEATURE_SOURCE" \
+        "$EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED" \
+        "$EXPECTED_FEATURE_OUTPUT_REFRESH_RUNNING" \
+        "$EXPECTED_FRONTEND_STARTED_AT" \
+        "$EXPECTED_REFRESH_TOTAL_LOADED_MIN" \
+        "$EXPECTED_MARKET_METADATA_STATUS" \
+        "$EXPECTED_MARKET_METADATA_MIN_ROWS" > "$health_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -84,13 +95,39 @@ if feature_source == "feature_outputs":
                 f"health check failed: feature_output_refresh.enabled is {actual_enabled!r}, "
                 f"expected {expected_enabled!r}"
             )
+    expected_running = sys.argv[4].strip().lower() if len(sys.argv) > 4 else ""
+    if expected_running:
+        expected_running_bool = expected_running == "true"
+        actual_running = refresh.get("running")
+        if actual_running != expected_running_bool:
+            raise SystemExit(
+                f"health check failed: feature_output_refresh.running is {actual_running!r}, "
+                f"expected {expected_running_bool!r}"
+            )
+    raw_total_loaded = refresh.get("total_loaded")
+    if isinstance(raw_total_loaded, bool) or not isinstance(raw_total_loaded, int):
+        raise SystemExit("health check failed: feature_output_refresh.total_loaded is not an integer")
+    min_total_loaded_raw = sys.argv[6].strip() if len(sys.argv) > 6 else ""
+    if min_total_loaded_raw:
+        min_total_loaded = int(min_total_loaded_raw)
+        if raw_total_loaded < min_total_loaded:
+            raise SystemExit(
+                f"health check failed: feature_output_refresh.total_loaded is {raw_total_loaded}, "
+                f"expected at least {min_total_loaded}"
+            )
+started_at = body.get("started_at")
+expected_started_at = sys.argv[5].strip() if len(sys.argv) > 5 else ""
+if expected_started_at and started_at != expected_started_at:
+    raise SystemExit(
+        f"health check failed: started_at is {started_at!r}, expected unchanged {expected_started_at!r}"
+    )
 metadata = body.get("market_metadata")
 if not isinstance(metadata, dict):
     raise SystemExit("health check failed: market_metadata is missing")
 metadata_status = metadata.get("status")
 if not metadata_status:
     raise SystemExit("health check failed: market_metadata.status is missing")
-expected_metadata_status = sys.argv[4].strip() if len(sys.argv) > 4 else ""
+expected_metadata_status = sys.argv[7].strip() if len(sys.argv) > 7 else ""
 if expected_metadata_status and metadata_status != expected_metadata_status:
     raise SystemExit(
         f"health check failed: market_metadata.status is {metadata_status!r}, "
@@ -100,7 +137,7 @@ raw_rows = metadata.get("markets")
 if isinstance(raw_rows, bool) or not isinstance(raw_rows, int):
     raise SystemExit("health check failed: market_metadata.markets is not an integer")
 try:
-    min_rows = int(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5].strip() else 0
+    min_rows = int(sys.argv[8]) if len(sys.argv) > 8 and sys.argv[8].strip() else 0
 except ValueError as exc:
     raise SystemExit("health check failed: EXPECTED_MARKET_METADATA_MIN_ROWS must be an integer") from exc
 if raw_rows < min_rows:
@@ -111,13 +148,29 @@ print(feature_source)
 print(metadata_status)
 print(raw_rows)
 print(refresh.get("enabled") if isinstance(refresh, dict) else "")
+print(refresh.get("running") if isinstance(refresh, dict) else "")
+print(refresh.get("total_loaded") if isinstance(refresh, dict) else "")
+print(started_at)
 PY
+    then
+        break
+    fi
+    if [ "$health_attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+        printf 'health check failed after %s attempts\n' "$health_attempt" >&2
+        exit 1
+    fi
+    health_attempt=$((health_attempt + 1))
+    sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+done
 feature_source="$(sed -n '1p' "$health_selection")"
 market_metadata_status="$(sed -n '2p' "$health_selection")"
 market_metadata_rows="$(sed -n '3p' "$health_selection")"
 feature_output_refresh_enabled="$(sed -n '4p' "$health_selection")"
-printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s feature_output_refresh_enabled=%s market_metadata_status=%s market_metadata_rows=%s\n' \
-    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$feature_output_refresh_enabled" "$market_metadata_status" "$market_metadata_rows"
+feature_output_refresh_running="$(sed -n '5p' "$health_selection")"
+feature_output_refresh_total_loaded="$(sed -n '6p' "$health_selection")"
+frontend_started_at="$(sed -n '7p' "$health_selection")"
+printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s feature_output_refresh_enabled=%s feature_output_refresh_running=%s feature_output_refresh_total_loaded=%s started_at=%s market_metadata_status=%s market_metadata_rows=%s\n' \
+    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$feature_output_refresh_enabled" "$feature_output_refresh_running" "$feature_output_refresh_total_loaded" "$frontend_started_at" "$market_metadata_status" "$market_metadata_rows"
 
 symbols_json="$tmpdir/symbols.json"
 fetch_json "/symbols" "$symbols_json"
