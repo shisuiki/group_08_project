@@ -459,6 +459,8 @@ services:
     volumes:
       - ./recordings:/app/recordings
       - ./scripts:/app/scripts:ro
+    networks:
+      - cluster_net
 
   featureplant:
     build: .

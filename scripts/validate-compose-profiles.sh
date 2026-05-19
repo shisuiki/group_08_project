@@ -147,6 +147,16 @@ assert_published_ports_loopback() {
     fi
 }
 
+assert_no_default_network() {
+    label="$1"
+    shift
+    if compose "$@" config | grep -q '^  default:$'; then
+        printf 'profile %s renders implicit default network; attach all services to an explicit network\n' "$label" >&2
+        exit 1
+    fi
+    printf 'PASS compose_no_default_network profiles=%s\n' "$label"
+}
+
 assert_raw_replay_table_defaults_aligned() {
     rendered="$(service_config_for raw-ingress-replay --profile raw-replay)"
     if ! printf '%s\n' "$rendered" | grep -q '^      RAW_REPLAY_TABLE: raw_ws_events$'; then
@@ -244,6 +254,13 @@ assert_published_ports_loopback "local-db,frontend-integration" --profile local-
 assert_published_ports_loopback "historical-backfill" --profile historical-backfill
 assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
+assert_no_default_network "cluster-live" --profile cluster-live
+assert_no_default_network "recording-capture" --profile recording-capture
+assert_no_default_network "observability" --profile observability
+assert_no_default_network "local-db,frontend-integration" --profile local-db --profile frontend-integration
+assert_no_default_network "historical-backfill" --profile historical-backfill
+assert_no_default_network "featureplant" --profile featureplant
+assert_no_default_network "raw-replay" --profile raw-replay
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned
