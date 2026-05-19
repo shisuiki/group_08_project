@@ -16,6 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -38,13 +39,13 @@ class AsyncDbWriterTest {
         assertEquals(DbOfferResult.DISABLED, writer.offerSerializedCanonicalEvent(serializedCanonicalEvent("serialized-disabled")));
         writer.close();
 
-        assertEquals(0, store.rawInsertCalls);
-        assertEquals(0, store.canonicalInsertCalls);
+        assertEquals(0, store.rawInsertCalls.get());
+        assertEquals(0, store.canonicalInsertCalls.get());
         assertEquals(DbWriterStats.empty(), writer.stats());
     }
 
     @Test
-    void boundedQueueDropsQuicklyWhenWorkerIsBlocked() throws Exception {
+    void rawQueueDropsQuicklyWhenRawWorkerIsBlockedWithoutBlockingCanonical() throws Exception {
         RecordingStore store = new RecordingStore();
         store.blockRaw.set(true);
         BackendMetrics metrics = new BackendMetrics();
@@ -64,6 +65,12 @@ class AsyncDbWriterTest {
             assertEquals(1L, writer.stats().rawDropped());
             assertEquals(1L, metrics.get(BoundedAsyncDbWriter.RAW_DROPPED_COUNTER));
 
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("canonical-while-raw-blocked")));
+            assertEventually(
+                () -> store.canonicalEvents.size() == 1 && writer.stats().canonicalWritten() == 1L,
+                "canonical worker should write while raw worker is blocked"
+            );
+
             store.releaseRaw.countDown();
             assertEventually(() -> store.rawEvents.size() == 2, "queued raw event should flush after release");
             long closeStartNs = System.nanoTime();
@@ -72,6 +79,7 @@ class AsyncDbWriterTest {
 
             assertTrue(closeElapsedNs < TimeUnit.MILLISECONDS.toNanos(500), "close should not wait after release");
             assertEquals(2L, writer.stats().rawWritten());
+            assertEquals(1L, writer.stats().canonicalWritten());
             assertEquals(0, writer.stats().queueDepth());
         }
     }
@@ -107,6 +115,32 @@ class AsyncDbWriterTest {
             assertEquals(1L, metrics.get(BoundedAsyncDbWriter.CANONICAL_ACCEPTED_COUNTER));
             assertEquals(1L, metrics.get(BoundedAsyncDbWriter.RAW_WRITTEN_COUNTER));
             assertEquals(1L, metrics.get(BoundedAsyncDbWriter.CANONICAL_WRITTEN_COUNTER));
+        }
+    }
+
+    @Test
+    void queueDepthGaugesExposeAggregateAndSplitDepths() throws Exception {
+        RecordingStore store = new RecordingStore();
+        store.blockRaw.set(true);
+        BackendMetrics metrics = new BackendMetrics();
+
+        try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 2, 1, metrics)) {
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("blocking"))));
+            assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should enter the slow store");
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("queued"))));
+
+            String queuedText = metrics.prometheusText();
+            assertTrue(queuedText.contains(BoundedAsyncDbWriter.RAW_QUEUE_DEPTH_GAUGE + " 1\n"));
+            assertTrue(queuedText.contains(BoundedAsyncDbWriter.CANONICAL_QUEUE_DEPTH_GAUGE + " 0\n"));
+            assertTrue(queuedText.contains(BoundedAsyncDbWriter.QUEUE_DEPTH_GAUGE + " 1\n"));
+
+            store.releaseRaw.countDown();
+            assertEventually(() -> writer.stats().rawWritten() == 2L, "raw queue should drain after release");
+
+            String drainedText = metrics.prometheusText();
+            assertTrue(drainedText.contains(BoundedAsyncDbWriter.RAW_QUEUE_DEPTH_GAUGE + " 0\n"));
+            assertTrue(drainedText.contains(BoundedAsyncDbWriter.CANONICAL_QUEUE_DEPTH_GAUGE + " 0\n"));
+            assertTrue(drainedText.contains(BoundedAsyncDbWriter.QUEUE_DEPTH_GAUGE + " 0\n"));
         }
     }
 
@@ -186,6 +220,7 @@ class AsyncDbWriterTest {
     void closeDrainsAcceptedEventsAndCountsFinalStats() throws Exception {
         RecordingStore store = new RecordingStore();
         store.blockRaw.set(true);
+        store.blockCanonical.set(true);
         BackendMetrics metrics = new BackendMetrics();
         BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 16, 8, metrics);
         CountDownLatch closeInvoked = new CountDownLatch(1);
@@ -202,8 +237,9 @@ class AsyncDbWriterTest {
         try {
             assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("close-raw-1"))));
             assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should block in raw store");
-            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("close-raw-2"))));
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("close-canonical")));
+            assertTrue(store.canonicalBatchStarted.await(5, TimeUnit.SECONDS), "canonical worker should block in canonical store");
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("close-raw-2"))));
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonicalEvent(canonicalEvent("close-canonical-event")));
 
             closeThread.start();
@@ -212,6 +248,9 @@ class AsyncDbWriterTest {
             assertTrue(closeThread.isAlive(), "close should wait for accepted blocked work to drain");
 
             store.releaseRaw.countDown();
+            Thread.sleep(50L);
+            assertTrue(closeThread.isAlive(), "close should still wait for canonical worker to drain");
+            store.releaseCanonical.countDown();
             closeThread.join(2_000L);
 
             assertTrue(!closeThread.isAlive(), "close should finish after the store releases");
@@ -234,20 +273,20 @@ class AsyncDbWriterTest {
             );
         } finally {
             store.releaseRaw.countDown();
+            store.releaseCanonical.countDown();
             writer.close();
         }
     }
 
     @Test
-    void canonicalEventOfferDropsQuicklyWhenQueueIsFull() throws Exception {
+    void canonicalQueueDropsQuicklyWhenCanonicalWorkerIsBlockedWithoutBlockingRaw() throws Exception {
         RecordingStore store = new RecordingStore();
-        store.blockRaw.set(true);
+        store.blockCanonical.set(true);
         BackendMetrics metrics = new BackendMetrics();
 
         try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 1, 1, metrics)) {
-            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("blocking"))));
-            assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should enter the slow store");
-
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonicalEvent(canonicalEvent("canonical-blocking")));
+            assertTrue(store.canonicalBatchStarted.await(5, TimeUnit.SECONDS), "canonical worker should enter the slow store");
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonicalEvent(canonicalEvent("canonical-queued")));
             long startNs = System.nanoTime();
             DbOfferResult result = writer.offerCanonicalEvent(canonicalEvent("canonical-dropped"));
@@ -255,12 +294,19 @@ class AsyncDbWriterTest {
 
             assertEquals(DbOfferResult.DROPPED_FULL, result);
             assertTrue(elapsedNs < TimeUnit.MILLISECONDS.toNanos(500), "offer should not wait on the store");
-            assertEquals(1L, writer.stats().canonicalAccepted());
+            assertEquals(2L, writer.stats().canonicalAccepted());
             assertEquals(1L, writer.stats().canonicalDropped());
             assertEquals(1L, metrics.get(BoundedAsyncDbWriter.CANONICAL_DROPPED_COUNTER));
 
-            store.releaseRaw.countDown();
-            assertEventually(() -> store.canonicalEvents.size() == 1, "queued canonical event should flush after release");
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("raw-while-canonical-blocked"))));
+            assertEventually(
+                () -> writer.stats().rawWritten() == 1L,
+                "raw worker should write while canonical worker is blocked"
+            );
+
+            store.releaseCanonical.countDown();
+            assertEventually(() -> store.canonicalEvents.size() == 2, "queued canonical event should flush after release");
+            assertEquals(2L, writer.stats().canonicalWritten());
         }
     }
 
@@ -280,10 +326,39 @@ class AsyncDbWriterTest {
     }
 
     @Test
+    void closeUsesSharedDeadlineAcrossWorkers() throws Exception {
+        RecordingStore store = new RecordingStore();
+        store.blockRaw.set(true);
+        store.blockCanonical.set(true);
+        BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 4, 1, new BackendMetrics());
+
+        try {
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("deadline-raw"))));
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("deadline-canonical")));
+            assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "raw worker should enter store");
+            assertTrue(store.canonicalBatchStarted.await(5, TimeUnit.SECONDS), "canonical worker should enter store");
+
+            long startNs = System.nanoTime();
+            writer.close();
+            long elapsedNs = System.nanoTime() - startNs;
+
+            assertTrue(
+                elapsedNs < TimeUnit.MILLISECONDS.toNanos(3_500L),
+                "close should use one shared deadline across both workers"
+            );
+        } finally {
+            store.releaseRaw.countDown();
+            store.releaseCanonical.countDown();
+            writer.close();
+        }
+    }
+
+    @Test
     void offerAndCloseRaceDoesNotThrowOrBlock() throws Exception {
         RecordingStore store = new RecordingStore();
         store.blockRaw.set(true);
-        BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 32, 8, new BackendMetrics());
+        BackendMetrics metrics = new BackendMetrics();
+        BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 32, 8, metrics);
         CountDownLatch start = new CountDownLatch(1);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicLong acceptedOffers = new AtomicLong();
@@ -343,6 +418,10 @@ class AsyncDbWriterTest {
             assertEquals(writer.stats().rawAccepted(), writer.stats().rawWritten());
             assertEquals(writer.stats().canonicalAccepted(), writer.stats().canonicalWritten());
             assertEquals(0, writer.stats().queueDepth());
+            String text = metrics.prometheusText();
+            assertTrue(text.contains(BoundedAsyncDbWriter.RAW_QUEUE_DEPTH_GAUGE + " 0\n"));
+            assertTrue(text.contains(BoundedAsyncDbWriter.CANONICAL_QUEUE_DEPTH_GAUGE + " 0\n"));
+            assertTrue(text.contains(BoundedAsyncDbWriter.QUEUE_DEPTH_GAUGE + " 0\n"));
             assertEquals(DbOfferResult.DISABLED, writer.offerRaw(rawInput(rawPayload("after-race-close"))));
             assertEquals(DbOfferResult.DISABLED, writer.offerCanonical(canonicalDbEvent("after-race-close")));
         } finally {
@@ -361,13 +440,45 @@ class AsyncDbWriterTest {
             assertDoesNotThrow(() ->
                 assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("store-fails"))))
             );
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("canonical-after-raw-store-failure")));
 
             assertEventually(
                 () -> writer.stats().failedBatches() == 1L
+                    && writer.stats().canonicalWritten() == 1L
                     && metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER) == 1L,
-                "failed store batch should be counted by the worker"
+                "failed raw store batch should not prevent canonical worker writes"
             );
             assertEquals(0L, writer.stats().rawWritten());
+            assertEquals(
+                List.of("canonical-after-raw-store-failure"),
+                store.canonicalEvents.stream().map(CanonicalDbEvent::eventId).toList()
+            );
+        }
+    }
+
+    @Test
+    void canonicalStoreExceptionDoesNotPreventRawWrite() throws Exception {
+        RecordingStore store = new RecordingStore();
+        store.failCanonical.set(true);
+        BackendMetrics metrics = new BackendMetrics();
+
+        try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 4, 1, metrics)) {
+            assertDoesNotThrow(() ->
+                assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("canonical-store-fails")))
+            );
+            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("raw-after-canonical-store-failure"))));
+
+            assertEventually(
+                () -> writer.stats().failedBatches() == 1L
+                    && writer.stats().rawWritten() == 1L
+                    && metrics.get(BoundedAsyncDbWriter.BATCH_FAILED_COUNTER) == 1L,
+                "failed canonical store batch should not prevent raw worker writes"
+            );
+            assertEquals(0L, writer.stats().canonicalWritten());
+            assertEquals(
+                List.of(rawPayload("raw-after-canonical-store-failure")),
+                store.rawEvents.stream().map(RawWsDbEvent::rawPayload).toList()
+            );
         }
     }
 
@@ -387,7 +498,7 @@ class AsyncDbWriterTest {
                 "failed mapper batch should be counted by the worker"
             );
             assertEquals(0L, writer.stats().rawWritten());
-            assertEquals(0, store.rawInsertCalls);
+            assertEquals(0, store.rawInsertCalls.get());
         }
     }
 
@@ -417,17 +528,11 @@ class AsyncDbWriterTest {
     @Test
     void canonicalEventMapperExceptionDoesNotSkipMappedCanonicalWrite() throws Exception {
         RecordingStore store = new RecordingStore();
-        store.blockRaw.set(true);
         BackendMetrics metrics = new BackendMetrics();
 
         try (BoundedAsyncDbWriter writer = new BoundedAsyncDbWriter(store, 4, 3, metrics)) {
-            assertEquals(DbOfferResult.ACCEPTED, writer.offerRaw(rawInput(rawPayload("blocking"))));
-            assertTrue(store.rawBatchStarted.await(5, TimeUnit.SECONDS), "worker should enter the slow store");
-
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonical(canonicalDbEvent("mapped-canonical-ok")));
             assertEquals(DbOfferResult.ACCEPTED, writer.offerCanonicalEvent(canonicalEventWithoutMetadata("bad-canonical")));
-
-            store.releaseRaw.countDown();
 
             assertEventually(
                 () -> writer.stats().failedBatches() == 1L
@@ -548,17 +653,21 @@ class AsyncDbWriterTest {
 
     private static final class RecordingStore implements AcceptedEventStore {
         private final AtomicBoolean blockRaw = new AtomicBoolean();
+        private final AtomicBoolean blockCanonical = new AtomicBoolean();
         private final AtomicBoolean failRaw = new AtomicBoolean();
+        private final AtomicBoolean failCanonical = new AtomicBoolean();
         private final CountDownLatch rawBatchStarted = new CountDownLatch(1);
+        private final CountDownLatch canonicalBatchStarted = new CountDownLatch(1);
         private final CountDownLatch releaseRaw = new CountDownLatch(1);
+        private final CountDownLatch releaseCanonical = new CountDownLatch(1);
         private final List<RawWsDbEvent> rawEvents = new CopyOnWriteArrayList<>();
         private final List<CanonicalDbEvent> canonicalEvents = new CopyOnWriteArrayList<>();
-        private int rawInsertCalls;
-        private int canonicalInsertCalls;
+        private final AtomicInteger rawInsertCalls = new AtomicInteger();
+        private final AtomicInteger canonicalInsertCalls = new AtomicInteger();
 
         @Override
-        public synchronized void insertRawBatch(List<RawWsDbEvent> events) throws Exception {
-            rawInsertCalls++;
+        public void insertRawBatch(List<RawWsDbEvent> events) throws Exception {
+            rawInsertCalls.incrementAndGet();
             rawBatchStarted.countDown();
             if (blockRaw.get()) {
                 assertTrue(releaseRaw.await(5, TimeUnit.SECONDS), "test did not release raw insert");
@@ -570,8 +679,15 @@ class AsyncDbWriterTest {
         }
 
         @Override
-        public synchronized void insertCanonicalBatch(List<CanonicalDbEvent> events) {
-            canonicalInsertCalls++;
+        public void insertCanonicalBatch(List<CanonicalDbEvent> events) throws Exception {
+            canonicalInsertCalls.incrementAndGet();
+            canonicalBatchStarted.countDown();
+            if (blockCanonical.get()) {
+                assertTrue(releaseCanonical.await(5, TimeUnit.SECONDS), "test did not release canonical insert");
+            }
+            if (failCanonical.get()) {
+                throw new IllegalStateException("canonical insert failed");
+            }
             canonicalEvents.addAll(events);
         }
     }
