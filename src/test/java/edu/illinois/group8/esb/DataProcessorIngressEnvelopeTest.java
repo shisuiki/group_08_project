@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,6 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DataProcessorIngressEnvelopeTest {
     private static final String TRADE_MESSAGE = """
         {"type":"trade","sid":11,"msg":{"trade_id":"abc","market_ticker":"M","yes_price_dollars":"0.360","no_price_dollars":"0.640","count_fp":"1.00","taker_side":"yes","ts_ms":1669149841000}}
+        """;
+    private static final String ORDERBOOK_SNAPSHOT_MESSAGE = """
+        {"type":"orderbook_snapshot","sid":11,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
         """;
 
     @Test
@@ -183,6 +187,7 @@ class DataProcessorIngressEnvelopeTest {
     void canonicalDbSinkReceivesPublishedEventAfterPublisherReturns() {
         RecordingEventPublisher publisher = new RecordingEventPublisher(true);
         RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        BackendMetrics metrics = new BackendMetrics();
         writer.beforeOffer = () -> {
             assertFalse(publisher.inPublish);
             assertEquals(writer.canonicalEvents.size() + 1, publisher.returnedCalls);
@@ -191,7 +196,7 @@ class DataProcessorIngressEnvelopeTest {
             new KalshiCanonicalParser(),
             new OrderBookStateManager(),
             publisher,
-            new BackendMetrics(),
+            metrics,
             new CanonicalDbSink(writer)
         );
 
@@ -208,6 +213,35 @@ class DataProcessorIngressEnvelopeTest {
         assertFalse(publisher.inPublish);
         assertSame(publisher.events().get(1), writer.canonicalEvents.get(1));
         assertNotNull(writer.canonicalEvents.get(1).metadata().publishTsNs());
+        assertEquals(1L, dbOfferCount(metrics, "raw", DbOfferResult.ACCEPTED, "raw_source_event", "raw.kalshi.websocket"));
+        assertEquals(1L, dbOfferCount(metrics, "canonical", DbOfferResult.ACCEPTED, "market_trade", "canonical.trade"));
+    }
+
+    @Test
+    void dbOfferAcceptedCountersIncludeGeneratedPath() {
+        RecordingEventPublisher publisher = new RecordingEventPublisher(true);
+        RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
+        BackendMetrics metrics = new BackendMetrics();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            publisher,
+            metrics,
+            new CanonicalDbSink(writer)
+        );
+
+        processor.processMessage(KalshiIngressEnvelope.wrap(
+            ORDERBOOK_SNAPSHOT_MESSAGE,
+            123_456_789L,
+            Instant.parse("2026-05-08T00:00:00Z"),
+            "live-1",
+            null
+        ));
+
+        assertEquals(3, writer.canonicalEvents.size());
+        assertEquals(1L, dbOfferCount(metrics, "raw", DbOfferResult.ACCEPTED, "raw_source_event", "raw.kalshi.websocket"));
+        assertEquals(1L, dbOfferCount(metrics, "canonical", DbOfferResult.ACCEPTED, "orderbook_snapshot", "canonical.orderbook.snapshot"));
+        assertEquals(1L, dbOfferCount(metrics, "generated", DbOfferResult.ACCEPTED, "top_of_book_update", "derived.top_of_book"));
     }
 
     @Test
@@ -269,6 +303,8 @@ class DataProcessorIngressEnvelopeTest {
         assertEquals(publisher.events().size(), writer.canonicalEvents.size());
         assertEquals(publisher.events().size(), metrics.get("processor.publish_success"));
         assertEquals(0L, metrics.get("processor.publish_failure"));
+        assertEquals(1L, dbOfferCount(metrics, "raw", DbOfferResult.DROPPED_FULL, "raw_source_event", "raw.kalshi.websocket"));
+        assertEquals(1L, dbOfferCount(metrics, "canonical", DbOfferResult.DROPPED_FULL, "market_trade", "canonical.trade"));
     }
 
     @Test
@@ -296,6 +332,27 @@ class DataProcessorIngressEnvelopeTest {
         assertEquals(publisher.events().size(), writer.canonicalEvents.size());
         assertEquals(0L, metrics.get("processor.publish_success"));
         assertEquals(publisher.events().size(), metrics.get("processor.publish_failure"));
+        assertEquals(1L, dbOfferCount(metrics, "raw", DbOfferResult.DISABLED, "raw_source_event", "raw.kalshi.websocket"));
+        assertEquals(1L, dbOfferCount(metrics, "canonical", DbOfferResult.DISABLED, "market_trade", "canonical.trade"));
+    }
+
+    private static long dbOfferCount(
+        BackendMetrics metrics,
+        String path,
+        DbOfferResult result,
+        String eventType,
+        String stream
+    ) {
+        return metrics.get(
+            "processor_db_offers_total",
+            BackendMetrics.labels(
+                "service", "backend",
+                "path", path,
+                "result", result.name().toLowerCase(Locale.ROOT),
+                "event_type", eventType,
+                "stream", stream
+            )
+        );
     }
 
     private static final class RecordingEventPublisher implements EventPublisher {

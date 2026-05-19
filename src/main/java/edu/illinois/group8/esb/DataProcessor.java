@@ -15,7 +15,9 @@ import edu.illinois.group8.publication.AeronEventPublisher;
 import edu.illinois.group8.publication.EventPublisher;
 import edu.illinois.group8.publication.EventPublisher.PublicationResult;
 import edu.illinois.group8.storage.db.CanonicalDbSink;
+import edu.illinois.group8.storage.db.DbOfferResult;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +43,7 @@ public class DataProcessor {
     private final ConcurrentHashMap<String, BackendMetrics.Counter> canonicalEventCounters = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, BackendMetrics.Counter> generatedEventCounters = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<EventMetricKey, EventMetricHandles> eventMetricHandles = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<DbOfferMetricKey, BackendMetrics.Counter> dbOfferCounters = new ConcurrentHashMap<>();
     private long parserLatencySampleCursor;
     private long messageAgeSampleCursor;
 
@@ -185,7 +188,7 @@ public class DataProcessor {
         if (shouldSampleParserLatency()) {
             backendParserLatency.observe(Math.max(0L, System.nanoTime() - parseStartTsNs));
         }
-        publish(parseResult.rawSourceEvent());
+        publish(parseResult.rawSourceEvent(), "raw");
         rawEvents.increment();
 
         if (sourceSequenceMonitorEnabled) {
@@ -206,7 +209,7 @@ public class DataProcessor {
     }
 
     private void handleCanonicalEvent(CanonicalEvent event) {
-        publish(event);
+        publish(event, "canonical");
         canonicalEventCounter(event.eventType()).increment();
 
         if (orderBookDerivedEnabled) {
@@ -217,11 +220,11 @@ public class DataProcessor {
     }
 
     private void handleGeneratedEvent(CanonicalEvent generated) {
-        publish(generated);
+        publish(generated, "generated");
         generatedEventCounter(generated.eventType()).increment();
     }
 
-    private void publish(CanonicalEvent event) {
+    private void publish(CanonicalEvent event, String path) {
         CanonicalEvent publishedEvent = CanonicalEvents.withPublishTsNs(event, System.nanoTime());
         PublicationResult result = publisher.publishSerialized(publishedEvent);
         if (result.success()) {
@@ -229,11 +232,10 @@ public class DataProcessor {
         } else {
             publishFailure.increment();
         }
-        if (result.serializedEvent() == null) {
-            canonicalDbSink.offer(publishedEvent);
-        } else {
-            canonicalDbSink.offer(result.serializedEvent());
-        }
+        DbOfferResult dbOfferResult = result.serializedEvent() == null
+            ? canonicalDbSink.offer(publishedEvent)
+            : canonicalDbSink.offer(result.serializedEvent());
+        dbOfferCounter(DbOfferMetricKey.from(publishedEvent, path, dbOfferResult)).increment();
     }
 
     private void observeEventMetrics(CanonicalEvent event) {
@@ -298,6 +300,23 @@ public class DataProcessor {
         );
     }
 
+    private BackendMetrics.Counter dbOfferCounter(DbOfferMetricKey key) {
+        return dbOfferCounters.computeIfAbsent(key, this::createDbOfferCounter);
+    }
+
+    private BackendMetrics.Counter createDbOfferCounter(DbOfferMetricKey key) {
+        return metrics.counter(
+            "processor_db_offers_total",
+            BackendMetrics.labels(
+                "service", "backend",
+                "path", key.path(),
+                "result", key.result(),
+                "event_type", key.eventType(),
+                "stream", key.streamName()
+            )
+        );
+    }
+
     static boolean shouldSampleHotPathDistribution(long cursor) {
         return (cursor & HOT_PATH_DISTRIBUTION_SAMPLE_MASK) == 0L;
     }
@@ -334,5 +353,16 @@ public class DataProcessor {
         BackendMetrics.Counter sequenceGap,
         BackendMetrics.Counter orderbookCrossed
     ) {
+    }
+
+    private record DbOfferMetricKey(String path, String result, String eventType, String streamName) {
+        private static DbOfferMetricKey from(CanonicalEvent event, String path, DbOfferResult result) {
+            return new DbOfferMetricKey(
+                normalizeLabelValue(path),
+                result.name().toLowerCase(Locale.ROOT),
+                normalizeLabelValue(event.eventType()),
+                normalizeLabelValue(event.streamName())
+            );
+        }
     }
 }
