@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.MarketMetadata;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -30,6 +31,8 @@ import java.util.function.Supplier;
 public class FrontendAdapterServer {
     private static final int DEFAULT_FEATURE_LIMIT = 100;
     private static final int MAX_FEATURE_LIMIT = 500;
+    private static final int DEFAULT_MARKET_LIMIT = 100;
+    private static final int MAX_MARKET_LIMIT = 500;
 
     public record FeaturePlantStats(long eventsIn, long eventsOut, long errors) {
         public static final FeaturePlantStats EMPTY = new FeaturePlantStats(0L, 0L, 0L);
@@ -37,6 +40,7 @@ public class FrontendAdapterServer {
 
     private final FrontendAdapterConfig config;
     private final FrontendFeatureStore store;
+    private final FrontendMarketMetadataCatalog metadataCatalog;
     private final Supplier<FeaturePlantStats> featurePlantStats;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
     private final BackendMetrics metrics = new BackendMetrics();
@@ -51,8 +55,20 @@ public class FrontendAdapterServer {
         FrontendFeatureStore store,
         Supplier<FeaturePlantStats> featurePlantStats
     ) {
+        this(config, store, FrontendMarketMetadataCatalog.disabled("disabled"), featurePlantStats);
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats
+    ) {
         this.config = config;
         this.store = store;
+        this.metadataCatalog = metadataCatalog == null
+            ? FrontendMarketMetadataCatalog.disabled("disabled")
+            : metadataCatalog;
         this.featurePlantStats = featurePlantStats == null ? () -> FeaturePlantStats.EMPTY : featurePlantStats;
     }
 
@@ -66,6 +82,7 @@ public class FrontendAdapterServer {
         bind("/symbols", this::handleSymbols);
         bind("/quotes", this::handleQuotes);
         bind("/features", this::handleFeatures);
+        bind("/markets", this::handleMarkets);
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
         httpServer.setExecutor(Executors.newFixedThreadPool(4));
@@ -128,7 +145,8 @@ public class FrontendAdapterServer {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", symbol);
         body.put("ticker", symbol);
-        body.put("description", symbol);
+        Optional<MarketMetadata> metadata = metadataCatalog.find(symbol);
+        body.put("description", metadata.map(FrontendAdapterServer::metadataDescription).orElse(symbol));
         body.put("type", "binary");
         body.put("session", "24x7");
         body.put("timezone", "Etc/UTC");
@@ -138,6 +156,7 @@ public class FrontendAdapterServer {
         body.put("has_seconds", true);
         body.put("supported_resolutions", BarResolution.SUPPORTED);
         body.put("volume_precision", 0);
+        metadata.ifPresent(row -> addMetadataFields(body, row));
         writeJson(exchange, 200, body);
     }
 
@@ -151,7 +170,21 @@ public class FrontendAdapterServer {
             limit = 30;
         }
         List<Map<String, Object>> results = new ArrayList<>();
+        Set<String> seen = ConcurrentHashMap.newKeySet();
+        for (MarketMetadata metadata : metadataCatalog.search(query, null, limit)) {
+            results.add(searchEntry(metadata));
+            seen.add(metadata.marketTicker());
+            if (results.size() >= limit) {
+                break;
+            }
+        }
         for (String symbol : store.symbols()) {
+            if (results.size() >= limit) {
+                break;
+            }
+            if (!seen.add(symbol)) {
+                continue;
+            }
             if (query.isEmpty() || symbol.toLowerCase(Locale.ROOT).contains(query)) {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("symbol", symbol);
@@ -161,9 +194,6 @@ public class FrontendAdapterServer {
                 entry.put("ticker", symbol);
                 entry.put("type", "binary");
                 results.add(entry);
-                if (results.size() >= limit) {
-                    break;
-                }
             }
         }
         writeJson(exchange, 200, results);
@@ -298,6 +328,26 @@ public class FrontendAdapterServer {
         writeJson(exchange, 200, body);
     }
 
+    private void handleMarkets(HttpExchange exchange) throws IOException {
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        int limit;
+        try {
+            limit = parseLimit(params.get("limit"), DEFAULT_MARKET_LIMIT, MAX_MARKET_LIMIT);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+        String query = params.getOrDefault("query", "");
+        String status = params.getOrDefault("status", "");
+        List<Map<String, Object>> markets = metadataCatalog.search(query, status, limit).stream()
+            .map(FrontendAdapterServer::marketMetadataBody)
+            .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("count", markets.size());
+        body.put("markets", markets);
+        writeJson(exchange, 200, body);
+    }
+
     private void handleHealth(HttpExchange exchange) throws IOException {
         FeaturePlantStats stats = featurePlantStats.get();
         Map<String, Object> health = new LinkedHashMap<>();
@@ -311,6 +361,14 @@ public class FrontendAdapterServer {
         storeView.put("symbols", store.symbolCount());
         storeView.put("total_features", store.totalAccepted());
         health.put("store", storeView);
+        Map<String, Object> metadataView = new LinkedHashMap<>();
+        metadataView.put("source", metadataCatalog.source());
+        metadataView.put("status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT));
+        metadataView.put("markets", metadataCatalog.size());
+        if (metadataCatalog.error() != null) {
+            metadataView.put("error", metadataCatalog.error());
+        }
+        health.put("market_metadata", metadataView);
         Map<String, Object> fp = new LinkedHashMap<>();
         fp.put("events_in", stats.eventsIn());
         fp.put("events_out", stats.eventsOut());
@@ -356,6 +414,53 @@ public class FrontendAdapterServer {
         body.put("source_event_id", output.sourceEventId());
         body.put("values", output.values());
         return body;
+    }
+
+    private static Map<String, Object> marketMetadataBody(MarketMetadata metadata) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("market_ticker", metadata.marketTicker());
+        body.put("event_ticker", metadata.eventTicker());
+        body.put("series_ticker", metadata.seriesTicker());
+        body.put("status", metadata.status());
+        body.put("open_time", metadata.openTime() == null ? null : metadata.openTime().toString());
+        body.put("close_time", metadata.closeTime() == null ? null : metadata.closeTime().toString());
+        body.put("settlement_time", metadata.settlementTime() == null ? null : metadata.settlementTime().toString());
+        return body;
+    }
+
+    private static Map<String, Object> searchEntry(MarketMetadata metadata) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("symbol", metadata.marketTicker());
+        entry.put("full_name", metadata.marketTicker());
+        entry.put("description", metadataDescription(metadata));
+        entry.put("exchange", "Kalshi");
+        entry.put("ticker", metadata.marketTicker());
+        entry.put("type", "binary");
+        entry.put("status", metadata.status());
+        return entry;
+    }
+
+    private static String metadataDescription(MarketMetadata metadata) {
+        List<String> parts = new ArrayList<>();
+        if (metadata.eventTicker() != null && !metadata.eventTicker().isBlank()) {
+            parts.add(metadata.eventTicker());
+        }
+        if (metadata.seriesTicker() != null && !metadata.seriesTicker().isBlank()) {
+            parts.add(metadata.seriesTicker());
+        }
+        if (metadata.status() != null && !metadata.status().isBlank()) {
+            parts.add(metadata.status());
+        }
+        return parts.isEmpty() ? metadata.marketTicker() : String.join(" / ", parts);
+    }
+
+    private static void addMetadataFields(Map<String, Object> body, MarketMetadata metadata) {
+        body.put("event_ticker", metadata.eventTicker());
+        body.put("series_ticker", metadata.seriesTicker());
+        body.put("status", metadata.status());
+        body.put("open_time", metadata.openTime() == null ? null : metadata.openTime().toString());
+        body.put("close_time", metadata.closeTime() == null ? null : metadata.closeTime().toString());
+        body.put("settlement_time", metadata.settlementTime() == null ? null : metadata.settlementTime().toString());
     }
 
     private static int parseLimit(String raw, int defaultLimit, int maxLimit) {

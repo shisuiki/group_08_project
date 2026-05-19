@@ -260,8 +260,8 @@ Legend:
 | Persistent feature store | current-basic | `feature_outputs` schema/store plus explicit `FEATUREPLANT_OUTPUT=db` FeaturePlant sink exist; stdout remains default and async/batched feature writes are absent |
 | MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` schema/store/reader plus historical REST metadata upsert wiring exists |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
-| Feature/query API | current-basic | `/features` inspection endpoint serves buffered feature outputs; `/bars` and WS features absent |
-| Frontend adapter | current-demo | HTTP polling datafeed demo; module-driven canonical DB source remains default, recording is explicit legacy/debug/demo; optional `feature_outputs` startup snapshot mode reads persisted feature rows |
+| Feature/query API | current-basic | `/features` inspection endpoint serves buffered feature outputs; frontend market metadata catalog queries are startup-bounded; `/bars` and WS features absent |
+| Frontend adapter | current-demo | HTTP polling datafeed demo; module-driven canonical DB source remains default, recording is explicit legacy/debug/demo; optional `feature_outputs` startup snapshot mode reads persisted feature rows; metadata search/symbol/catalog responses can use a bounded DB startup snapshot |
 | Replay viewer controls | planned | pause/resume/seek/speed absent |
 | Research CSV export | current-basic | canonical DB source is default, recording is explicit legacy/export/debug/import |
 | Semantic parser/schema | planned | absent |
@@ -309,9 +309,12 @@ Current:
   - `/datafeed/time`
   - `/symbols`
   - `/quotes`
+  - `/markets`
   - `/health`
   - `/metrics`
 - Quotes are HTTP polling, not streaming.
+- Market metadata search/catalog data is loaded as a bounded startup snapshot
+  when configured; it is not a live metadata stream or full durable query API.
 - Bars are synthesized from `feature.bbo` midpoint.
 - Volume is sample count, not true trade volume.
 

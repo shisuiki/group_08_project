@@ -25,6 +25,8 @@ public record FrontendAdapterConfig(
     int idleSleepMillis,
     long recordingMaxEvents,
     int featureOutputMaxRows,
+    MetadataSource metadataSource,
+    int metadataMaxRows,
     String dbUrl,
     String dbUser,
     String dbPassword,
@@ -32,6 +34,7 @@ public record FrontendAdapterConfig(
     String dbReplayId
 ) {
     private static final int DEFAULT_FEATURE_OUTPUT_MAX_ROWS = 10_000;
+    private static final int DEFAULT_METADATA_MAX_ROWS = 1_000;
 
     public enum SourceMode {
         AERON, RECORDING, DB;
@@ -64,6 +67,22 @@ public record FrontendAdapterConfig(
         }
     }
 
+    public enum MetadataSource {
+        AUTO, DB, DISABLED;
+
+        public static MetadataSource parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return AUTO;
+            }
+            return switch (raw.trim().toLowerCase(Locale.ROOT).replace('-', '_')) {
+                case "auto", "automatic" -> AUTO;
+                case "db", "postgres", "postgresql", "timescale", "timescaledb", "market_metadata" -> DB;
+                case "disabled", "off", "none" -> DISABLED;
+                default -> throw new IllegalArgumentException("Unknown FRONTEND_ADAPTER_METADATA_SOURCE: " + raw);
+            };
+        }
+    }
+
     public FrontendAdapterConfig {
         host = host == null || host.isBlank() ? "127.0.0.1" : host;
         if (port < 0 || port > 65535) {
@@ -74,6 +93,9 @@ public record FrontendAdapterConfig(
         }
         if (featureSource == null) {
             throw new IllegalArgumentException("featureSource is required");
+        }
+        if (metadataSource == null) {
+            throw new IllegalArgumentException("metadataSource is required");
         }
         streams = List.copyOf(streams);
         moduleNames = List.copyOf(moduleNames);
@@ -91,6 +113,9 @@ public record FrontendAdapterConfig(
         }
         if (featureOutputMaxRows < 1) {
             throw new IllegalArgumentException("featureOutputMaxRows must be positive");
+        }
+        if (metadataMaxRows < 1) {
+            throw new IllegalArgumentException("metadataMaxRows must be positive");
         }
         dbUrl = normalize(dbUrl);
         dbUser = normalize(dbUser);
@@ -132,6 +157,8 @@ public record FrontendAdapterConfig(
             idleSleepMillis,
             recordingMaxEvents,
             DEFAULT_FEATURE_OUTPUT_MAX_ROWS,
+            MetadataSource.AUTO,
+            DEFAULT_METADATA_MAX_ROWS,
             dbUrl,
             dbUser,
             dbPassword,
@@ -164,6 +191,8 @@ public record FrontendAdapterConfig(
             intValue(env, "FRONTEND_ADAPTER_IDLE_SLEEP_MS", 1),
             longValue(env, "FRONTEND_ADAPTER_RECORDING_MAX_EVENTS", 0L),
             intValue(env, "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", DEFAULT_FEATURE_OUTPUT_MAX_ROWS),
+            MetadataSource.parse(value(env, "FRONTEND_ADAPTER_METADATA_SOURCE", "auto")),
+            intValue(env, "FRONTEND_ADAPTER_METADATA_MAX_ROWS", DEFAULT_METADATA_MAX_ROWS),
             value(env, "FRONTEND_ADAPTER_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
             value(env, "FRONTEND_ADAPTER_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
             value(env, "FRONTEND_ADAPTER_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),

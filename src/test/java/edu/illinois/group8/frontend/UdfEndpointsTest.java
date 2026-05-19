@@ -3,6 +3,7 @@ package edu.illinois.group8.frontend;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.illinois.group8.feature.FeatureOutput;
+import edu.illinois.group8.storage.db.MarketMetadata;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -52,6 +54,10 @@ class UdfEndpointsTest {
         server = new FrontendAdapterServer(
             config,
             store,
+            FrontendMarketMetadataCatalog.loaded("test", List.of(
+                metadata("MKT-1", "EVENT-1", "SERIES-1", "open"),
+                metadata("MKT-META", "EVENT-META", "SERIES-META", "closed")
+            )),
             () -> new FrontendAdapterServer.FeaturePlantStats(42L, 17L, 0L)
         );
         server.start();
@@ -82,6 +88,10 @@ class UdfEndpointsTest {
         JsonNode body = getJson("/datafeed/symbols?symbol=MKT-1");
         assertEquals("MKT-1", body.path("name").asText());
         assertEquals("MKT-1", body.path("ticker").asText());
+        assertEquals("EVENT-1 / SERIES-1 / open", body.path("description").asText());
+        assertEquals("EVENT-1", body.path("event_ticker").asText());
+        assertEquals("SERIES-1", body.path("series_ticker").asText());
+        assertEquals("open", body.path("status").asText());
         assertEquals("binary", body.path("type").asText());
         assertEquals("24x7", body.path("session").asText());
         assertEquals("Etc/UTC", body.path("timezone").asText());
@@ -98,6 +108,40 @@ class UdfEndpointsTest {
         assertTrue(body.size() >= 1);
         assertEquals("Kalshi", body.get(0).path("exchange").asText());
         assertEquals("binary", body.get(0).path("type").asText());
+    }
+
+    @Test
+    void datafeedSearchFindsMetadataOnlyMarkets() throws Exception {
+        JsonNode body = getJson("/datafeed/search?query=EVENT-META&limit=10");
+
+        assertTrue(body.isArray());
+        assertEquals(1, body.size());
+        assertEquals("MKT-META", body.get(0).path("symbol").asText());
+        assertEquals("EVENT-META / SERIES-META / closed", body.get(0).path("description").asText());
+        assertEquals("closed", body.get(0).path("status").asText());
+    }
+
+    @Test
+    void marketsEndpointReturnsCompactFilteredMetadata() throws Exception {
+        JsonNode body = getJson("/markets?status=closed&limit=10");
+
+        assertEquals(1, body.path("count").asInt());
+        JsonNode market = body.path("markets").get(0);
+        assertEquals("MKT-META", market.path("market_ticker").asText());
+        assertEquals("EVENT-META", market.path("event_ticker").asText());
+        assertEquals("SERIES-META", market.path("series_ticker").asText());
+        assertEquals("closed", market.path("status").asText());
+        assertEquals("2026-05-20T01:00:00Z", market.path("open_time").asText());
+        assertTrue(market.path("market_payload").isMissingNode());
+        assertTrue(market.path("rules_payload").isMissingNode());
+    }
+
+    @Test
+    void marketsEndpointRejectsBadLimit() throws Exception {
+        HttpResponse<String> badLimit = get("/markets?limit=0");
+
+        assertEquals(400, badLimit.statusCode());
+        assertTrue(badLimit.body().contains("limit must be positive"));
     }
 
     @Test
@@ -176,6 +220,8 @@ class UdfEndpointsTest {
         assertEquals("ok", body.path("status").asText());
         assertEquals("frontend-adapter", body.path("service").asText());
         assertEquals("modules", body.path("feature_source").asText());
+        assertEquals("loaded", body.path("market_metadata").path("status").asText());
+        assertEquals(2, body.path("market_metadata").path("markets").asInt());
         assertEquals(42L, body.path("feature_plant").path("events_in").asLong());
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
     }
@@ -235,5 +281,19 @@ class UdfEndpointsTest {
                 )
             ));
         }
+    }
+
+    private static MarketMetadata metadata(String ticker, String eventTicker, String seriesTicker, String status) {
+        return new MarketMetadata(
+            ticker,
+            eventTicker,
+            seriesTicker,
+            status,
+            Instant.parse("2026-05-20T01:00:00Z"),
+            Instant.parse("2026-05-21T01:00:00Z"),
+            null,
+            "{\"rule\":\"value\"}",
+            "{\"ticker\":\"" + ticker + "\"}"
+        );
     }
 }

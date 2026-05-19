@@ -38,7 +38,7 @@ demo, import, and debug workflows.
 | Historical REST backfill | current-basic | REST raw/canonical/metadata DB targets exist; retry taxonomy and broad operational hardening remain limited. |
 | FeaturePlant modules | current-basic | BBO, ticker snapshot, and trade tape modules run from DB, recording, or live Aeron sources; richer stateful/versioned feature streams remain planned. |
 | `feature_outputs` persistent demo path | current-demo | Schema/store, explicit FeaturePlant DB output, deterministic seed, smoke script, and frontend startup snapshot mode exist; async/batched production feature persistence remains planned. |
-| Frontend adapter/static chart | current-demo | HTTP polling adapter and TradingView static chart exist; no production realtime WS/SSE frontend or replay controls. |
+| Frontend adapter/static chart | current-demo | HTTP polling adapter, startup-bounded market metadata search/catalog support, and TradingView static chart exist; no production realtime WS/SSE frontend or replay controls. |
 | Raw replay | current-basic | Timescale source is default; local NDJSON is explicit import/debug fallback; replay publishes byte[] ingress envelopes. |
 | Recording-capture / S3 archive | legacy/debug | Recorder and S3 sync are explicit capture/archive/import/export paths, not the live source of truth. |
 | Observability | current-basic | Backend/FeaturePlant/streamtap metrics, pure Prometheus/Grafana profile, recorder metrics only with explicit `recording-capture`, CI compose profile gates, and deploy smoke checks exist; alert rules and tracing remain planned. |
@@ -133,7 +133,7 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 5. Raw replay defaults to DB/Timescale; use `RAW_REPLAY_SOURCE=local-ndjson` only for explicit fixture/import/debug mode.
 6. Pure observability is available with `docker compose --profile observability up --build`; it starts Prometheus/Grafana and streamtap only, without `stream-recorder`, S3 sync, or `recordings/` writes. Use `recording-capture` explicitly for NDJSON capture/archive runs.
 7. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
-8. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
+8. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL` and can auto-load a bounded market metadata catalog; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
 9. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.
 10. For the reproducible DB-primary demo, run `scripts/db-primary-demo-seed.sh`, follow `docs/demo_db_primary_walkthrough.md`, use `docs/video_demo_checklist.md` for presentation boundaries, and run `scripts/db-primary-demo-smoke.sh` against the frontend adapter.
 

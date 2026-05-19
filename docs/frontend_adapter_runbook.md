@@ -12,6 +12,9 @@ feature rows and does not start the module feeder loop. See
 The default source is canonical DB rows through `DbCanonicalEnvelopeSource`.
 Replay rows are excluded by default. Recording input remains an explicit
 legacy/demo/debug path for local fixture trees under `recordings/canonical`.
+When DB config is available, market metadata is loaded into a bounded startup
+catalog by default and used to enrich symbol/search/catalog responses. This is
+frontend query support, not a production durable query API.
 
 The adapter maintains one in-memory store keyed by `marketTicker`. Bars (OHLC)
 are synthesized on read from buffered `feature.bbo` midpoints. When Plan 02
@@ -27,6 +30,8 @@ to that feature stream without breaking the external API.
 | `FRONTEND_ADAPTER_SOURCE` | `db` | `db`, `recording`, or `aeron` |
 | `FRONTEND_ADAPTER_FEATURE_SOURCE` | `modules` | `modules` or `feature_outputs` |
 | `FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS` | `10000` | max rows loaded from `feature_outputs` at startup |
+| `FRONTEND_ADAPTER_METADATA_SOURCE` | `auto` | `auto`, `db`, or `disabled`; `db` fails fast if metadata cannot load |
+| `FRONTEND_ADAPTER_METADATA_MAX_ROWS` | `1000` | max market metadata rows loaded at startup |
 | `FRONTEND_ADAPTER_DB_URL` | `DB_WRITER_DATABASE_URL` | canonical DB URL when `source=db` |
 | `FRONTEND_ADAPTER_DB_USER` | `DB_WRITER_DATABASE_USER` | canonical DB user |
 | `FRONTEND_ADAPTER_DB_PASSWORD` | `DB_WRITER_DATABASE_PASSWORD` | canonical DB password |
@@ -54,12 +59,15 @@ UDF datafeed (TradingView Lightweight Charts):
 
 `from` and `to` accept seconds or milliseconds (`> 10_000_000_000` is treated as
 ms). History returns `{ s: "no_data" }` when no bars fall inside the window.
+`/datafeed/search` and `/datafeed/symbols` use the startup market metadata
+catalog when available; otherwise they retain feature-store-only behavior.
 
 Companion REST:
 
 - `GET /symbols` — `{ symbols: [{ symbol, latest_event_ts_ms }] }`
 - `GET /quotes?symbols=<csv>` — latest `feature.bbo` per market
 - `GET /features?symbol=<ticker>&feature=<featureName>&limit=<n>` — inspect buffered feature outputs, limit capped at 500
+- `GET /markets?query=<q>&status=<status>&limit=<n>` — compact market metadata catalog, limit capped at 500
 - `GET /health` — status + store size + feature-plant counters
 - `GET /metrics` — Prometheus text
 
@@ -73,6 +81,7 @@ mvn -q -DskipTests package
 
 FRONTEND_ADAPTER_PORT=8090 \
 FRONTEND_ADAPTER_DB_URL=jdbc:postgresql://127.0.0.1:5432/kalshi \
+FRONTEND_ADAPTER_METADATA_SOURCE=auto \
 FRONTEND_ADAPTER_STREAMS=canonical.trade,canonical.ticker,derived.top_of_book \
 FRONTEND_ADAPTER_MODULES=bbo,ticker_snapshot,trade_tape \
 java -cp target/kalshi-project-1.0-SNAPSHOT.jar \
@@ -97,6 +106,13 @@ It defaults to canonical DB rows and falls back from `FRONTEND_ADAPTER_DB_*` to
 Use `FRONTEND_ADAPTER_SOURCE=aeron` only when you want to drive it from a
 running tickerplant channel.
 
+`FRONTEND_ADAPTER_METADATA_SOURCE=auto` loads market metadata when a DB URL is
+available and marks `/health.market_metadata.status=unavailable` if the optional
+metadata snapshot fails. Set `FRONTEND_ADAPTER_METADATA_SOURCE=db` when metadata
+is required and startup should fail on missing DB config or reader errors. Set
+`FRONTEND_ADAPTER_METADATA_SOURCE=disabled` to keep search/symbols feature-store
+only.
+
 For a persisted feature-output demo, set
 `FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs`. This mode requires the same
 DB URL fallback, loads at most `FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS` rows
@@ -117,6 +133,7 @@ curl -s http://127.0.0.1:8090/metrics | head
 curl -s 'http://127.0.0.1:8090/datafeed/config' | jq
 curl -s 'http://127.0.0.1:8090/datafeed/search?query=KX&limit=5' | jq
 curl -s 'http://127.0.0.1:8090/datafeed/symbols?symbol=KXHIGHCHI-26MAY12-T70' | jq
+curl -s 'http://127.0.0.1:8090/markets?query=KX&status=open&limit=5' | jq
 curl -s "http://127.0.0.1:8090/datafeed/history?symbol=KXHIGHCHI-26MAY12-T70&resolution=1S&from=$(($(date -u +%s)-3600))&to=$(date -u +%s)" | jq
 curl -s http://127.0.0.1:8090/datafeed/time
 curl -s 'http://127.0.0.1:8090/symbols' | jq
@@ -135,6 +152,7 @@ curl -s 'http://127.0.0.1:8090/features?symbol=KXHIGHCHI-26MAY12-T70&feature=fea
 - No authorization. Bind to `127.0.0.1` unless you've fronted the service.
 - No refresh loop in `FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs`; restart
   the service to load a newer persisted feature snapshot.
+- No market metadata refresh loop; restart to load newer metadata rows.
 - No PTP-aware code paths. `eventTsMs` from `FeatureOutput` is authoritative.
 
 ## Related Docs

@@ -110,6 +110,7 @@ the adapter.
 ```bash
 curl -fsS http://127.0.0.1:8090/health
 curl -fsS http://127.0.0.1:8090/symbols
+curl -fsS 'http://127.0.0.1:8090/markets?query=DEMO-DBPRIMARY&limit=5'
 curl -fsS 'http://127.0.0.1:8090/features?symbol=DEMO-DBPRIMARY-26MAY19-T50&feature=feature.bbo&limit=5'
 curl -fsS 'http://127.0.0.1:8090/quotes?symbols=DEMO-DBPRIMARY-26MAY19-T50'
 curl -fsS "http://127.0.0.1:8090/datafeed/history?symbol=DEMO-DBPRIMARY-26MAY19-T50&resolution=1&from=$(($(date -u +%s)-7200))&to=$(date -u +%s)"

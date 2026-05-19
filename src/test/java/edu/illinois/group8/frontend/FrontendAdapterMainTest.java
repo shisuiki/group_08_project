@@ -5,6 +5,9 @@ import edu.illinois.group8.feature.DbCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
+import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -119,6 +122,101 @@ class FrontendAdapterMainTest {
             .toList());
     }
 
+    @Test
+    void explicitMetadataDbModeRequiresDatabaseUrl() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_SOURCE", "db",
+            "FRONTEND_ADAPTER_DB_URL", ""
+        ));
+
+        IllegalArgumentException thrown = assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterMain.buildMarketMetadataReader(config)
+        );
+
+        assertTrue(thrown.getMessage().contains("FRONTEND_ADAPTER_METADATA_SOURCE=db"));
+    }
+
+    @Test
+    void metadataReaderBuildsWithoutOpeningConnection() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_SOURCE", "db",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi"
+        ));
+
+        assertInstanceOf(JdbcMarketMetadataReader.class, FrontendAdapterMain.buildMarketMetadataReader(config));
+    }
+
+    @Test
+    void autoMetadataWithoutDbUrlIsDisabled() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_SOURCE", "auto",
+            "FRONTEND_ADAPTER_DB_URL", ""
+        ));
+
+        FrontendMarketMetadataCatalog catalog = FrontendAdapterMain.loadMarketMetadata(
+            config,
+            () -> {
+                throw new AssertionError("reader should not be built");
+            }
+        );
+
+        assertEquals(FrontendMarketMetadataCatalog.LoadStatus.DISABLED, catalog.loadStatus());
+        assertEquals("auto", catalog.source());
+    }
+
+    @Test
+    void autoMetadataFailureDegradesCatalogStatus() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_SOURCE", "auto",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi"
+        ));
+
+        FrontendMarketMetadataCatalog catalog = FrontendAdapterMain.loadMarketMetadata(
+            config,
+            () -> request -> {
+                throw new IllegalStateException("metadata unavailable");
+            }
+        );
+
+        assertEquals(FrontendMarketMetadataCatalog.LoadStatus.UNAVAILABLE, catalog.loadStatus());
+        assertEquals("auto", catalog.source());
+        assertTrue(catalog.error().contains("metadata unavailable"));
+    }
+
+    @Test
+    void marketMetadataReadRequestUsesConfiguredLimit() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_MAX_ROWS", "250"
+        ));
+
+        MarketMetadataReadRequest request = FrontendAdapterMain.marketMetadataReadRequest(config);
+
+        assertEquals(250, request.maxRows());
+    }
+
+    @Test
+    void metadataCatalogLoadsRowsFromReader() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_SOURCE", "db",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi"
+        ));
+        List<MarketMetadataReadRequest> requests = new ArrayList<>();
+
+        FrontendMarketMetadataCatalog catalog = FrontendAdapterMain.loadMarketMetadata(
+            config,
+            () -> request -> {
+                requests.add(request);
+                return List.of(metadata("MKT-1", "open"));
+            }
+        );
+
+        assertEquals(1, requests.size());
+        assertEquals(config.metadataMaxRows(), requests.get(0).maxRows());
+        assertEquals(FrontendMarketMetadataCatalog.LoadStatus.LOADED, catalog.loadStatus());
+        assertEquals(1, catalog.size());
+    }
+
     private static FeatureOutput output(long eventTsMs, String sourceEventId) {
         return new FeatureOutput(
             "feature.bbo",
@@ -127,6 +225,20 @@ class FrontendAdapterMainTest {
             eventTsMs,
             sourceEventId,
             Map.of("midpoint_micros", eventTsMs)
+        );
+    }
+
+    private static MarketMetadata metadata(String ticker, String status) {
+        return new MarketMetadata(
+            ticker,
+            "EVENT-1",
+            "SERIES-1",
+            status,
+            null,
+            null,
+            null,
+            null,
+            "{\"ticker\":\"" + ticker + "\"}"
         );
     }
 }

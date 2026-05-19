@@ -16,7 +16,9 @@ class FrontendAdapterConfigTest {
 
         assertEquals(FrontendAdapterConfig.SourceMode.DB, config.sourceMode());
         assertEquals(FrontendAdapterConfig.FeatureSource.MODULES, config.featureSource());
+        assertEquals(FrontendAdapterConfig.MetadataSource.AUTO, config.metadataSource());
         assertEquals(10_000, config.featureOutputMaxRows());
+        assertEquals(1_000, config.metadataMaxRows());
     }
 
     @Test
@@ -62,6 +64,22 @@ class FrontendAdapterConfigTest {
     }
 
     @Test
+    void metadataSourceAliasesParse() {
+        assertEquals(FrontendAdapterConfig.MetadataSource.AUTO, FrontendAdapterConfig.MetadataSource.parse(null));
+        assertEquals(FrontendAdapterConfig.MetadataSource.AUTO, FrontendAdapterConfig.MetadataSource.parse("auto"));
+        assertEquals(FrontendAdapterConfig.MetadataSource.DB, FrontendAdapterConfig.MetadataSource.parse("db"));
+        assertEquals(
+            FrontendAdapterConfig.MetadataSource.DB,
+            FrontendAdapterConfig.MetadataSource.parse("market-metadata")
+        );
+        assertEquals(FrontendAdapterConfig.MetadataSource.DISABLED, FrontendAdapterConfig.MetadataSource.parse("off"));
+        assertEquals(
+            FrontendAdapterConfig.MetadataSource.DISABLED,
+            FrontendAdapterConfig.MetadataSource.parse("disabled")
+        );
+    }
+
+    @Test
     void invalidFeatureSourceAndMaxRowsAreRejected() {
         assertThrows(
             IllegalArgumentException.class,
@@ -70,6 +88,14 @@ class FrontendAdapterConfigTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "0"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_METADATA_SOURCE", "kafka"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_METADATA_MAX_ROWS", "0"))
         );
     }
 
@@ -117,5 +143,16 @@ class FrontendAdapterConfigTest {
 
         assertEquals(FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS, config.featureSource());
         assertEquals(250, config.featureOutputMaxRows());
+    }
+
+    @Test
+    void metadataConfigParsesSourceAndMaxRows() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_METADATA_SOURCE", "db",
+            "FRONTEND_ADAPTER_METADATA_MAX_ROWS", "250"
+        ));
+
+        assertEquals(FrontendAdapterConfig.MetadataSource.DB, config.metadataSource());
+        assertEquals(250, config.metadataMaxRows());
     }
 }

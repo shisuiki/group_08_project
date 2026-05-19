@@ -38,7 +38,7 @@ Plan status from the markdowns:
 | --- | --- | --- |
 | `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, source watermark snapshots, basic cluster recovery snapshot payloads, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: automated fresh snapshot reload/live recovery, object-store backfill, binary serialization experiments, and WebSocket reconnect/subscription restore reliability. |
 | `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, DB-backed default input, recording/Aeron sources, fair-polled live stream subscriptions, a feature runtime, bounded output buffer, explicit DB `feature_outputs` writes, and BBO/ticker/trade templates. | Productionize feature persistence, add richer stateful modules, and add a durable query/export layer that can consume buffered feature outputs from live or historical sources. |
-| `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer` path has been removed; a current frontend adapter HTTP service and lightweight chart demo expose datafeed/search/history/quotes/health/metrics endpoints. | Production frontend work should add durable query backing, WS/SSE streaming, replay controls, and frontend hardening behind the feature/query boundary. |
+| `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer` path has been removed; a current frontend adapter HTTP service and lightweight chart demo expose datafeed/search/history/quotes/markets/health/metrics endpoints with startup-bounded metadata catalog support. | Production frontend work should add durable query backing, WS/SSE streaming, replay controls, and frontend hardening behind the feature/query boundary. |
 | `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, cached hot-path metric handles, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
 | `05_semantic_feature_plant_ontology_pricing_plan.md` | Not implemented in source packages today. | Add a downstream semantic/pricing service that consumes canonical streams, feature streams, market metadata, replay, and quality/staleness indicators. |
 
@@ -361,7 +361,7 @@ flowchart LR
   FSTORE --> FAPI
 
   subgraph Frontend["Frontend / Research Placement"]
-    FE2["Frontend adapter HTTP service<br/>datafeed/search/history/quotes/features<br/>health + metrics + persisted snapshot mode"]:::current
+    FE2["Frontend adapter HTTP service<br/>datafeed/search/history/quotes/features/markets<br/>health + metrics + persisted startup snapshots"]:::current
     FEPROD["Production frontend hardening<br/>durable query backing<br/>WS/SSE stream"]:::planned
     CHART2["TradingView or Lightweight Charts<br/>standard datafeed adapter"]:::external
     REPLAYCTRL["Replay viewer controls<br/>pause, resume, seek, speed"]:::planned

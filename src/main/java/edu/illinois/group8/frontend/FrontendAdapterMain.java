@@ -18,6 +18,10 @@ import edu.illinois.group8.storage.db.FeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputReader;
+import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
+import edu.illinois.group8.storage.db.MarketMetadataReader;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,9 +44,11 @@ public final class FrontendAdapterMain {
         );
         if (config.featureSource() == FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS) {
             int seeded = seedFeatureOutputs(config, store, buildFeatureOutputReader(config));
+            FrontendMarketMetadataCatalog metadataCatalog = buildMarketMetadataCatalog(config);
             FrontendAdapterServer server = new FrontendAdapterServer(
                 config,
                 store,
+                metadataCatalog,
                 () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
             );
             server.start();
@@ -54,6 +60,8 @@ public final class FrontendAdapterMain {
             System.out.println("FrontendAdapter listening on " + config.host() + ":" + server.boundPort()
                 + " feature_source=" + config.featureSource().name().toLowerCase(Locale.ROOT)
                 + " seeded_feature_outputs=" + seeded
+                + " market_metadata_status=" + metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT)
+                + " market_metadata_rows=" + metadataCatalog.size()
                 + " max_feature_output_rows=" + config.featureOutputMaxRows());
             stop.await();
             return;
@@ -68,6 +76,7 @@ public final class FrontendAdapterMain {
         FrontendAdapterServer server = new FrontendAdapterServer(
             config,
             store,
+            buildMarketMetadataCatalog(config),
             () -> readFeaturePlantStats(metrics)
         );
         server.start();
@@ -118,6 +127,52 @@ public final class FrontendAdapterMain {
             );
         }
         return JdbcFeatureOutputReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+    }
+
+    static FrontendMarketMetadataCatalog buildMarketMetadataCatalog(FrontendAdapterConfig config) {
+        return loadMarketMetadata(config, () -> buildMarketMetadataReader(config));
+    }
+
+    static FrontendMarketMetadataCatalog loadMarketMetadata(
+        FrontendAdapterConfig config,
+        java.util.function.Supplier<MarketMetadataReader> readerSupplier
+    ) {
+        if (config.metadataSource() == FrontendAdapterConfig.MetadataSource.DISABLED) {
+            return FrontendMarketMetadataCatalog.disabled("disabled");
+        }
+        String source = config.metadataSource().name().toLowerCase(Locale.ROOT);
+        if (config.dbUrl().isBlank()) {
+            if (config.metadataSource() == FrontendAdapterConfig.MetadataSource.DB) {
+                throw new IllegalArgumentException(
+                    "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when "
+                        + "FRONTEND_ADAPTER_METADATA_SOURCE=db"
+                );
+            }
+            return FrontendMarketMetadataCatalog.disabled(source);
+        }
+        try {
+            List<MarketMetadata> rows = readerSupplier.get().read(marketMetadataReadRequest(config));
+            return FrontendMarketMetadataCatalog.loaded(source, rows);
+        } catch (RuntimeException e) {
+            if (config.metadataSource() == FrontendAdapterConfig.MetadataSource.DB) {
+                throw e;
+            }
+            return FrontendMarketMetadataCatalog.unavailable(source, e.getMessage());
+        }
+    }
+
+    static MarketMetadataReadRequest marketMetadataReadRequest(FrontendAdapterConfig config) {
+        return MarketMetadataReadRequest.search(null, null, config.metadataMaxRows());
+    }
+
+    static MarketMetadataReader buildMarketMetadataReader(FrontendAdapterConfig config) {
+        if (config.dbUrl().isBlank()) {
+            throw new IllegalArgumentException(
+                "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when "
+                    + "FRONTEND_ADAPTER_METADATA_SOURCE=db"
+            );
+        }
+        return JdbcMarketMetadataReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
     }
 
     private static void feedLoop(FeaturePlantService service, FrontendAdapterConfig config, AtomicBoolean running) {
