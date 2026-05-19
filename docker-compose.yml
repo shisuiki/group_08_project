@@ -278,6 +278,43 @@ services:
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.replay.raw.RawIngressReplayCli"
 
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_DB: ${LOCAL_DB_NAME:-kalshi_test}
+      POSTGRES_USER: ${LOCAL_DB_USER:-kalshi}
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:-kalshi}
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    networks:
+      - cluster_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  db-migrate:
+    image: flyway/flyway:10.20.1
+    profiles: ["local-db"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME:-kalshi_test}
+      FLYWAY_USER: ${LOCAL_DB_USER:-kalshi}
+      FLYWAY_PASSWORD: ${LOCAL_DB_PASSWORD:-kalshi}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CONNECT_RETRIES: 60
+    volumes:
+      - ./src/main/resources/db/migration:/flyway/sql:ro
+    networks:
+      - cluster_net
+    command: migrate
+
   historical-backfill:
     build: .
     profiles: ["historical-backfill"]
@@ -496,3 +533,6 @@ networks:
     ipam:
       config:
         - subnet: ${CLUSTER_SUBNET:-172.20.0.0/16}
+
+volumes:
+  timescale_data:

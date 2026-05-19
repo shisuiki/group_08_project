@@ -27,6 +27,51 @@ java -cp target/kalshi-project-1.0-SNAPSHOT.jar \
   --dry-run
 ```
 
+## Local DB
+
+Use the `local-db` profile only for local development and demo DB smoke tests.
+It is isolated from `cluster-live`, `recording-capture`, and EC2 deploys.
+
+Start the local Timescale/Postgres service and apply the repository migrations:
+
+```bash
+docker compose --profile local-db up -d timescaledb
+docker compose --profile local-db run --rm db-migrate
+```
+
+Host-run CLIs and tests can use:
+
+```text
+jdbc:postgresql://127.0.0.1:${POSTGRES_HOST_PORT:-5432}/${LOCAL_DB_NAME:-kalshi_test}
+```
+
+Compose services must use the service hostname on `cluster_net`:
+
+```text
+jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME:-kalshi_test}
+```
+
+For local DB-primary demos, point the relevant component URL at the host or
+compose JDBC URL, for example `DB_WRITER_DATABASE_URL`,
+`RAW_REPLAY_DATABASE_URL`, `FEATUREPLANT_DB_URL`,
+`FRONTEND_ADAPTER_DB_URL`, or `RESEARCH_EXPORT_DB_URL`.
+
+Clean up the containers without deleting data:
+
+```bash
+docker compose --profile local-db down
+```
+
+Reset the local DB data by also removing the named volume:
+
+```bash
+docker compose --profile local-db down -v
+```
+
+The demo password variables in `.env.example` are for local development only.
+EC2 deploys should continue to use external DB URL/user/password variables and
+must not rely on the `local-db` profile.
+
 ## Live Startup
 
 Required live settings:
