@@ -21,6 +21,7 @@ down_all_profiles() {
         --profile observability \
         --profile local-db \
         --profile db-primary-product \
+        --profile live-product \
         --profile featureplant \
         --profile raw-replay \
         --profile historical-backfill \
@@ -51,6 +52,11 @@ diagnose_profile() {
         log "Recent db-primary-product logs:"
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
             timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary >&2 || true
+    elif [ "$DEPLOY_PROFILE" = "live-product" ]; then
+        log "Recent live-product logs:"
+        sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
+            timescaledb db-migrate node0 node1 node2 wsclient streamtap \
+            featureplant-db-follower frontend-adapter-db-primary >&2 || true
     fi
 }
 
@@ -84,6 +90,7 @@ db_preflight_service() {
         cluster-live) printf '%s\n' wsclient ;;
         recording-capture) printf '%s\n' wsclient-capture ;;
         db-primary-product) printf '%s\n' featureplant-db-follower ;;
+        live-product) printf '%s\n' wsclient ;;
         *) printf '%s\n' "" ;;
     esac
 }
@@ -114,6 +121,78 @@ db_preflight_product_value() {
     printf '%s\n' "$value"
 }
 
+local_db_url() {
+    env_file="$1"
+    db_name="$(env_file_value "$env_file" LOCAL_DB_NAME)"
+    if [ -z "$db_name" ]; then
+        db_name="kalshi_test"
+    fi
+    printf 'jdbc:postgresql://timescaledb:5432/%s\n' "$db_name"
+}
+
+local_db_value() {
+    env_file="$1"
+    key="$2"
+    fallback="$3"
+    value="$(env_file_value "$env_file" "$key")"
+    if [ -z "$value" ]; then
+        value="$fallback"
+    fi
+    printf '%s\n' "$value"
+}
+
+effective_product_db_value() {
+    env_file="$1"
+    key="$2"
+    fallback="$3"
+    value="$(env_file_value "$env_file" "$key")"
+    if [ -z "$value" ]; then
+        value="$fallback"
+    fi
+    printf '%s\n' "$value"
+}
+
+validate_live_product_db_writer() {
+    env_file="$1"
+    db_enabled="$(env_file_value "$env_file" DB_WRITER_ENABLED)"
+    db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
+    db_user="$(env_file_value "$env_file" DB_WRITER_DATABASE_USER)"
+    db_password="$(env_file_value "$env_file" DB_WRITER_DATABASE_PASSWORD)"
+    local_url="$(local_db_url "$env_file")"
+    local_user="$(local_db_value "$env_file" LOCAL_DB_USER kalshi)"
+    local_password="$(local_db_value "$env_file" LOCAL_DB_PASSWORD kalshi)"
+    featureplant_url="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_URL "$local_url")"
+    featureplant_user="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_USER "$local_user")"
+    featureplant_password="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_PASSWORD "$local_password")"
+    frontend_url="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_URL "$local_url")"
+    frontend_user="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_USER "$local_user")"
+    frontend_password="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_PASSWORD "$local_password")"
+
+    case "$db_enabled" in
+        true|TRUE|True) ;;
+        *)
+            log "live-product requires DB_WRITER_ENABLED=true."
+            return 1
+            ;;
+    esac
+    if [ -z "$db_url" ] || [ -z "$db_user" ] || [ -z "$db_password" ]; then
+        log "live-product requires DB_WRITER_DATABASE_URL, DB_WRITER_DATABASE_USER, and DB_WRITER_DATABASE_PASSWORD."
+        return 1
+    fi
+    if [ "$db_url" != "$featureplant_url" ] || [ "$db_url" != "$frontend_url" ]; then
+        log "live-product requires DB writer, FeaturePlant, and frontend DB URLs to match."
+        return 1
+    fi
+    if [ "$db_user" != "$featureplant_user" ] || [ "$db_user" != "$frontend_user" ]; then
+        log "live-product requires DB writer, FeaturePlant, and frontend DB users to match."
+        return 1
+    fi
+    if [ "$db_password" != "$featureplant_password" ] || [ "$db_password" != "$frontend_password" ]; then
+        log "live-product requires DB writer, FeaturePlant, and frontend DB passwords to match."
+        return 1
+    fi
+}
+
 run_db_release_preflight() {
     env_file="$1"
     service="$(db_preflight_service)"
@@ -131,6 +210,19 @@ run_db_release_preflight() {
             db_url="$(db_preflight_product_value "$env_file" FEATUREPLANT_DB_URL FRONTEND_ADAPTER_DB_URL DB_WRITER_DATABASE_URL)"
             db_user="$(db_preflight_product_value "$env_file" FEATUREPLANT_DB_USER FRONTEND_ADAPTER_DB_USER DB_WRITER_DATABASE_USER)"
             db_password="$(db_preflight_product_value "$env_file" FEATUREPLANT_DB_PASSWORD FRONTEND_ADAPTER_DB_PASSWORD DB_WRITER_DATABASE_PASSWORD)"
+            ;;
+        live-product)
+            if ! validate_live_product_db_writer "$env_file"; then
+                return 1
+            fi
+            db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
+            db_user="$(env_file_value "$env_file" DB_WRITER_DATABASE_USER)"
+            db_password="$(env_file_value "$env_file" DB_WRITER_DATABASE_PASSWORD)"
+            required="true"
+            if [ "$db_url" = "$(local_db_url "$env_file")" ]; then
+                log "Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup."
+                return 0
+            fi
             ;;
         *)
             db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
@@ -161,11 +253,11 @@ run_db_release_preflight() {
     log "DB release preflight passed."
 }
 
-health_smoke_pair() {
-    first_name="$1"
-    first_url="$2"
-    second_name="$3"
-    second_url="$4"
+health_smoke_services() {
+    if [ $(( $# % 2 )) -ne 0 ]; then
+        log "Health smoke check requires name/url pairs."
+        return 1
+    fi
     start_delay="$(numeric_or_default "$WSCLIENT_START_DELAY_SECONDS" 20)"
     if [ "$start_delay" -gt 120 ]; then
         start_delay=120
@@ -175,23 +267,28 @@ health_smoke_pair() {
     timeout_seconds=$((start_delay + 120))
     attempts=$(((timeout_seconds + interval_seconds - 1) / interval_seconds))
     attempt=1
-    first_ok=0
-    second_ok=0
 
     while [ "$attempt" -le "$attempts" ]; do
-        if [ "$first_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$first_url" >/dev/null 2>&1; then
-            log "$first_name health check passed: $first_url"
-            first_ok=1
-        fi
-        if [ "$second_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$second_url" >/dev/null 2>&1; then
-            log "$second_name health check passed: $second_url"
-            second_ok=1
-        fi
-        if [ "$first_ok" -eq 1 ] && [ "$second_ok" -eq 1 ]; then
+        all_ok=1
+        pending=""
+        index=1
+        while [ "$index" -le "$#" ]; do
+            eval "name=\${$index}"
+            index=$((index + 1))
+            eval "url=\${$index}"
+            index=$((index + 1))
+            if curl -fsS --connect-timeout 1 --max-time 2 "$url" >/dev/null 2>&1; then
+                log "$name health check passed: $url"
+            else
+                all_ok=0
+                pending="${pending}${pending:+,}$name"
+            fi
+        done
+        if [ "$all_ok" -eq 1 ]; then
             return 0
         fi
 
-        log "Health checks pending ($attempt/$attempts): $first_name=$first_ok $second_name=$second_ok"
+        log "Health checks pending ($attempt/$attempts): $pending"
         if [ "$attempt" -lt "$attempts" ]; then
             sleep "$interval_seconds"
         fi
@@ -205,17 +302,24 @@ health_smoke_pair() {
 profile_health_smoke() {
     case "$DEPLOY_PROFILE" in
         cluster-live)
-            health_smoke_pair \
+            health_smoke_services \
                 wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health" \
                 streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"
             ;;
         recording-capture)
-            health_smoke_pair \
+            health_smoke_services \
                 wsclient-capture "http://127.0.0.1:${WSCLIENT_CAPTURE_METRICS_HOST_PORT}/health" \
                 stream-recorder "http://127.0.0.1:${STREAM_RECORDER_HOST_PORT}/health"
             ;;
         db-primary-product)
-            health_smoke_pair \
+            health_smoke_services \
+                featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health" \
+                frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"
+            ;;
+        live-product)
+            health_smoke_services \
+                wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health" \
+                streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health" \
                 featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health" \
                 frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"
             ;;

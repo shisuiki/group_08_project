@@ -114,6 +114,44 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void rollbackGateTreatsLiveProductAsFirstClassProfile() throws Exception {
+        String script = read("scripts/ec2-compose-rollback-gate.sh");
+
+        assertTrue(script.contains("--profile live-product"));
+        assertTrue(script.contains("timescaledb db-migrate node0 node1 node2 wsclient streamtap"));
+        assertTrue(script.contains("live-product) printf '%s\\n' wsclient"));
+        assertTrue(script.contains("validate_live_product_db_writer()"));
+        assertTrue(script.contains("live-product requires DB_WRITER_ENABLED=true."));
+        assertTrue(script.contains("live-product requires DB_WRITER_DATABASE_URL, DB_WRITER_DATABASE_USER, and DB_WRITER_DATABASE_PASSWORD."));
+        assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB URLs to match."));
+        assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB users to match."));
+        assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB passwords to match."));
+        assertTrue(script.contains("Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup."));
+        assertTrue(script.contains("wsclient \"http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health\""));
+        assertTrue(script.contains("streamtap \"http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health\""));
+        assertTrue(script.contains("featureplant-db-follower \"http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health\""));
+        assertTrue(script.contains("frontend-adapter-db-primary \"http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health\""));
+        assertTrue(script.contains("required=\"true\""));
+        assertFalse(script.contains("Skipping health smoke checks for DEPLOY_PROFILE=live-product"));
+    }
+
+    @Test
+    void composeValidatorPinsLiveProductProfileAndDbWriterContract() throws Exception {
+        String script = read("scripts/validate-compose-profiles.sh");
+
+        assertTrue(script.contains("validate_config \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_services_absent \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_live_product_services_present"));
+        assertTrue(script.contains("node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary"));
+        assertTrue(script.contains("assert_cluster_live_db_writer_stays_opt_in"));
+        assertTrue(script.contains("'DB_WRITER_ENABLED: \"\"'"));
+        assertTrue(script.contains("assert_live_product_db_writer_expectations"));
+        assertTrue(script.contains("DB_WRITER_DATABASE_URL=jdbc:postgresql://timescaledb:5432/kalshi_test"));
+        assertTrue(script.contains("assert_published_ports_loopback \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
+    }
+
+    @Test
     void deployWorkflowPropagatesDbPrimaryProductPortsToRollbackGate() throws Exception {
         String workflow = read(".github/workflows/deploy-ec2.yml");
 

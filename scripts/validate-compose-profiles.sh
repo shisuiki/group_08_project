@@ -63,6 +63,29 @@ assert_services_present() {
     printf 'PASS compose_services_present profiles=%s services=stream-recorder,s3-recording-sync\n' "$label"
 }
 
+assert_exact_services() {
+    label="$1"
+    expected="$2"
+    shift 2
+    services="$(services_for "$@")"
+    for service in $expected; do
+        if ! printf '%s\n' "$services" | grep -qx "$service"; then
+            printf 'profile %s is missing %s\n' "$label" "$service" >&2
+            exit 1
+        fi
+    done
+    for service in $services; do
+        case " $expected " in
+            *" $service "*) ;;
+            *)
+                printf 'profile %s unexpectedly includes %s\n' "$label" "$service" >&2
+                exit 1
+                ;;
+        esac
+    done
+    printf 'PASS compose_exact_services profiles=%s services=%s\n' "$label" "$expected"
+}
+
 assert_frontend_adapter_metadata_env_present() {
     label="$1"
     shift
@@ -82,20 +105,17 @@ assert_frontend_adapter_metadata_env_present() {
 }
 
 assert_db_primary_product_services_present() {
-    services="$(services_for --profile db-primary-product)"
-    for service in timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary; do
-        if ! printf '%s\n' "$services" | grep -qx "$service"; then
-            printf 'profile db-primary-product is missing %s\n' "$service" >&2
-            exit 1
-        fi
-    done
-    for service in featureplant frontend-adapter; do
-        if printf '%s\n' "$services" | grep -qx "$service"; then
-            printf 'profile db-primary-product unexpectedly includes legacy demo service %s\n' "$service" >&2
-            exit 1
-        fi
-    done
-    printf 'PASS compose_services_present profiles=db-primary-product services=timescaledb,db-migrate,featureplant-db-follower,frontend-adapter-db-primary\n'
+    assert_exact_services \
+        "db-primary-product" \
+        "timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary" \
+        --profile db-primary-product
+}
+
+assert_live_product_services_present() {
+    assert_exact_services \
+        "live-product" \
+        "node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary" \
+        --profile live-product
 }
 
 assert_db_primary_product_defaults_aligned() {
@@ -169,6 +189,67 @@ assert_db_primary_product_defaults_aligned() {
         fi
     done
     printf 'PASS db_primary_product_defaults featureplant=follower frontend=feature_outputs\n'
+}
+
+assert_cluster_live_db_writer_stays_opt_in() {
+    services="$(services_for --profile cluster-live)"
+    for service in timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary; do
+        if printf '%s\n' "$services" | grep -qx "$service"; then
+            printf 'cluster-live unexpectedly includes %s\n' "$service" >&2
+            exit 1
+        fi
+    done
+    rendered="$(service_config_for wsclient --profile cluster-live)"
+    for expected in \
+        'DB_WRITER_ENABLED: ""' \
+        'DB_WRITER_DATABASE_URL: ""' \
+        'DB_WRITER_DATABASE_USER: ""' \
+        'DB_WRITER_DATABASE_PASSWORD: ""'; do
+        if ! printf '%s\n' "$rendered" | grep -q "^      ${expected}$"; then
+            printf 'cluster-live wsclient DB writer default changed: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS cluster_live_db_writer_opt_in\n'
+}
+
+assert_live_product_db_writer_expectations() {
+    rendered="$(
+        DB_WRITER_ENABLED=true \
+        DB_WRITER_DATABASE_URL=jdbc:postgresql://timescaledb:5432/kalshi_test \
+        DB_WRITER_DATABASE_USER=kalshi \
+        DB_WRITER_DATABASE_PASSWORD=kalshi \
+        service_config_for wsclient --profile live-product
+    )"
+    for expected in \
+        'DB_WRITER_ENABLED: "true"' \
+        'DB_WRITER_DATABASE_URL: jdbc:postgresql://timescaledb:5432/kalshi_test' \
+        'DB_WRITER_DATABASE_USER: kalshi' \
+        'DB_WRITER_DATABASE_PASSWORD: kalshi'; do
+        if ! printf '%s\n' "$rendered" | grep -q "^      ${expected}$"; then
+            printf 'live-product wsclient missing DB writer setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    for expected in \
+        'live-product requires DB_WRITER_ENABLED=true.' \
+        'live-product requires DB_WRITER_DATABASE_URL, DB_WRITER_DATABASE_USER, and DB_WRITER_DATABASE_PASSWORD.' \
+        'live-product requires DB writer, FeaturePlant, and frontend DB URLs to match.' \
+        'live-product requires DB writer, FeaturePlant, and frontend DB users to match.' \
+        'live-product requires DB writer, FeaturePlant, and frontend DB passwords to match.' \
+        'Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup.' \
+        "live-product) printf '%s\\n' wsclient" \
+        'wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health"' \
+        'streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"' \
+        'featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health"' \
+        'frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"' \
+        'timescaledb db-migrate node0 node1 node2 wsclient streamtap'; do
+        if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
+            printf 'rollback gate missing live-product behavior: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS live_product_db_writer_expectations\n'
 }
 
 assert_published_ports_loopback() {
@@ -372,12 +453,17 @@ validate_config "historical-backfill" --profile historical-backfill
 validate_config "featureplant" --profile featureplant
 validate_config "raw-replay" --profile raw-replay
 validate_config "db-primary-product" --profile db-primary-product
+validate_config "live-product" --profile live-product
 
 assert_services_absent "observability" --profile observability
 assert_services_absent "cluster-live,observability" --profile cluster-live --profile observability
+assert_services_absent "live-product" --profile live-product
 assert_services_present "recording-capture" --profile recording-capture
 assert_db_primary_product_services_present
+assert_live_product_services_present
 assert_db_primary_product_defaults_aligned
+assert_cluster_live_db_writer_stays_opt_in
+assert_live_product_db_writer_expectations
 assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration
 assert_published_ports_loopback "cluster-live" --profile cluster-live
 assert_published_ports_loopback "single-node-local" --profile single-node-local
@@ -388,6 +474,7 @@ assert_published_ports_loopback "historical-backfill" --profile historical-backf
 assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
 assert_published_ports_loopback "db-primary-product" --profile db-primary-product
+assert_published_ports_loopback "live-product" --profile live-product
 assert_no_default_network "cluster-live" --profile cluster-live
 assert_no_default_network "recording-capture" --profile recording-capture
 assert_no_default_network "observability" --profile observability
@@ -396,6 +483,7 @@ assert_no_default_network "historical-backfill" --profile historical-backfill
 assert_no_default_network "featureplant" --profile featureplant
 assert_no_default_network "raw-replay" --profile raw-replay
 assert_no_default_network "db-primary-product" --profile db-primary-product
+assert_no_default_network "live-product" --profile live-product
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned

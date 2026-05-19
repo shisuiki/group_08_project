@@ -1,7 +1,7 @@
 services:
   node0:
     build: .
-    profiles: ["cluster-live", "single-node-local"]
+    profiles: ["cluster-live", "single-node-local", "live-product"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
       CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
@@ -69,7 +69,7 @@ services:
 
   node1:
     build: .
-    profiles: ["cluster-live"]
+    profiles: ["cluster-live", "live-product"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
       CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
@@ -101,7 +101,7 @@ services:
 
   node2:
     build: .
-    profiles: ["cluster-live"]
+    profiles: ["cluster-live", "live-product"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
       CLUSTER_ADDRESSES: ${CLUSTER_ADDRESSES:-172.20.0.2,172.20.0.3,172.20.0.4}
@@ -133,7 +133,7 @@ services:
 
   wsclient:
     build: .
-    profiles: ["cluster-live"]
+    profiles: ["cluster-live", "live-product"]
     depends_on:
       - node0
       - node1
@@ -304,7 +304,7 @@ services:
 
   timescaledb:
     image: timescale/timescaledb:2.17.2-pg16
-    profiles: ["local-db", "db-primary-product"]
+    profiles: ["local-db", "db-primary-product", "live-product"]
     environment:
       POSTGRES_DB: ${LOCAL_DB_NAME:-kalshi_test}
       POSTGRES_USER: ${LOCAL_DB_USER:-kalshi}
@@ -323,7 +323,7 @@ services:
 
   db-migrate:
     image: flyway/flyway:10.20.1
-    profiles: ["local-db", "db-primary-product"]
+    profiles: ["local-db", "db-primary-product", "live-product"]
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -390,7 +390,7 @@ services:
 
   streamtap:
     build: .
-    profiles: ["cluster-live", "observability"]
+    profiles: ["cluster-live", "observability", "live-product"]
     restart: unless-stopped
     environment:
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
@@ -500,7 +500,7 @@ services:
 
   featureplant-db-follower:
     build: .
-    profiles: ["db-primary-product"]
+    profiles: ["db-primary-product", "live-product"]
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -542,7 +542,7 @@ services:
 
   frontend-adapter-db-primary:
     build: .
-    profiles: ["db-primary-product"]
+    profiles: ["db-primary-product", "live-product"]
     depends_on:
       db-migrate:
         condition: service_completed_successfully
