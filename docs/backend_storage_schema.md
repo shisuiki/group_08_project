@@ -135,6 +135,25 @@ market_payload jsonb not null
 updated_at timestamptz not null default now()
 ```
 
+## Feature Outputs
+
+`feature_outputs` is the durable table for `FeatureOutput` rows. FeaturePlant
+can write it explicitly with `FEATUREPLANT_OUTPUT=db` or `--output=db`; stdout
+remains the default output. The DB sink maps values to sorted compact JSON and
+assigns deterministic `feature_event_id` values. Writes are synchronous through
+`JdbcFeatureOutputStore`; async/batched feature persistence is not implemented.
+
+```text
+feature_event_id text primary key
+source_event_id text
+feature_name text not null
+feature_version integer not null
+market_ticker text
+event_ts_ms bigint
+"values" jsonb not null
+created_at timestamptz not null default now()
+```
+
 ## Replay
 
 Use `edu.illinois.group8.replay.raw.RawIngressReplayCli` to replay raw

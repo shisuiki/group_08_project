@@ -67,8 +67,11 @@ Recommended repository variables:
 - `S3_DELETE_AFTER_UPLOAD`: default `false`; set `true` for whole-universe capture on the EC2 root volume.
 - `FEATUREPLANT_SOURCE`: default `db`; use `recording` only for explicit
   legacy/debug/demo/import runs, or `aeron` for live tickerplant input.
+- `FEATUREPLANT_OUTPUT`: default `stdout`; set `db` to persist FeaturePlant
+  outputs to `feature_outputs`, or `stdout,db` for both.
 - `FEATUREPLANT_DB_URL`: optional canonical DB URL, falling back to
-  `DB_WRITER_DATABASE_URL`; required when `FEATUREPLANT_SOURCE=db`.
+  `DB_WRITER_DATABASE_URL`; required when `FEATUREPLANT_SOURCE=db` or
+  `FEATUREPLANT_OUTPUT` includes `db`.
 - `FEATUREPLANT_DB_USER`: optional DB user, falling back to
   `DB_WRITER_DATABASE_USER`.
 - `FEATUREPLANT_DB_PASSWORD`: optional DB password, falling back to

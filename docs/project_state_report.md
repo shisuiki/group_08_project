@@ -186,8 +186,9 @@ Current database status:
   a replay id or include-replay option is supplied.
 - `market_metadata` schema, isolated JDBC store boundary, and historical REST
   market discovery upsert wiring exist; live/runtime writes are not wired.
-- `feature_outputs` schema and an isolated JDBC store boundary exist; FeaturePlant
-  live/runtime writes are not wired.
+- `feature_outputs` schema, isolated JDBC store boundary, deterministic mapper,
+  and explicit FeaturePlant DB output mode exist. Stdout remains the default;
+  feature output batching/async writes are not wired.
 - No S3-to-Timescale loader is implemented in this repo.
 
 Remaining database migration work:
@@ -253,7 +254,7 @@ Legend:
 | FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, live Aeron fair-polls streams and parses envelopes from byte[] while retaining payload strings, recording is explicit legacy/debug/demo/import; fair-poll coverage uses fake pollers |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
-| Persistent feature store | current-basic | `feature_outputs` schema and isolated JDBC store boundary exist; no FeaturePlant live/runtime wiring |
+| Persistent feature store | current-basic | `feature_outputs` schema/store plus explicit `FEATUREPLANT_OUTPUT=db` FeaturePlant sink exist; stdout remains default and async/batched feature writes are absent |
 | MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` schema/store plus historical REST metadata upsert wiring exists |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
 | Feature/query API | planned | `/features`, `/bars`, WS features absent |

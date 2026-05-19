@@ -4,6 +4,7 @@ import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
+import edu.illinois.group8.storage.db.JdbcFeatureOutputStore;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -21,8 +22,8 @@ public final class FeaturePlantCli {
 
     public static void main(String[] args) {
         Config config = Config.fromEnvironment().withArgs(args);
+        FeatureOutputSink sink = config.outputSink();
         CanonicalEnvelopeSource source = config.source();
-        FeatureOutputSink sink = new StdoutFeatureOutputSink();
         try (
              FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink)) {
             if (config.runOnce()) {
@@ -50,6 +51,7 @@ public final class FeaturePlantCli {
         int batchSize,
         int idleSleepMillis,
         boolean runOnce,
+        String outputMode,
         String dbUrl,
         String dbUser,
         String dbPassword,
@@ -71,6 +73,7 @@ public final class FeaturePlantCli {
                 intValue(env, "FEATUREPLANT_BATCH_SIZE", 100),
                 intValue(env, "FEATUREPLANT_IDLE_SLEEP_MS", 1),
                 Boolean.parseBoolean(value(env, "FEATUREPLANT_RUN_ONCE", "true")),
+                value(env, "FEATUREPLANT_OUTPUT", "stdout"),
                 value(env, "FEATUREPLANT_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
                 value(env, "FEATUREPLANT_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
                 value(env, "FEATUREPLANT_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
@@ -89,6 +92,7 @@ public final class FeaturePlantCli {
             int nextBatchSize = batchSize;
             int nextIdleSleepMillis = idleSleepMillis;
             boolean nextRunOnce = runOnce;
+            String nextOutputMode = outputMode;
             String nextDbUrl = dbUrl;
             String nextDbUser = dbUser;
             String nextDbPassword = dbPassword;
@@ -114,6 +118,8 @@ public final class FeaturePlantCli {
                     nextBatchSize = Integer.parseInt(arg.substring("--batch-size=".length()));
                 } else if (arg.startsWith("--idle-sleep-ms=")) {
                     nextIdleSleepMillis = Integer.parseInt(arg.substring("--idle-sleep-ms=".length()));
+                } else if (arg.startsWith("--output=")) {
+                    nextOutputMode = arg.substring("--output=".length());
                 } else if (arg.startsWith("--db-url=")) {
                     nextDbUrl = arg.substring("--db-url=".length());
                 } else if (arg.startsWith("--db-user=")) {
@@ -142,12 +148,38 @@ public final class FeaturePlantCli {
                 Math.max(1, nextBatchSize),
                 Math.max(0, nextIdleSleepMillis),
                 nextRunOnce,
+                nextOutputMode,
                 nextDbUrl,
                 nextDbUser,
                 nextDbPassword,
                 nextDbIncludeReplayEvents,
                 nextDbReplayId
             );
+        }
+
+        FeatureOutputSink outputSink() {
+            List<FeatureOutputSink> sinks = new ArrayList<>();
+            for (String mode : outputModes(outputMode)) {
+                switch (mode) {
+                    case "stdout", "console" -> sinks.add(new StdoutFeatureOutputSink());
+                    case "db", "postgres", "postgresql", "timescale", "timescaledb" ->
+                        sinks.add(dbOutputSink());
+                    default -> throw new IllegalArgumentException("Unsupported FEATUREPLANT_OUTPUT: " + mode);
+                }
+            }
+            if (sinks.size() == 1) {
+                return sinks.get(0);
+            }
+            return new CompositeFeatureOutputSink(sinks);
+        }
+
+        private FeatureOutputSink dbOutputSink() {
+            if (dbUrl == null || dbUrl.isBlank()) {
+                throw new IllegalArgumentException(
+                    "FEATUREPLANT_DB_URL or --db-url is required when FEATUREPLANT_OUTPUT includes db"
+                );
+            }
+            return new DbFeatureOutputSink(JdbcFeatureOutputStore.fromDriverManager(dbUrl, dbUser, dbPassword));
         }
 
         CanonicalEnvelopeSource source() {
@@ -173,6 +205,23 @@ public final class FeaturePlantCli {
                 dbIncludeReplayEvents,
                 dbReplayId
             );
+        }
+
+        private static List<String> outputModes(String raw) {
+            List<String> modes = new ArrayList<>();
+            for (String mode : csv(raw)) {
+                String normalized = mode.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+                if ("both".equals(normalized)) {
+                    modes.add("stdout");
+                    modes.add("db");
+                } else {
+                    modes.add(normalized);
+                }
+            }
+            if (modes.isEmpty()) {
+                throw new IllegalArgumentException("FEATUREPLANT_OUTPUT must include at least one output.");
+            }
+            return modes.stream().distinct().toList();
         }
 
         private static List<StreamContract> resolveStreams(String raw) {
@@ -248,6 +297,7 @@ public final class FeaturePlantCli {
               --modules=bbo,ticker_snapshot,trade_tape
               --max-events=100000
               --batch-size=100
+              --output=stdout|db|stdout,db
               --run-once
               --follow
             """);

@@ -251,7 +251,7 @@ flowchart LR
     RECSRC["RecordingCanonicalEnvelopeSource<br/>recordings/canonical input"]:::current
     FPSVC1["FeaturePlantCli / FeaturePlantService<br/>poll + module dispatch + metrics text"]:::current
     FMODS["Current modules<br/>feature.bbo, feature.ticker_snapshot,<br/>feature.trade_tape"]:::current
-    FSINKS["Current sinks<br/>Stdout, Collecting,<br/>BoundedFeatureOutputBuffer"]:::storage
+    FSINKS["Current sinks<br/>Stdout, DB feature_outputs,<br/>Collecting, BoundedFeatureOutputBuffer"]:::storage
   end
 
   EXT -.-> AERONSRC
@@ -286,7 +286,7 @@ flowchart LR
     REPLAY2["RawIngressReplayCli<br/>Timescale raw rows by default<br/>+ explicit local NDJSON import/debug"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
     RESTBACK2["HistoricalBackfillCli<br/>DB-primary raw REST + canonical backfill"]:::current
-    CURFEATURE["FeaturePlantService skeleton<br/>DB default + fair-polled Aeron/recording sources<br/>stdout/buffer sinks"]:::current
+    CURFEATURE["FeaturePlantService skeleton<br/>DB default + fair-polled Aeron/recording sources<br/>stdout/DB/buffer sinks"]:::current
     CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
     RECBASE["Basic cluster recovery snapshot<br/>source watermarks + paused book checkpoints<br/>no depth restore"]:::current
   end

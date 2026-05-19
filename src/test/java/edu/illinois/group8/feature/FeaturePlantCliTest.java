@@ -29,10 +29,69 @@ class FeaturePlantCliTest {
             FeaturePlantCli.main(new String[] {
                 "--source=" + source,
                 "--db-url=",
+                "--output=stdout",
                 "--root=" + tempDir,
                 "--max-events=10",
                 "--run-once"
             });
         }
+    }
+
+    @Test
+    void dbOutputRequiresDatabaseUrlEvenForRecordingSource() {
+        IllegalArgumentException thrown = assertThrows(
+            IllegalArgumentException.class,
+            () -> FeaturePlantCli.main(new String[] {
+                "--source=recording",
+                "--root=" + tempDir,
+                "--output=db",
+                "--db-url=",
+                "--max-events=0",
+                "--run-once"
+            })
+        );
+
+        assertTrue(thrown.getMessage().contains("FEATUREPLANT_DB_URL"));
+        assertTrue(thrown.getMessage().contains("FEATUREPLANT_OUTPUT"));
+    }
+
+    @Test
+    void dbOutputWithDatabaseUrlCanRunEmptyRecordingSource() {
+        FeaturePlantCli.main(new String[] {
+            "--source=recording",
+            "--root=" + tempDir,
+            "--output=db",
+            "--db-url=jdbc:postgresql://db:5432/kalshi",
+            "--max-events=0",
+            "--run-once"
+        });
+    }
+
+    @Test
+    void combinedOutputWithDatabaseUrlCanRunEmptyRecordingSource() {
+        FeaturePlantCli.main(new String[] {
+            "--source=recording",
+            "--root=" + tempDir,
+            "--output=stdout,db",
+            "--db-url=jdbc:postgresql://db:5432/kalshi",
+            "--max-events=0",
+            "--run-once"
+        });
+    }
+
+    @Test
+    void unsupportedOutputModeIsRejected() {
+        IllegalArgumentException thrown = assertThrows(
+            IllegalArgumentException.class,
+            () -> FeaturePlantCli.main(new String[] {
+                "--source=recording",
+                "--root=" + tempDir,
+                "--output=kafka",
+                "--max-events=0",
+                "--run-once"
+            })
+        );
+
+        assertTrue(thrown.getMessage().contains("FEATUREPLANT_OUTPUT"));
     }
 }

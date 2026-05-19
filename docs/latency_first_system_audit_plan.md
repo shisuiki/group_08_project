@@ -203,7 +203,8 @@ Deliverables:
   - `raw_ws_events` (landed)
   - `canonical_events` (landed)
   - `latest_market_state` (landed schema/store boundary; not wired live)
-  - `feature_outputs` (landed schema/store boundary; not wired live)
+  - `feature_outputs` (landed schema/store boundary plus explicit FeaturePlant
+    DB output; no async/batched live-hot-path writer)
 - Landed: `AsyncDbWriter` uses split bounded raw/canonical queues and JDBC
   batch insert.
 - Landed: `processor_db_offers_total` counts accepted, dropped-full, and

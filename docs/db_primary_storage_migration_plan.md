@@ -178,7 +178,8 @@ wired.
 
 ### `feature_outputs`
 
-Durable feature store schema and isolated JDBC store boundary.
+Durable feature store schema, isolated JDBC store boundary, and explicit
+FeaturePlant DB output sink.
 
 Required columns:
 
@@ -195,6 +196,10 @@ Indexes:
 
 - `(feature_name, market_ticker, event_ts_ms)`
 - unique `(feature_name, feature_version, source_event_id, market_ticker)`
+
+Status: schema, JDBC store boundary, deterministic FeatureOutput mapper, and
+`FEATUREPLANT_OUTPUT=db` CLI wiring are landed. Output defaults to `stdout`.
+Feature output writes are synchronous; batching/async persistence is not landed.
 
 ### `latest_market_state`
 
@@ -599,10 +604,12 @@ and drop-visible through writer metrics.
   response capture, timestamp-fenced `latest_market_state`, and
   `feature_outputs` plus `market_metadata`.
 - `AsyncDbWriter`, bounded DB writer queues, raw/canonical JDBC writes, raw REST
-  JDBC storage, canonical DB reads, and DB-default replay/feature/frontend/export
-  paths exist.
+  JDBC storage, canonical DB reads, DB-default replay/feature/frontend/export
+  sources, and explicit FeaturePlant DB output writes exist.
 
 ## Remaining Next Batches
 
 1. Finish DB query/API migration and DB-seeded demo data.
-2. Define the S3 archive/import/export retention and restore policy.
+2. Add batching/async policy for feature output persistence if it moves onto a
+   latency-sensitive live path.
+3. Define the S3 archive/import/export retention and restore policy.

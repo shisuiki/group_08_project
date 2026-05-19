@@ -35,9 +35,15 @@ should not subscribe directly to live tickerplant streams.
 The current sinks are intentionally simple:
 
 - `StdoutFeatureOutputSink` writes NDJSON-style feature outputs for smoke tests.
+- `DbFeatureOutputSink` writes `FeatureOutput` rows to `feature_outputs` through
+  `JdbcFeatureOutputStore` when `FEATUREPLANT_OUTPUT=db` is explicit.
 - `BoundedFeatureOutputBuffer` keeps recent outputs in memory for embedded
   adapters.
 - `CollectingFeatureOutputSink` is for tests.
+
+`FEATUREPLANT_OUTPUT` defaults to `stdout`. Use `stdout,db` or `both` only when
+both console output and DB persistence are required. The DB sink writes
+synchronously per feature output; batching/async persistence is not implemented.
 
 ## Explicit Recording Run
 
@@ -62,6 +68,7 @@ both.
 docker compose --profile featureplant run --rm \
   -e FEATUREPLANT_DB_URL='jdbc:postgresql://db:5432/kalshi' \
   -e FEATUREPLANT_DB_USER=kalshi \
+  -e FEATUREPLANT_OUTPUT=db \
   -e FEATUREPLANT_STREAMS=canonical.trade,canonical.ticker,derived.top_of_book \
   -e FEATUREPLANT_MODULES=bbo,ticker_snapshot,trade_tape \
   -e FEATUREPLANT_MAX_EVENTS=10000 \
@@ -74,6 +81,12 @@ by `canonical_commit_seq`. It excludes replay rows by default; use
 `--replay-id=<id>` for one replay or `--include-replay` to include all replay
 rows. If `poll` receives a non-positive fragment limit, the DB source caps each
 read at 1000 rows to avoid unbounded memory growth.
+
+With `FEATUREPLANT_OUTPUT=db`, feature rows are inserted into `feature_outputs`.
+`feature_event_id` is deterministic: outputs with a `source_event_id` use
+feature name/version/source/market identity, while outputs without a source id
+fall back to feature name/version/market/event timestamp/canonical values JSON.
+The current feature version is `1`.
 
 ## Live Run
 
