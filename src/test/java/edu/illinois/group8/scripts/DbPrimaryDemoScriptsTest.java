@@ -145,6 +145,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary"));
         assertTrue(script.contains("assert_cluster_live_db_writer_stays_opt_in"));
         assertTrue(script.contains("'DB_WRITER_ENABLED: \"\"'"));
+        assertTrue(script.contains("\"LOCAL_DB_PASSWORD: \\${{ secrets.LOCAL_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD || 'kalshi' }}\""));
+        assertTrue(script.contains("\"FRONTEND_ADAPTER_DB_PASSWORD: \\${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}\""));
+        assertTrue(script.contains("'LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD'"));
+        assertTrue(script.contains("'FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD'"));
         assertTrue(script.contains("assert_live_product_db_writer_expectations"));
         assertTrue(script.contains("DB_WRITER_DATABASE_URL=jdbc:postgresql://timescaledb:5432/kalshi_test"));
         assertTrue(script.contains("assert_published_ports_loopback \"live-product\" --profile live-product"));
@@ -157,8 +161,20 @@ class DbPrimaryDemoScriptsTest {
 
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT: ${{ vars.DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT || '8090' }}"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT: ${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}"));
+        assertTrue(workflow.contains("LOCAL_DB_NAME: ${{ vars.LOCAL_DB_NAME || 'kalshi_test' }}"));
+        assertTrue(workflow.contains("LOCAL_DB_USER: ${{ vars.LOCAL_DB_USER || 'kalshi' }}"));
+        assertTrue(workflow.contains("LOCAL_DB_PASSWORD: ${{ secrets.LOCAL_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD || 'kalshi' }}"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_URL: ${{ vars.FRONTEND_ADAPTER_DB_URL || vars.DB_WRITER_DATABASE_URL }}"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_USER: ${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_PASSWORD: ${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}"));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT"));
+        assertTrue(workflow.contains("LOCAL_DB_NAME=$LOCAL_DB_NAME"));
+        assertTrue(workflow.contains("LOCAL_DB_USER=$LOCAL_DB_USER"));
+        assertTrue(workflow.contains("LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_URL=$FRONTEND_ADAPTER_DB_URL"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_USER=$FRONTEND_ADAPTER_DB_USER"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD"));
         assertTrue(workflow.contains("printf -v q_db_primary_product_frontend_host_port '%q' \"$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));

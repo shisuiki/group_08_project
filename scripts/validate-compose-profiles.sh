@@ -160,7 +160,8 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_FEATURE_SOURCE: feature_outputs" \
         "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: \"true\"" \
         "FRONTEND_ADAPTER_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
-        "FRONTEND_ADAPTER_DB_USER: kalshi"; do
+        "FRONTEND_ADAPTER_DB_USER: kalshi" \
+        "FRONTEND_ADAPTER_DB_PASSWORD: kalshi"; do
         if ! printf '%s\n' "$frontend_rendered" | grep -q "^      ${expected}$"; then
             printf 'db-primary-product frontend-adapter-db-primary missing default %s\n' "$expected" >&2
             exit 1
@@ -181,7 +182,19 @@ assert_db_primary_product_defaults_aligned() {
     fi
     for expected in \
         "DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT: \${{ vars.DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT || '8090' }}" \
+        "LOCAL_DB_NAME: \${{ vars.LOCAL_DB_NAME || 'kalshi_test' }}" \
+        "LOCAL_DB_USER: \${{ vars.LOCAL_DB_USER || 'kalshi' }}" \
+        "LOCAL_DB_PASSWORD: \${{ secrets.LOCAL_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD || 'kalshi' }}" \
+        "FRONTEND_ADAPTER_DB_URL: \${{ vars.FRONTEND_ADAPTER_DB_URL || vars.DB_WRITER_DATABASE_URL }}" \
+        "FRONTEND_ADAPTER_DB_USER: \${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}" \
+        "FRONTEND_ADAPTER_DB_PASSWORD: \${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}" \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT' \
+        'LOCAL_DB_NAME=$LOCAL_DB_NAME' \
+        'LOCAL_DB_USER=$LOCAL_DB_USER' \
+        'LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD' \
+        'FRONTEND_ADAPTER_DB_URL=$FRONTEND_ADAPTER_DB_URL' \
+        'FRONTEND_ADAPTER_DB_USER=$FRONTEND_ADAPTER_DB_USER' \
+        'FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD' \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port'; do
         if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
             printf 'deploy workflow missing db-primary-product frontend propagation: %s\n' "$expected" >&2
