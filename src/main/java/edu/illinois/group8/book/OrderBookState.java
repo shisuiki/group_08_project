@@ -10,8 +10,6 @@ import edu.illinois.group8.canonical.SequenceGapEvent;
 import edu.illinois.group8.canonical.TopOfBookUpdate;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -37,22 +35,25 @@ public class OrderBookState {
         hasSnapshot = true;
         pausedForRecovery = false;
         lastSequence = snapshot.metadata().sourceSequence();
-        return changedTopOfBookEvents(snapshot.eventId(), snapshot.metadata());
+        CanonicalEvent topOfBookUpdate = changedTopOfBookEvent(
+            snapshot.eventId(),
+            snapshot.metadata(),
+            currentTopOfBook()
+        );
+        return topOfBookUpdate == null ? BookUpdateResult.empty() : BookUpdateResult.single(topOfBookUpdate);
     }
 
     public BookUpdateResult applyDelta(OrderBookDeltaEvent delta) {
-        List<CanonicalEvent> generated = new ArrayList<>();
         Long actualSequence = delta.metadata().sourceSequence();
 
         if (!hasSnapshot || pausedForRecovery) {
-            generated.add(sequenceGap(
+            return BookUpdateResult.single(sequenceGap(
                 delta.eventId(),
                 delta.metadata(),
                 expectedNextSequence(),
                 actualSequence,
                 !hasSnapshot ? "delta_before_snapshot" : "market_paused_for_snapshot_recovery"
             ));
-            return new BookUpdateResult(generated);
         }
 
         applyLevelDelta(delta);
@@ -60,18 +61,19 @@ public class OrderBookState {
             lastSequence = actualSequence;
         }
 
-        generated.addAll(changedTopOfBookEvents(delta.eventId(), delta.metadata()).generatedEvents());
         TopOfBook current = currentTopOfBook();
+        CanonicalEvent topOfBookUpdate = changedTopOfBookEvent(delta.eventId(), delta.metadata(), current);
         if (current.crossed()) {
-            generated.add(sequenceGap(
+            SequenceGapEvent gap = sequenceGap(
                 delta.eventId(),
                 delta.metadata(),
                 expectedNextSequence(),
                 actualSequence,
                 "crossed_book"
-            ));
+            );
+            return topOfBookUpdate == null ? BookUpdateResult.single(gap) : BookUpdateResult.of(topOfBookUpdate, gap);
         }
-        return new BookUpdateResult(generated);
+        return topOfBookUpdate == null ? BookUpdateResult.empty() : BookUpdateResult.single(topOfBookUpdate);
     }
 
     public TopOfBook currentTopOfBook() {
@@ -98,13 +100,12 @@ public class OrderBookState {
         return lastSequence;
     }
 
-    private BookUpdateResult changedTopOfBookEvents(String sourceEventId, EventMetadata metadata) {
-        TopOfBook current = currentTopOfBook();
+    private CanonicalEvent changedTopOfBookEvent(String sourceEventId, EventMetadata metadata, TopOfBook current) {
         if (current.equals(lastTopOfBook)) {
-            return BookUpdateResult.empty();
+            return null;
         }
         lastTopOfBook = current;
-        return new BookUpdateResult(List.of(new TopOfBookUpdate(
+        return new TopOfBookUpdate(
             KalshiCanonicalParser.eventId(sourceEventId, "top_of_book"),
             metadata,
             current.bidPriceMicros(),
@@ -112,7 +113,7 @@ public class OrderBookState {
             current.askPriceMicros(),
             current.askQuantityMicros(),
             current.crossed()
-        )));
+        );
     }
 
     private void applyLevelDelta(OrderBookDeltaEvent delta) {
