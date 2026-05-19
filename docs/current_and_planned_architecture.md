@@ -37,7 +37,7 @@ Plan status from the markdowns:
 | Plan | Current state | Where remaining planned modules belong |
 | --- | --- | --- |
 | `01_core_backend_implementation_plan.md` | Mostly represented in code: config, ingress envelopes, canonical events, parser, order book state, stream registry, file/object recording, REST backfill, raw replay, Docker profiles, docs, and metrics hooks. | Remaining hardening stays inside the core backend: cluster snapshots/recovery, fuller sequence recovery, object-store backfill, binary serialization experiments, and WebSocket heartbeat reliability. |
-| `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, recording-backed and Aeron-backed sources, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
+| `02_feature_plant_basic_implementation_plan.md` | Initial `feature` package exists: source-agnostic canonical envelope input, DB-backed default input, recording/Aeron sources, a feature runtime, bounded output buffer, and BBO/ticker/trade templates. | Add persistent feature outputs, richer stateful modules, and a query/export layer that can consume buffered feature outputs from live or historical sources. |
 | `03_standard_frontend_integration_plan.md` | The old `IntegrationGatewayServer`, live chart demo, and research CSV gateway path have been removed. | Frontend visualization, backtesting, and research export should attach to the same feature/query boundary used for historical replay, not directly to live tickerplant streams. |
 | `04_basic_instrumentation_plan.md` | Partially implemented: `BackendMetrics`, metrics catalog, recorder/streamtap metrics endpoints, feature module metrics, Prometheus, Grafana, and profiling CLI. | Add explicit data-quality events, trace sampling, and broader alert rules around the future feature and semantic layers. |
 | `05_semantic_feature_plant_ontology_pricing_plan.md` | Not implemented in source packages today. | Add a downstream semantic/pricing service that consumes canonical streams, feature streams, market metadata, replay, and quality/staleness indicators. |
@@ -185,6 +185,7 @@ flowchart LR
     SEQ["SourceSequenceMonitor<br/>optional source sequence gaps"]:::current
     BOOK["OrderBookStateManager<br/>snapshot/delta state<br/>derived top of book"]:::current
     PUB["AeronEventPublisher<br/>serializes canonical JSON"]:::bus
+    CDB["canonical_events<br/>Postgres/Timescale canonical DB"]:::storage
     INTERNAL["Internal event bus<br/>StreamRegistry ID 20"]:::bus
     TP["Tickerplant<br/>routes by stream_name"]:::current
   end
@@ -196,6 +197,7 @@ flowchart LR
   DP --> PARSER
   DP --> SEQ
   DP --> BOOK
+  DP --> CDB
   DP --> PUB
   PUB -->|raw/canonical/derived/system JSON| INTERNAL
   INTERNAL --> TP
@@ -238,6 +240,7 @@ flowchart LR
   RECORDER --> MON
 
   subgraph FeatureCurrent["Current Featureplant Templates"]
+    DBSRC["DbCanonicalEnvelopeSource<br/>default canonical_events input"]:::current
     AERONSRC["AeronCanonicalEnvelopeSource<br/>live external stream input"]:::current
     RECSRC["RecordingCanonicalEnvelopeSource<br/>recordings/canonical input"]:::current
     FPSVC1["FeaturePlantCli / FeaturePlantService<br/>poll + module dispatch + metrics text"]:::current
@@ -246,7 +249,9 @@ flowchart LR
   end
 
   EXT -.-> AERONSRC
+  CDB --> DBSRC
   CANONREC --> RECSRC
+  DBSRC --> FPSVC1
   AERONSRC --> FPSVC1
   RECSRC --> FPSVC1
   FPSVC1 --> FMODS
@@ -267,16 +272,18 @@ flowchart LR
     KALSHI2["Kalshi REST/WS"]:::external
     CORE["Core backend<br/>KalshiSystem + ESBClusteredService + DataProcessor"]:::current
     CANON["Canonical tickerplant streams<br/>raw.*, canonical.*, derived.top_of_book, system.*"]:::current
+    CDB2["canonical_events<br/>Postgres/Timescale canonical DB"]:::current
     RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + recordings/canonical"]:::current
     REPLAY2["RawIngressReplayCli<br/>Timescale/S3 raw selection + ingress injection"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
     RESTBACK2["HistoricalBackfillCli<br/>current raw-rest + canonical backfill"]:::current
-    CURFEATURE["FeaturePlantService skeleton<br/>Aeron/recording sources + stdout/buffer sinks"]:::current
+    CURFEATURE["FeaturePlantService skeleton<br/>DB default + Aeron/recording sources<br/>stdout/buffer sinks"]:::current
     CURMON["Current observability<br/>streamtap, stream-recorder metrics,<br/>Prometheus, Grafana, profiler"]:::current
   end
 
   KALSHI2 --> CORE
   CORE --> CANON
+  CORE --> CDB2
   CORE -->|raw-ingest capture| RAWSTORE
   CANON -->|stream-recorder canonical copy| RAWSTORE
   RAWSTORE --> REPLAY2
@@ -304,7 +311,7 @@ flowchart LR
   RESTHELPERS --> METASTORE
 
   subgraph Feature["Planned Feature Plant Production Layer"]
-    FSRC["CanonicalEnvelopeSource<br/>current live or recording input boundary"]:::current
+    FSRC["CanonicalEnvelopeSource<br/>DB default, live, or recording input boundary"]:::current
     FPSVC["FeaturePlantService<br/>current module dispatch runtime"]:::current
     FPUB["Feature publisher + feature stream registry<br/>versioned feature.* outputs"]:::planned
     STATE["MarketStateStore<br/>latest trade/ticker/OI/BBO/depth"]:::planned
@@ -318,6 +325,7 @@ flowchart LR
   end
 
   CANON -->|live tickerplant source| FSRC
+  CDB2 -->|default canonical DB source| FSRC
   RAWSTORE -->|recordings/canonical source| FSRC
   FSRC --> FPSVC
   METASTORE -->|market metadata| FPSVC

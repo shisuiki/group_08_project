@@ -22,7 +22,10 @@ To get market data, we connect to the Kalshi API with a custom WebSocket client.
 
 As stated before, our service running the WebSocket client sends data messages through the ESB orchestrator to the data processor, which processes them. Processing updates our internal copies of the order books, which lets the processor know if our custom “top of book” message type should be sent. Once the processor decides what should be published, the messages are sent to the tickerplant. The tickerplant then publishes each message to the appropriate data feed, where interested clients are able to connect and read from.
 
-Durable live raw storage is DB-primary: raw websocket input is written to Postgres/Timescale through the async DB writer. The `canonical_events` schema is the next migration target, but the live canonical writer and DB-backed feature/research/frontend readers are not wired yet. Canonical NDJSON remains the legacy/capture/export path until that migration lands.
+Durable live storage is DB-primary: raw websocket input and canonical events are
+written to Postgres/Timescale through the async DB writer path. FeaturePlant
+defaults to the DB canonical reader. Canonical NDJSON remains an explicit
+legacy/capture/export path for recording, demo, import, and debug workflows.
 
 ## Terminology
 
@@ -42,7 +45,10 @@ We used various tools and technologies for our project. We wanted to emphasize t
 
 For our ESB, we are using Aeron Cluster, a distributed system utilizing the Raft consensus algorithm for leader election, fault tolerance, and replication. Aeron clusters also have channels through which services can communicate in a publish/subscribe (pubsub) fashion. We specifically chose Aeron for its low-latency properties, as it is able to receive the messages, process them, and send them to the tickerplant with <100 microsecond latency.
 
-We use Aeron for low-latency publication and Postgres/Timescale for live raw ingest audit and replay. DB-backed canonical query readers remain a migration target. S3-backed NDJSON remains a cold archive/export path for capture profiles, not the live source of truth.
+We use Aeron for low-latency publication and Postgres/Timescale for live raw
+ingest audit, canonical storage, replay, and FeaturePlant input. S3-backed
+NDJSON remains a cold archive/export path for capture profiles, not the live
+source of truth.
 
 Because the Kalshi API uses the WebSocket protocol for streaming live data, we use a WebSocket connection to receive all live market updates. Due to the way that the API requires authentication through headers, it was hard to find a Java WebSocket library that could support this specific need. It ended up being easier to write our own lightweight WebSocket client, so we used our custom-made client to interface with the API.
 
@@ -50,7 +56,12 @@ Because the Kalshi API uses the WebSocket protocol for streaming live data, we u
 
 ### Raw And Canonical Recording
 
-The storage path is split by purpose. Live ingestion writes raw websocket payloads to the DB first. `RawIngestRecorder` and `TickerplantStreamRecorder` remain explicit NDJSON capture tools for recorder soaks, archive/import, downstream-consumer validation, and canonical export until the canonical DB writer/readers are wired. `HistoricalBackfillCli` records REST backfills and can preserve raw REST responses under `raw-rest`.
+The storage path is split by purpose. Live ingestion writes raw websocket
+payloads and canonical events to the DB first. `RawIngestRecorder` and
+`TickerplantStreamRecorder` remain explicit NDJSON capture tools for recorder
+soaks, archive/import, downstream-consumer validation, demos, and debug export.
+`HistoricalBackfillCli` records REST backfills and can preserve raw REST
+responses under `raw-rest`.
 
 ### Real-Time Market Data Listener
 
@@ -80,7 +91,11 @@ The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_h
 
 ### Real-Time Data Storage
 
-New live captures store raw websocket input primarily in Postgres/Timescale. Raw replay defaults to the DB raw ingest table. Canonical DB storage is planned but not yet live-wired, so canonical NDJSON remains the capture/export path for now. NDJSON/S3 recording is retained for `recording-capture`, legacy archive/import, fixtures, and debug exports. The downstream stream recorder remains useful for validating what Aeron clients receive.
+New live captures store raw websocket input and canonical events primarily in
+Postgres/Timescale. Raw replay and FeaturePlant default to DB sources. NDJSON/S3
+recording is retained for `recording-capture`, legacy archive/import, fixtures,
+demo data, and debug exports. The downstream stream recorder remains useful for
+validating what Aeron clients receive.
 
 ## Demo Video
 
@@ -92,7 +107,7 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 3. Run a single local node with `docker compose --profile single-node-local up --build`, or the three-node live stack with `docker compose --profile cluster-live up --build`.
 4. Raw replay defaults to DB/Timescale; local NDJSON replay is explicit fixture/import/debug mode with `RAW_REPLAY_SOURCE=local-ndjson`.
 5. Observability is available with `docker compose --profile observability up --build`.
-6. Featureplant templates can run over recorded history with `docker compose --profile featureplant run --rm featureplant`.
+6. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
 
 Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 
@@ -100,6 +115,8 @@ Backend stream contracts, schema mappings, replay behavior, featureplant behavio
 
 Currently, we are using Unicast for all Aeron channels which is inefficient and tough to code with. This is due to the fact that Multicast with Docker Bridges on MacOS doesn’t work properly; the only way to fix this is by deploying on Linux instead. We eventually plan to deploy our services on a K8s cluster running Linux which should fix our multicast problem. We purposely architected our codebase with layers of abstraction that allow us to switch from Unicast to Multicast endpoints easily.
 
-TimescaleDB is the primary live raw ingest and replay store. Canonical DB readers remain migration work; S3 remains useful for cold archive/export and retained legacy imports without adding more hot-path consumers.
+TimescaleDB is the primary live raw ingest, canonical, replay, and FeaturePlant
+source. S3 remains useful for cold archive/export and retained legacy imports
+without adding more hot-path consumers.
 
 Because our WebSocket client is custom-made to be lightweight, it is lacking some features. For example, the Kalshi API documentation mentions that it uses the WebSocket protocol’s standard ping/pong frames (heartbeat), which we have not yet implemented. This is something we would like to implement to ensure a reliable connection.

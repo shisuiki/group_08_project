@@ -1,10 +1,11 @@
 # Backend Storage Schema
 
-New live raw ingest is DB-primary. The async DB writer stores accepted raw
-websocket input in `raw_ws_events`. The `canonical_events` table/schema exists
-as the target for the next migration step, but the live canonical writer from
-`DataProcessor` is not wired yet. File layouts under `recordings/` remain for
-`recording-capture`, legacy archive/import, local fixtures, and debug exports.
+New live storage is DB-primary. The async DB writer stores accepted raw
+websocket input in `raw_ws_events`, and the canonical DB sink stores normalized
+events in `canonical_events` from `DataProcessor` / cluster runtime. FeaturePlant
+defaults to the canonical DB reader. File layouts under `recordings/` remain for
+`recording-capture`, legacy archive/import, local fixtures, demos, and debug
+exports.
 
 ## Raw Ingest
 
@@ -43,15 +44,16 @@ receive timestamp, market ticker, or raw event id.
 
 ## Downstream Canonical
 
-`canonical_events` is the planned normalized DB table for readers that need
-durable canonical market data. It is not the current live canonical sink until
-`DataProcessor` enqueues canonical copies and readers move off NDJSON.
+`canonical_events` is the normalized DB table for readers that need durable
+canonical market data. `DataProcessor` enqueues canonical copies on the live
+cluster path, and FeaturePlant reads this table by default through the canonical
+DB cursor reader.
 
 `recordings/canonical` is written by `TickerplantStreamRecorder`, which
 subscribes to the tickerplant exactly as a downstream Aeron client would. This
 NDJSON view is used for recording-capture archives, consumer-latency
-measurement, stream-fidelity checks, import/debug workflows, and retained
-legacy feature/research exports.
+measurement, stream-fidelity checks, import/debug/demo workflows, and retained
+legacy research exports.
 
 ```text
 recordings/canonical/

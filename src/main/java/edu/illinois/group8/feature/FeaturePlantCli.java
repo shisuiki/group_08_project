@@ -60,7 +60,7 @@ public final class FeaturePlantCli {
             Map<String, String> env = System.getenv();
             String baseDir = value(env, "BASE_DIR", "/app");
             return new Config(
-                value(env, "FEATUREPLANT_SOURCE", "recording"),
+                value(env, "FEATUREPLANT_SOURCE", "db"),
                 Path.of(value(env, "FEATUREPLANT_RECORDING_ROOT", baseDir + "/recordings")),
                 value(env, "FEATUREPLANT_AERON_CHANNEL",
                     value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
@@ -236,7 +236,7 @@ public final class FeaturePlantCli {
             Usage: FeaturePlantCli [options]
 
             Options:
-              --source=recording|aeron|db
+              --source=db|recording|aeron
               --root=/path/to/recordings
               --channel=aeron:udp?endpoint=224.0.1.1:40456
               --db-url=jdbc:postgresql://db:5432/kalshi

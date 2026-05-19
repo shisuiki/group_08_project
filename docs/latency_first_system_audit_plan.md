@@ -55,14 +55,15 @@ Kalshi WebSocket
   Fix: use a length-prefixed or binary ingress envelope; carry stream id in a
   header; remove `Tickerplant` JSON routing parse.
 
-- [High] Current storage path is file-first, DB is mostly roadmap.
-  Impact: frontend, replay, featureplant, and export still depend on recording
-  files.
+- [High] Some downstream storage paths are still file-backed.
+  Impact: frontend and export still depend on recording files; FeaturePlant has
+  moved to DB by default.
   Evidence: `RawIngestRecorder`, `TickerplantStreamRecorder`,
   `RecordingCanonicalEnvelopeSource`, `RawRecordingReader`, and
   `ResearchExportCli` are file/NDJSON based.
-  Fix: add async DB writer and DB readers; remove runtime NDJSON fallback after
-  DB-backed demo works.
+  Fix: keep FeaturePlant on the canonical DB reader by default, move remaining
+  frontend/export readers to DB, and keep runtime NDJSON as explicit
+  capture/debug/import/export only.
 
 - [High] Best-effort DB conflicts with "complete audit" language.
   Impact: if DB queue drops, DB history is permanently incomplete.

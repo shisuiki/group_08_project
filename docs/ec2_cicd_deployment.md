@@ -62,7 +62,17 @@ Recommended repository variables:
 - `S3_UPLOAD_INTERVAL_SECONDS`: default `60`.
 - `S3_UPLOAD_MIN_AGE_SECONDS`: default `120`.
 - `S3_DELETE_AFTER_UPLOAD`: default `false`; set `true` for whole-universe capture on the EC2 root volume.
-- `FEATUREPLANT_SOURCE`: default `recording`; use `aeron` for live tickerplant input.
+- `FEATUREPLANT_SOURCE`: default `db`; use `recording` only for explicit
+  legacy/debug/demo/import runs, or `aeron` for live tickerplant input.
+- `FEATUREPLANT_DB_URL`: optional canonical DB URL, falling back to
+  `DB_WRITER_DATABASE_URL`; required when `FEATUREPLANT_SOURCE=db`.
+- `FEATUREPLANT_DB_USER`: optional DB user, falling back to
+  `DB_WRITER_DATABASE_USER`.
+- `FEATUREPLANT_DB_PASSWORD`: optional DB password, falling back to
+  `DB_WRITER_DATABASE_PASSWORD`.
+- `FEATUREPLANT_DB_INCLUDE_REPLAY`: default `false`; replay rows are excluded by
+  default.
+- `FEATUREPLANT_DB_REPLAY_ID`: optional replay id filter for DB reads.
 - `FEATUREPLANT_RECORDING_ROOT`: default `/app/recordings`.
 - `FEATUREPLANT_AERON_CHANNEL`: optional override, otherwise uses `AERON_EXTERNAL_CHANNEL`.
 - `FEATUREPLANT_STREAMS`: default `canonical.trade,canonical.ticker,derived.top_of_book`.
@@ -127,7 +137,9 @@ curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/events
 curl http://127.0.0.1:8092/health
 curl http://127.0.0.1:8092/events
-sudo docker compose --env-file .env --profile featureplant run --rm featureplant --max-events=1000
+sudo docker compose --env-file .env --profile featureplant run --rm \
+  -e FEATUREPLANT_MAX_EVENTS=1000 \
+  featureplant
 ```
 
 ## Security Notes

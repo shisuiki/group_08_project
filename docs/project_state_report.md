@@ -53,8 +53,9 @@ Current code differs from the diagram:
   `DataProcessor` / cluster runtime.
 - NDJSON/S3 remains for recording-capture, offline replay, debug, import, and
   export workflows, not the live source of truth.
-- FeaturePlant has an optional canonical DB source; recording remains the
-  default, and frontend/research DB defaults remain migration work.
+- FeaturePlant defaults to the canonical DB source. Recording remains an
+  explicit legacy/debug/demo/import source, and frontend/research DB defaults
+  remain migration work.
 - Current code adds raw replay, REST backfill, stream recorder, featureplant,
   frontend adapter, stream tap, Prometheus/Grafana, and profiling.
 
@@ -129,9 +130,9 @@ Current database status:
   wiring, and raw replay reader support.
 - DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
   reader primitive exists for the current single-writer path and backs the
-  optional FeaturePlant DB source. Its cursor is global over
+  default FeaturePlant DB source. Its cursor is global over
   `canonical_commit_seq`; replay rows are excluded unless a replay id or
-  include-replay option is supplied. Feature/frontend defaults are still
+  include-replay option is supplied. Frontend/research defaults are still
   migration work.
 - No persistent feature store schema is present.
 - No S3-to-Timescale loader is implemented in this repo.
@@ -192,7 +193,7 @@ Legend:
 | Object-store loader/query backfill | planned | no full loader/query path |
 | Raw ingress replay | current-basic | local NDJSON import/debug path and Timescale reader; live raw ingest is DB-primary |
 | Historical REST backfill | current-basic | writes raw-rest and canonical |
-| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; optional canonical DB source available, default still recording |
+| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, recording is explicit legacy/debug/demo/import |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
 | Persistent feature store | planned | no durable feature DB |
@@ -317,7 +318,7 @@ Recommended demo scope:
 
 1. Show current architecture and distinguish roadmap.
 2. Start from sample `recordings/canonical`.
-3. Run `featureplant` over recording.
+3. Run `featureplant` over recording only as an explicit demo/legacy mode.
 4. Run `frontend-adapter` against recording.
 5. Open static chart demo.
 6. Show `/health` and `/metrics`.
@@ -341,7 +342,7 @@ Do not demo as completed:
 5. Add CI gates: `mvn test`, `mvn package`, Docker build, compose config.
 6. Add health smoke checks for frontend adapter, streamtap, recorder.
 7. Default HTTP admin endpoints to localhost or add auth.
-8. Define remaining DB migration: DB readers/query API, feature/frontend DB
-   defaults, and recording import/export boundaries.
+8. Define remaining DB migration: DB query API, frontend/research DB defaults,
+   and recording import/export boundaries.
 9. Decide whether to split Maven modules or at least enforce package boundaries.
 10. Mark semantic/pricing/arb modules as future work only.

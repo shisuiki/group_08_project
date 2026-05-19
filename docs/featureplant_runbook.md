@@ -6,10 +6,10 @@ through `CanonicalEnvelopeSource`, so the same feature module can run against:
 
 - live tickerplant streams through `AeronCanonicalEnvelopeSource`;
 - historical canonical recordings through `RecordingCanonicalEnvelopeSource`;
-- committed canonical DB rows through optional `DbCanonicalEnvelopeSource`.
+- committed canonical DB rows through `DbCanonicalEnvelopeSource`.
 
-The default source remains `recording`; DB reads are opt-in with
-`FEATUREPLANT_SOURCE=db` or `--source=db`.
+The default source is `db`. Recording is explicit legacy/debug/demo/import mode
+with `FEATUREPLANT_SOURCE=recording` or `--source=recording`.
 
 Downstream visualization, backtesting, and research export modules should attach
 to `FeatureOutputSink` or a persistent feature store built behind that sink. They
@@ -31,27 +31,27 @@ The current sinks are intentionally simple:
   adapters.
 - `CollectingFeatureOutputSink` is for tests.
 
-## Historical Run
+## Explicit Recording Run
 
 ```bash
-docker compose --profile featureplant run --rm featureplant \
-  --source=recording \
-  --root=/app/recordings \
-  --streams=canonical.trade,canonical.ticker,derived.top_of_book \
-  --modules=bbo,ticker_snapshot,trade_tape \
-  --max-events=10000 \
-  --run-once
+docker compose --profile featureplant run --rm \
+  -e FEATUREPLANT_SOURCE=recording \
+  -e FEATUREPLANT_RECORDING_ROOT=/app/recordings \
+  -e FEATUREPLANT_STREAMS=canonical.trade,canonical.ticker,derived.top_of_book \
+  -e FEATUREPLANT_MODULES=bbo,ticker_snapshot,trade_tape \
+  -e FEATUREPLANT_MAX_EVENTS=10000 \
+  -e FEATUREPLANT_RUN_ONCE=true \
+  featureplant
 ```
 
 `RecordingCanonicalEnvelopeSource` reads `recordings/canonical`, which may
 contain downstream stream-recorder records, REST historical backfill records, or
 both.
 
-## Database Run
+## Default Database Run
 
 ```bash
 docker compose --profile featureplant run --rm \
-  -e FEATUREPLANT_SOURCE=db \
   -e FEATUREPLANT_DB_URL='jdbc:postgresql://db:5432/kalshi' \
   -e FEATUREPLANT_DB_USER=kalshi \
   -e FEATUREPLANT_STREAMS=canonical.trade,canonical.ticker,derived.top_of_book \
@@ -70,16 +70,17 @@ read at 1000 rows to avoid unbounded memory growth.
 ## Live Run
 
 ```bash
-docker compose --profile featureplant run --rm featureplant \
-  --source=aeron \
-  --channel='aeron:udp?endpoint=224.0.1.1:40456' \
-  --streams=canonical.trade,canonical.ticker,derived.top_of_book \
-  --modules=bbo,ticker_snapshot,trade_tape \
-  --follow
+docker compose --profile featureplant run --rm \
+  -e FEATUREPLANT_SOURCE=aeron \
+  -e FEATUREPLANT_AERON_CHANNEL='aeron:udp?endpoint=224.0.1.1:40456' \
+  -e FEATUREPLANT_STREAMS=canonical.trade,canonical.ticker,derived.top_of_book \
+  -e FEATUREPLANT_MODULES=bbo,ticker_snapshot,trade_tape \
+  -e FEATUREPLANT_RUN_ONCE=false \
+  featureplant
 ```
 
-Use live mode for low-latency feature experiments. Use recording mode for
-dataviz, research export, reproducible backtests, and backfills.
+Use live mode for low-latency feature experiments. Use recording mode only for
+legacy/debug/demo/import workflows.
 
 ## Metrics
 
