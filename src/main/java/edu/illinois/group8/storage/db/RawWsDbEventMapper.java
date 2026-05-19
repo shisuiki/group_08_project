@@ -2,7 +2,6 @@ package edu.illinois.group8.storage.db;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import edu.illinois.group8.parser.KalshiCanonicalParser;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -29,8 +28,9 @@ public final class RawWsDbEventMapper {
         Objects.requireNonNull(input.rawPayload(), "input.rawPayload");
 
         RawMetadata metadata = extractMetadata(input.rawPayload());
+        RawPayloadIdentity identity = rawPayloadIdentity(input.rawPayload());
         return new RawWsDbEvent(
-            KalshiCanonicalParser.rawEventId(input.rawPayload()),
+            identity.rawEventId(),
             input.source(),
             input.captureId(),
             input.connectionId(),
@@ -40,7 +40,7 @@ public final class RawWsDbEventMapper {
             metadata.marketTicker(),
             metadata.sourceChannel(),
             metadata.sourceSequence(),
-            sha256(input.rawPayload()),
+            identity.payloadSha256(),
             input.rawPayload(),
             input.ingestStatus()
         );
@@ -97,13 +97,17 @@ public final class RawWsDbEventMapper {
         return null;
     }
 
-    private static String sha256(String payload) {
+    private static RawPayloadIdentity rawPayloadIdentity(String payload) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(payload.getBytes(StandardCharsets.UTF_8)));
+            String payloadSha256 = HexFormat.of().formatHex(digest.digest(payload.getBytes(StandardCharsets.UTF_8)));
+            return new RawPayloadIdentity("raw_" + payloadSha256.substring(0, 24), payloadSha256);
         } catch (Exception e) {
             throw new IllegalStateException("SHA-256 digest is unavailable", e);
         }
+    }
+
+    private record RawPayloadIdentity(String rawEventId, String payloadSha256) {
     }
 
     private record RawMetadata(String marketTicker, String sourceChannel, Long sourceSequence) {

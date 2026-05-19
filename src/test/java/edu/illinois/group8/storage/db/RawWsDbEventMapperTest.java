@@ -30,6 +30,7 @@ class RawWsDbEventMapperTest {
             "7209534ab232a48af35a61a59a1b5f7cb97e8d4b1229b6ad3e628bdf3ba855d4",
             event.payloadSha256()
         );
+        assertEquals("raw_" + event.payloadSha256().substring(0, 24), event.rawEventId());
         assertEquals("kalshi-ws", event.source());
         assertEquals("capture-1", event.captureId());
         assertEquals("connection-1", event.connectionId());
@@ -66,6 +67,7 @@ class RawWsDbEventMapperTest {
             "17eed55d881c0dd5fe0935a98d89dd9e52d62aed941f3fb7d17bd490e5aa3e8f",
             event.payloadSha256()
         );
+        assertEquals("raw_" + event.payloadSha256().substring(0, 24), event.rawEventId());
         assertEquals("kalshi-ws", event.source());
         assertEquals("capture-1", event.captureId());
         assertEquals("connection-1", event.connectionId());
