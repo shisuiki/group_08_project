@@ -9,6 +9,7 @@ import edu.illinois.group8.storage.db.AsyncDbWriterFactory;
 import edu.illinois.group8.storage.db.DbWriterConfig;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.wrapper.KalshiWebSocketClient;
+import edu.illinois.group8.wrapper.OrderBookRecoveryController;
 import edu.illinois.group8.wrapper.KalshiWrapper;
 import edu.illinois.group8.wrapper.RequestParameters;
 import org.json.simple.JSONArray;
@@ -20,6 +21,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
@@ -41,6 +44,12 @@ public class KalshiSystem {
         RawDbIngestSink rawDbSink = createRawDbIngestSink(DbWriterConfig.fromEnvironment());
         registerRawDbShutdownHook(rawDbSink);
         RawIngestRecorder rawIngestRecorder = createRawIngestRecorder(config);
+        ExecutorService orderBookRecoveryExecutor = newOrderBookRecoveryExecutor();
+        registerOrderBookRecoveryShutdownHook(orderBookRecoveryExecutor);
+        OrderBookRecoveryController orderBookRecoveryController = new OrderBookRecoveryController(
+            orderBookRecoveryExecutor,
+            config.subscriptionAckTimeoutMs()
+        );
 
         KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
         try {
@@ -52,7 +61,15 @@ public class KalshiSystem {
                     newRawDbConnection(rawDbSink),
                     rawIngestRecorder
                 );
-                subscribeOpenMarketCapture(config, wrapper, wsClient, cluster, rawDbSink, rawIngestRecorder);
+                subscribeOpenMarketCapture(
+                    config,
+                    wrapper,
+                    wsClient,
+                    cluster,
+                    rawDbSink,
+                    rawIngestRecorder,
+                    orderBookRecoveryController
+                );
             } else {
                 List<String> tickers = resolveMarketTickers(config, wrapper);
                 if (tickers.isEmpty()) {
@@ -63,7 +80,7 @@ public class KalshiSystem {
                     newRawDbConnection(rawDbSink),
                     rawIngestRecorder
                 );
-                subscribeConfiguredMarketCapture(config, wsClient, tickers);
+                subscribeConfiguredMarketCapture(config, wsClient, tickers, orderBookRecoveryController);
             }
         } catch (InterruptedException exc) {
             Thread.currentThread().interrupt();
@@ -77,7 +94,8 @@ public class KalshiSystem {
         KalshiWebSocketClient wsClient,
         ClientClusterOrchestrator cluster,
         RawDbIngestSink rawDbSink,
-        RawIngestRecorder rawIngestRecorder
+        RawIngestRecorder rawIngestRecorder,
+        OrderBookRecoveryController orderBookRecoveryController
     ) throws InterruptedException {
         List<String> globalChannels = config.websocketGlobalChannels().isEmpty()
             ? requestedOpenMarketGlobalChannels(config.websocketChannels())
@@ -99,14 +117,16 @@ public class KalshiSystem {
             filteredChannels,
             "",
             rawDbSink,
-            rawIngestRecorder
+            rawIngestRecorder,
+            orderBookRecoveryController
         );
     }
 
     private static void subscribeConfiguredMarketCapture(
         BackendConfig config,
         KalshiWebSocketClient wsClient,
-        List<String> tickers
+        List<String> tickers,
+        OrderBookRecoveryController orderBookRecoveryController
     ) throws InterruptedException {
         List<String> globalChannels = config.websocketChannels().stream()
             .filter(FILTER_UNSUPPORTED_CHANNELS::contains)
@@ -120,14 +140,15 @@ public class KalshiSystem {
             wsClient.subscribe(globalChannels.toArray(new String[0]));
             delayBetweenSubscriptions(config);
         }
-        subscribeMarketChunks(config, wsClient, filteredChannels, tickers);
+        subscribeMarketChunks(config, wsClient, filteredChannels, tickers, orderBookRecoveryController);
     }
 
     private static void subscribeMarketChunks(
         BackendConfig config,
         KalshiWebSocketClient wsClient,
         List<String> channels,
-        List<String> tickers
+        List<String> tickers,
+        OrderBookRecoveryController orderBookRecoveryController
     ) throws InterruptedException {
         if (channels.isEmpty()) {
             return;
@@ -143,7 +164,14 @@ public class KalshiSystem {
                     + " of " + tickers.size()
                     + " (subscription " + subscriptionIndex + "/" + subscriptionCount + ")."
             );
-            wsClient.subscribe(channels.toArray(new String[0]), chunk.toArray(new String[0]));
+            String[] channelArray = channels.toArray(new String[0]);
+            String[] marketArray = chunk.toArray(new String[0]);
+            if (orderBookRecoveryController == null) {
+                wsClient.subscribe(channelArray, marketArray);
+            } else {
+                long sid = wsClient.subscribeAndAwaitSid(channelArray, marketArray, config.subscriptionAckTimeoutMs());
+                registerRecoveryMarkets(orderBookRecoveryController, sid, chunk, wsClient::requestSnapshotAndAwaitOk);
+            }
             if (end < tickers.size()) {
                 delayBetweenSubscriptions(config);
             }
@@ -158,7 +186,8 @@ public class KalshiSystem {
         List<String> channels,
         String seriesTicker,
         RawDbIngestSink rawDbSink,
-        RawIngestRecorder rawIngestRecorder
+        RawIngestRecorder rawIngestRecorder,
+        OrderBookRecoveryController orderBookRecoveryController
     ) throws InterruptedException {
         if (channels.isEmpty()) {
             return;
@@ -201,7 +230,8 @@ public class KalshiSystem {
                         channels,
                         chunk,
                         subscribed,
-                        subscriptionSid
+                        subscriptionSid,
+                        orderBookRecoveryController
                     );
                     subscribed = state.totalSubscribed();
                     subscriptionSid = state.sid();
@@ -228,7 +258,8 @@ public class KalshiSystem {
                             channels,
                             chunk,
                             subscribed,
-                            subscriptionSid
+                            subscriptionSid,
+                            orderBookRecoveryController
                         );
                         subscribed = state.totalSubscribed();
                         subscriptionSid = state.sid();
@@ -267,7 +298,8 @@ public class KalshiSystem {
                         channels,
                         chunk,
                         subscribed,
-                        subscriptionSid
+                        subscriptionSid,
+                        orderBookRecoveryController
                     );
                     subscribed = state.totalSubscribed();
                     subscriptionSid = state.sid();
@@ -358,13 +390,26 @@ public class KalshiSystem {
         }
     }
 
+    private static ExecutorService newOrderBookRecoveryExecutor() {
+        return Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "orderbook-recovery-snapshot-requester");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private static void registerOrderBookRecoveryShutdownHook(ExecutorService executor) {
+        Runtime.getRuntime().addShutdownHook(new Thread(executor::shutdownNow, "orderbook-recovery-shutdown"));
+    }
+
     private static OrderbookSubscriptionState subscribeDiscoveredChunk(
         BackendConfig config,
         KalshiWebSocketClient wsClient,
         List<String> channels,
         List<String> chunk,
         int alreadySubscribed,
-        long currentSid
+        long currentSid,
+        OrderBookRecoveryController orderBookRecoveryController
     ) throws InterruptedException {
         int totalAfterChunk = alreadySubscribed + chunk.size();
         System.out.println(
@@ -382,8 +427,23 @@ public class KalshiSystem {
             wsClient.updateAndAwaitOk(sid, "add_markets", marketArray, config.subscriptionAckTimeoutMs());
             System.out.println("Kalshi subscription sid=" + sid + " acknowledged add_markets for " + chunk.size() + " markets.");
         }
+        registerRecoveryMarkets(orderBookRecoveryController, sid, chunk, wsClient::requestSnapshotAndAwaitOk);
         delayBetweenSubscriptions(config);
         return new OrderbookSubscriptionState(sid, totalAfterChunk);
+    }
+
+    static void registerRecoveryMarkets(
+        OrderBookRecoveryController orderBookRecoveryController,
+        long sid,
+        List<String> chunk,
+        OrderBookRecoveryController.SnapshotRequester requester
+    ) {
+        if (orderBookRecoveryController == null || chunk == null || chunk.isEmpty()) {
+            return;
+        }
+        for (String marketTicker : chunk) {
+            orderBookRecoveryController.registerMarket(marketTicker, sid, requester);
+        }
     }
 
     private static List<String> requestedOpenMarketGlobalChannels(List<String> requestedChannels) {

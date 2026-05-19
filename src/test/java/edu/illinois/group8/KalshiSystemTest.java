@@ -1,6 +1,8 @@
 package edu.illinois.group8;
 
 import edu.illinois.group8.canonical.CanonicalEvent;
+import edu.illinois.group8.canonical.EventMetadata;
+import edu.illinois.group8.canonical.SequenceGapEvent;
 import edu.illinois.group8.config.BackendConfig;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.AsyncDbWriter;
@@ -10,14 +12,18 @@ import edu.illinois.group8.storage.db.DbWriterConfig;
 import edu.illinois.group8.storage.db.DbWriterStats;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
+import edu.illinois.group8.wrapper.OrderBookRecoveryController;
+import edu.illinois.group8.wrapper.OrderBookRecoveryController.RequestStatus;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -174,6 +180,101 @@ class KalshiSystemTest {
         sink.close();
 
         assertEquals(1, writer.closeCalls);
+    }
+
+    @Test
+    void registerRecoveryMarketsRegistersMultipleMarketsAndSchedulesSnapshots() {
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750);
+        RecordingSnapshotRequester requester = new RecordingSnapshotRequester();
+
+        KalshiSystem.registerRecoveryMarkets(controller, 42L, List.of("M1", "M2"), requester);
+
+        assertEquals(RequestStatus.SKIPPED_UNKNOWN_MARKET, controller.handleGap(sequenceGap("UNKNOWN")));
+        assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(sequenceGap("M1")));
+        assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(sequenceGap("M2")));
+        assertEquals(2, executor.pendingCount());
+        assertTrue(requester.calls.isEmpty());
+
+        executor.runAll();
+
+        assertEquals(2, requester.calls.size());
+        assertSnapshotCall(requester.calls.get(0), 42L, "M1", 750);
+        assertSnapshotCall(requester.calls.get(1), 42L, "M2", 750);
+    }
+
+    @Test
+    void registerRecoveryMarketsNoopsForNullControllerOrEmptyChunk() {
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750);
+        RecordingSnapshotRequester requester = new RecordingSnapshotRequester();
+
+        assertDoesNotThrow(() -> KalshiSystem.registerRecoveryMarkets(null, 42L, List.of("M1"), requester));
+        assertDoesNotThrow(() -> KalshiSystem.registerRecoveryMarkets(controller, 42L, List.of(), requester));
+
+        assertEquals(RequestStatus.SKIPPED_UNKNOWN_MARKET, controller.handleGap(sequenceGap("M1")));
+        assertEquals(0, executor.pendingCount());
+        assertTrue(requester.calls.isEmpty());
+    }
+
+    private static void assertSnapshotCall(SnapshotCall call, long sid, String marketTicker, int timeoutMs) {
+        assertEquals(sid, call.sid());
+        assertArrayEquals(new String[] {marketTicker}, call.marketTickers());
+        assertEquals(timeoutMs, call.timeoutMs());
+    }
+
+    private static SequenceGapEvent sequenceGap(String marketTicker) {
+        return new SequenceGapEvent(
+            "gap-" + marketTicker,
+            new EventMetadata(
+                "kalshi",
+                "orderbook_delta",
+                42L,
+                4L,
+                marketTicker,
+                null,
+                1L,
+                100L,
+                null,
+                "raw-1",
+                null
+            ),
+            3L,
+            4L,
+            "crossed_book",
+            "pause_market_and_request_fresh_snapshot"
+        );
+    }
+
+    private static final class FakeExecutor implements java.util.concurrent.Executor {
+        private final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
+
+        @Override
+        public void execute(Runnable command) {
+            tasks.add(command);
+        }
+
+        private int pendingCount() {
+            return tasks.size();
+        }
+
+        private void runAll() {
+            while (!tasks.isEmpty()) {
+                tasks.removeFirst().run();
+            }
+        }
+    }
+
+    private record SnapshotCall(long sid, String[] marketTickers, int timeoutMs) {
+    }
+
+    private static final class RecordingSnapshotRequester implements OrderBookRecoveryController.SnapshotRequester {
+        private final List<SnapshotCall> calls = new ArrayList<>();
+
+        @Override
+        public void requestSnapshotAndAwaitOk(long sid, String[] marketTickers, int timeoutMs) {
+            calls.add(new SnapshotCall(sid, marketTickers, timeoutMs));
+        }
     }
 
     private static final class RecordingAsyncDbWriter implements AsyncDbWriter {
