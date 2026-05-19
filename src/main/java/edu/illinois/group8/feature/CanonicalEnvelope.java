@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.illinois.group8.replay.recording.RecordingEvent;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 public record CanonicalEnvelope(
     String streamName,
@@ -16,13 +17,23 @@ public record CanonicalEnvelope(
     public static CanonicalEnvelope fromPayload(String streamName, String payload, ObjectMapper mapper) {
         try {
             JsonNode event = mapper.readTree(payload);
-            return new CanonicalEnvelope(
-                streamNameFrom(streamName, event),
-                payload,
-                event,
-                optionalLong(event.path("metadata").path("event_ts_ms")),
-                optionalLong(event.path("recorder_metadata").path("consumer_receive_ts_ns"))
-            );
+            return fromEvent(streamName, payload, event);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Malformed canonical envelope for stream " + streamName, e);
+        }
+    }
+
+    public static CanonicalEnvelope fromPayloadBytes(
+        String streamName,
+        byte[] payloadUtf8,
+        int offset,
+        int length,
+        ObjectMapper mapper
+    ) {
+        try {
+            JsonNode event = mapper.readTree(payloadUtf8, offset, length);
+            String payload = new String(payloadUtf8, offset, length, StandardCharsets.UTF_8);
+            return fromEvent(streamName, payload, event);
         } catch (IOException e) {
             throw new IllegalArgumentException("Malformed canonical envelope for stream " + streamName, e);
         }
@@ -54,6 +65,16 @@ public record CanonicalEnvelope(
     private static String streamNameFrom(String fallback, JsonNode event) {
         String streamName = event.path("stream_name").asText("");
         return streamName.isBlank() ? fallback : streamName;
+    }
+
+    private static CanonicalEnvelope fromEvent(String streamName, String payload, JsonNode event) {
+        return new CanonicalEnvelope(
+            streamNameFrom(streamName, event),
+            payload,
+            event,
+            optionalLong(event.path("metadata").path("event_ts_ms")),
+            optionalLong(event.path("recorder_metadata").path("consumer_receive_ts_ns"))
+        );
     }
 
     private static Long optionalLong(JsonNode node) {

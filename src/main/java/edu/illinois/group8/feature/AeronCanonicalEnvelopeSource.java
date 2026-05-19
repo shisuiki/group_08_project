@@ -7,7 +7,6 @@ import io.aeron.Aeron;
 import io.aeron.Subscription;
 import io.aeron.driver.MediaDriver;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public class AeronCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
@@ -43,8 +42,7 @@ public class AeronCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
             fragments += subscription.poll((buffer, offset, length, header) -> {
                 byte[] bytes = new byte[length];
                 buffer.getBytes(offset, bytes);
-                String payload = new String(bytes, StandardCharsets.UTF_8);
-                handler.onEvent(CanonicalEnvelope.fromPayload(stream.streamName(), payload, mapper));
+                handler.onEvent(CanonicalEnvelope.fromPayloadBytes(stream.streamName(), bytes, 0, length, mapper));
             }, remaining);
         }
         return fragments;
