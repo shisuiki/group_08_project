@@ -26,10 +26,10 @@ Kalshi WebSocket
   -> WebSocketClient frame parser
   -> KalshiWebSocketClient.onMessage
   -> optional RawIngestRecorder
-  -> JSON ingress envelope
-  -> ClientClusterOrchestrator.writeToCluster
-  -> ESBClusteredService.onSessionMessage
-  -> DataProcessor
+  -> KalshiIngressEnvelope byte[] JSON envelope
+  -> ClientClusterOrchestrator.writeToCluster(byte[])
+  -> ESBClusteredService.onSessionMessage scratch byte[] slice
+  -> DataProcessor.processMessage(byte[], offset, length)
   -> KalshiCanonicalParser
   -> OrderBookStateManager
   -> AeronEventPublisher
@@ -49,10 +49,13 @@ Kalshi WebSocket
 
 - [High] The same message is parsed/copied too many times.
   Impact: avoidable latency and allocation.
-  Evidence: WebSocket frame bytes become `String`; ingress wraps raw payload in
-  JSON; `KalshiIngressEnvelope` parses envelope; `KalshiCanonicalParser` parses
-  raw payload; `Tickerplant` full-tree routing parse has been optimized, but
-  routing still depends on payload-carried stream metadata.
+  Evidence: WebSocket frame bytes still become `String` for the raw Kalshi
+  payload, and `KalshiCanonicalParser` still parses that raw payload string.
+  Status: live ingress and raw replay now send `KalshiIngressEnvelope` as
+  byte[]; the ESB leader reuses a scratch byte[] and parses byte[] slices
+  without allocating a full envelope string. `Tickerplant` full-tree routing
+  parse has been optimized, but routing still depends on payload-carried stream
+  metadata.
   Fix: keep the lightweight routing path; long term, carry stream id/name in a
   header so `Tickerplant` can route without JSON payload inspection.
 
@@ -68,7 +71,7 @@ Kalshi WebSocket
 - [High] Best-effort DB conflicts with "complete audit" language.
   Impact: if DB queue drops, DB history is permanently incomplete.
   Fix: document DB as primary query/audit store for accepted rows only; expose
-  `db_*_dropped_total`, gaps, and watermarks.
+  `db_*_dropped_total`, `processor_db_offers_total`, gaps, and watermarks.
 
 - [Medium, partially resolved] Hot path does expensive ID and numeric work.
   Impact: CPU and allocation overhead on high-frequency orderbook deltas.
@@ -192,7 +195,10 @@ Deliverables:
   - `canonical_events` (landed)
   - `latest_market_state`
   - `feature_outputs`
-- `AsyncDbWriter` with bounded queues and JDBC batch insert.
+- Landed: `AsyncDbWriter` uses split bounded raw/canonical queues and JDBC
+  batch insert.
+- Landed: `processor_db_offers_total` counts accepted, dropped-full, and
+  disabled DB offers by processor path, event type, and stream.
 - `RawEventStore`, `CanonicalEventStore`, `FeatureOutputStore`.
 - `ON CONFLICT DO NOTHING` for idempotent inserts.
 - Drop-on-full metrics.
@@ -201,8 +207,8 @@ Placement:
 
 - Raw DB copy: `KalshiWebSocketClient.onMessage`, after live path acceptance,
   using non-blocking queue offer.
-- Canonical DB copy: prefer downstream Aeron consumer; if in processor, enqueue
-  after publication and never wait.
+- Canonical DB copy: currently enqueued in `DataProcessor` after publication and
+  never waits.
 - Latest state: DB consumer/query layer, not cluster leader hot path.
 
 Verification:
@@ -216,11 +222,13 @@ Verification:
 
 Deliverables:
 
-- Replace JSON ingress envelope with length-prefixed/binary envelope or direct
-  raw bytes plus metadata header.
+- Landed: live wrapper and raw replay write JSON ingress envelopes as byte[];
+  leader-side parsing uses a reusable scratch buffer and byte[] slice parser.
+- Remaining: replace JSON ingress envelope with length-prefixed/binary envelope
+  or direct raw bytes plus metadata header.
 - Add stream id/name header so `Tickerplant` can eventually route from metadata
   instead of payload inspection; full-tree parse optimization is handled.
-- Avoid `byte[] -> String -> byte[]` round trips where possible.
+- Avoid remaining `byte[] -> String -> byte[]` round trips where possible.
 - Landed: common hot decimal strings use fixed-point parsing with `BigDecimal`
   fallback for compatibility.
 - Landed: event id sanitization uses deterministic low-allocation char loops.
@@ -236,6 +244,9 @@ Verification:
 Deliverables:
 
 - Keep current `TreeMap` as correctness baseline.
+- Landed: pause before mutating on order book sequence gaps and pause after
+  crossed books.
+- Remaining: automated fresh snapshot reload and cluster snapshot/restore.
 - Add primitive/discrete price-level book implementation for Kalshi price
   levels.
 - Benchmark snapshot/delta/top-of-book update cost.
@@ -249,7 +260,9 @@ Verification:
 
 Deliverables:
 
-- `DbRawReplaySource` becomes default. (landed)
+- `TimescaleRawReplaySource` is the default raw replay source. (landed)
+- `LocalNdjsonRawReplaySource` remains explicit import/debug mode. (landed)
+- Raw replay publishes byte[] ingress envelopes with `replay_id`. (landed)
 - `DbCanonicalEnvelopeSource` for featureplant/research. (landed)
 - `FrontendQueryStore` for `/symbols`, `/quotes`, `/datafeed/history`.
 - File readers moved to legacy import/test fixture mode.
@@ -345,8 +358,8 @@ Must be decided before implementation:
    - metrics
    - derived top-of-book
    - raw/canonical live publication
-3. Whether canonical DB sink runs inside `DataProcessor` or as downstream
-   Aeron consumer.
+3. Whether to keep the canonical DB sink inside `DataProcessor` or move it to a
+   downstream Aeron consumer.
 4. Whether raw event id should use payload hash, source sequence, or
    connection sequence.
 5. Whether S3 archive export remains in scope after DB migration.
@@ -355,11 +368,11 @@ Must be decided before implementation:
 
 Smallest useful slice:
 
-1. Add Maven Wrapper.
-2. Add perf baseline script for `HotPathProfileCli`.
-3. Land default single-offer/drop-first ingress with drop metrics.
-4. Add `AsyncDbWriter` skeleton with bounded queue and drop metrics.
+1. Maven Wrapper is present.
+2. Perf baseline script for `HotPathProfileCli` is present.
+3. Default single-offer/drop-first ingress with drop metrics is landed.
+4. `AsyncDbWriter` has split raw/canonical bounded queues and drop metrics.
 5. DB migrations for `raw_ws_events` and `canonical_events` are landed.
-6. Add tests for duplicate insert and queue overflow.
+6. Tests cover duplicate insert and queue overflow.
 
 This slice proves the latency-first contract without rewriting the full system.

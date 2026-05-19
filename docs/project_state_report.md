@@ -65,9 +65,10 @@ Main path:
 ```text
 Kalshi REST/WebSocket
   -> KalshiSystem / KalshiWebSocketClient
-  -> ClientClusterOrchestrator
-  -> Aeron Cluster / ESBClusteredService
-  -> DataProcessor
+  -> KalshiIngressEnvelope byte[] ingress
+  -> ClientClusterOrchestrator.writeToCluster(byte[])
+  -> Aeron Cluster / ESBClusteredService scratch byte[] parse
+  -> DataProcessor.processMessage(byte[], offset, length)
   -> internal Aeron stream
   -> Tickerplant
   -> external Aeron streams
@@ -79,10 +80,13 @@ Important classes:
 - `KalshiSystem`: live ingestion entrypoint.
 - `KalshiWrapper`: Kalshi REST wrapper and request signing.
 - `KalshiWebSocketClient`: custom WebSocket client, subscription ack handling,
-  raw ingest envelope creation.
+  raw ingest byte envelope creation.
+- `ClientClusterOrchestrator`: byte[] Aeron Cluster ingress writer.
 - `ClusterMain`: Aeron Cluster node startup.
-- `ESBClusteredService`: leader-side cluster message handling.
-- `DataProcessor`: raw/canonical parsing, order book derived events, metrics.
+- `ESBClusteredService`: leader-side cluster message handling with reusable
+  ingress scratch buffer.
+- `DataProcessor`: raw/canonical parsing, order book derived events, metrics,
+  and DB offer counters.
 - `Tickerplant`: routes internal canonical JSON by `stream_name`.
 - `StreamRegistry`: external stream IDs and stream contracts.
 
@@ -112,7 +116,7 @@ Internal tickerplant bus:
 Live raw websocket accepted rows are DB-primary via the async writer, and
 canonical DB writes are wired in `DataProcessor` / cluster runtime. Recording
 files remain capture/offline/debug/import/export artifacts, not the live source
-of truth.
+of truth. The DB writer uses split bounded raw/canonical queues.
 
 Current recording/export layouts:
 
@@ -133,11 +137,13 @@ Current database status:
 - Postgres/Timescale support includes live raw writes, canonical DB sink
   wiring, raw replay reader support, historical REST canonical backfill, and
   historical raw REST response rows in `raw_rest_responses`.
+- DB writer observability includes raw/canonical queue/drop/write metrics and
+  `processor_db_offers_total` for accepted, dropped-full, and disabled offers.
 - DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
   reader primitive exists for the current single-writer path and backs the
-  default FeaturePlant, frontend adapter, and research export DB sources. Its cursor is global over
-  `canonical_commit_seq`; replay rows are excluded unless a replay id or
-  include-replay option is supplied.
+  default FeaturePlant, frontend adapter, and research export DB sources. Its
+  cursor is global over `canonical_commit_seq`; replay rows are excluded unless
+  a replay id or include-replay option is supplied.
 - No persistent feature store schema is present.
 - No S3-to-Timescale loader is implemented in this repo.
 
@@ -157,6 +163,9 @@ Most "cache" code is in-process memory, not durable cache infrastructure.
 | Component | Type | Durable | Purpose |
 | --- | --- | --- | --- |
 | `RawIngestRecorder.queue` | bounded queue | no | async raw write buffer |
+| `BoundedAsyncDbWriter.rawQueue` | bounded queue | no | non-blocking raw DB write buffer |
+| `BoundedAsyncDbWriter.canonicalQueue` | bounded queue | no | non-blocking canonical DB write buffer |
+| `ESBClusteredService.sessionMessageScratch` | growable byte buffer | no | leader ingress copy reuse |
 | `FrontendFeatureStore.byMarket` | per-market deque | no | recent feature data for chart/quotes |
 | `FrontendFeatureStore.latestByMarket` | map | no | latest feature by market |
 | `BoundedFeatureOutputBuffer` | deque | no | embedded feature output buffer |
@@ -186,7 +195,7 @@ Legend:
 | Canonical event model | current | stream registry and serializer exist |
 | Kalshi WS parser | current | parser error events exist |
 | Kalshi REST parser | current | used by historical backfill |
-| Order book state/top-of-book | current | no robust recovery after restart/gaps |
+| Order book state/top-of-book | current | pauses before mutation on sequence gaps and after crossed books; automated fresh snapshot reload and cluster restore remain planned |
 | Source sequence monitor | current-basic | optional; semantics caveated in docs |
 | Tickerplant routing | current | JSON `stream_name` routing |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
@@ -194,7 +203,7 @@ Legend:
 | Raw REST backfill storage | current | DB-primary `raw_rest_responses`; `raw-rest` files are explicit recording/export/debug |
 | S3 recording sync | current-basic | sidecar/script present |
 | Object-store loader/query backfill | planned | no full loader/query path |
-| Raw ingress replay | current-basic | local NDJSON import/debug path and Timescale reader; live raw ingest is DB-primary |
+| Raw ingress replay | current-basic | Timescale reader default plus local NDJSON import/debug; publishes byte[] ingress envelopes with `replay_id` |
 | Historical REST backfill | current-basic | canonical DB and raw REST DB targets are default; canonical/raw-rest NDJSON are explicit legacy/debug/export |
 | FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, recording is explicit legacy/debug/demo/import |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
@@ -271,15 +280,15 @@ Missing:
 Current:
 
 - Java 17/Maven project.
-- 19 test files under `src/test/java`.
-- GitHub Actions runs `mvn -B test`.
+- Maven Wrapper is present.
+- 43 test files under `src/test/java`.
+- GitHub Actions runs `mvn -B test` and uses Node 24-native
+  `actions/checkout@v6` and `actions/setup-java@v5`.
 - Disabled live network tests exist for Kalshi wrapper.
 - EC2 deploy workflow exists.
 
 Gaps:
 
-- no Maven Wrapper
-- no local `mvn` available in this environment during audit
 - no CI `mvn package` gate
 - no Docker build gate before deploy
 - no `docker compose config` gate
@@ -301,6 +310,7 @@ High priority:
 Reliability risks:
 
 - no cluster business-state restore
+- no automated order book fresh snapshot reload
 - weak REST retry/backoff behavior
 - no full websocket reconnect/subscription restore
 - raw recorder can drop on full queue by configuration

@@ -168,20 +168,20 @@ flowchart LR
   KWS -.->|recordInbound when enabled| RAWREC
   KWS -.->|raw DB side copy when enabled| RAWDB
   RAWREC -.-> RAWSTORE
-  KWS -->|enveloped raw Kalshi JSON| ENVELOPE
+  KWS -->|byte[] KalshiIngressEnvelope| ENVELOPE
   ENVELOPE --> CCO
 
   subgraph RawReplay["Raw Ingress Replay"]
-    RAWREPLAY["RawIngressReplayCli / Service<br/>selects raw events from Timescale by default<br/>or explicit local NDJSON import/debug source<br/>replays raw payloads to ingress"]:::current
+    RAWREPLAY["RawIngressReplayCli / Service<br/>selects raw events from Timescale by default<br/>or explicit local NDJSON import/debug source<br/>replays byte[] ingress envelopes"]:::current
   end
 
   RAWDB -->|default raw replay source| RAWREPLAY
   RAWSTORE -.->|RAW_REPLAY_SOURCE=local-ndjson| RAWREPLAY
-  RAWREPLAY -->|adds replay_id metadata| ENVELOPE
+  RAWREPLAY -->|byte[] envelope with replay_id| ENVELOPE
 
   subgraph ESB["Aeron Cluster / ESB Runtime"]
     CM["ClusterMain<br/>node0-node2 profiles"]:::bus
-    ECS["ESBClusteredService<br/>leader handles ingress"]:::bus
+    ECS["ESBClusteredService<br/>leader handles byte[] ingress<br/>with scratch buffer reuse"]:::bus
     ORCH["ESBClusterCommunicationOrchestrator<br/>internal IPC stream + external Aeron channel"]:::bus
     DP["DataProcessor<br/>normalization, publishing,<br/>metrics"]:::current
     PARSER["KalshiCanonicalParser<br/>RawSourceEvent + canonical events<br/>WS parser"]:::current
@@ -311,7 +311,7 @@ flowchart LR
 
   subgraph CoreHardening["Planned Core Backend Hardening"]
     HEARTBEAT["WebSocket reconnect/subscription restore<br/>connection state metrics"]:::planned
-    RECOVERY["Order book recovery<br/>snapshot reload after gaps<br/>cluster snapshot/restore"]:::planned
+    RECOVERY["Order book recovery<br/>automated snapshot reload<br/>cluster snapshot/restore"]:::planned
     OBJECTBACKFILL["Object-store archive/import/export<br/>S3 retention + restore policy"]:::plannedStorage
     BINARY["Binary serialization experiment<br/>SBE, FlatBuffers, protobuf,<br/>or Agrona buffers"]:::planned
     METASTORE["Market metadata and terms store<br/>markets, events, series, rules text"]:::plannedStorage
