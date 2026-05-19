@@ -4,6 +4,7 @@ import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.feature.AeronCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.BestBidOfferFeatureModule;
 import edu.illinois.group8.feature.CanonicalEnvelopeSource;
+import edu.illinois.group8.feature.DbCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.FeatureModule;
 import edu.illinois.group8.feature.FeatureOutputSink;
 import edu.illinois.group8.feature.FeaturePlantService;
@@ -11,6 +12,8 @@ import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.TickerSnapshotFeatureModule;
 import edu.illinois.group8.feature.TradeTapeFeatureModule;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
+import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -81,13 +84,31 @@ public final class FrontendAdapterMain {
         }
     }
 
-    private static CanonicalEnvelopeSource buildSource(FrontendAdapterConfig config) {
+    static CanonicalEnvelopeSource buildSource(FrontendAdapterConfig config) {
         return switch (config.sourceMode()) {
             case AERON -> new AeronCanonicalEnvelopeSource(config.aeronChannel(), config.streams());
             case RECORDING -> RecordingCanonicalEnvelopeSource.fromRoot(
                 config.recordingRoot(), config.streams(), config.recordingMaxEvents()
             );
+            case DB -> dbSource(config);
         };
+    }
+
+    private static CanonicalEnvelopeSource dbSource(FrontendAdapterConfig config) {
+        if (config.dbUrl().isBlank()) {
+            throw new IllegalArgumentException(
+                "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when FRONTEND_ADAPTER_SOURCE=db"
+            );
+        }
+        return new DbCanonicalEnvelopeSource(
+            new JdbcCanonicalEventReader(
+                JdbcConnectionFactories.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword())
+            ),
+            config.streams(),
+            config.recordingMaxEvents(),
+            config.dbIncludeReplayEvents(),
+            config.dbReplayId()
+        );
     }
 
     static List<FeatureModule> resolveModules(List<String> moduleNames) {

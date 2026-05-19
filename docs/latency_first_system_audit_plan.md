@@ -56,14 +56,14 @@ Kalshi WebSocket
   header; remove `Tickerplant` JSON routing parse.
 
 - [High] Some downstream storage paths are still file-backed.
-  Impact: frontend and export still depend on recording files; FeaturePlant has
-  moved to DB by default.
+  Impact: research export still depends on recording files; FeaturePlant and
+  frontend adapter have moved to DB by default.
   Evidence: `RawIngestRecorder`, `TickerplantStreamRecorder`,
   `RecordingCanonicalEnvelopeSource`, `RawRecordingReader`, and
   `ResearchExportCli` are file/NDJSON based.
-  Fix: keep FeaturePlant on the canonical DB reader by default, move remaining
-  frontend/export readers to DB, and keep runtime NDJSON as explicit
-  capture/debug/import/export only.
+  Fix: keep FeaturePlant and frontend adapter on the canonical DB reader by
+  default, move remaining export readers to DB, and keep runtime NDJSON as
+  explicit capture/debug/import/export only.
 
 - [High] Best-effort DB conflicts with "complete audit" language.
   Impact: if DB queue drops, DB history is permanently incomplete.

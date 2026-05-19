@@ -12,10 +12,10 @@ Set `STREAM_RECORDER_PARTITION_GRANULARITY=minute` to add a `minute=<mm>` partit
 explicitly with `recording-capture` for recorder soak/export runs, or with
 `observability` when Prometheus needs recorder metrics.
 
-DB/Timescale is the default source for live raw replay and FeaturePlant
-canonical input. Research and frontend canonical readers have not moved to DB
-yet, so this directory remains the canonical capture/export source for those
-legacy flows.
+DB/Timescale is the default source for live raw replay, FeaturePlant canonical
+input, and frontend adapter input. Research export still uses this directory,
+and frontend/FeaturePlant can still select it explicitly for legacy/demo/debug
+flows.
 In recording capture, it reflects what a real Aeron consumer observed. In REST
 backfill, `HistoricalBackfillCli` can write parsed canonical events into the
 same layout.
@@ -53,8 +53,8 @@ s3://<bucket>/<prefix>/canonical/stream=canonical.trade/date=2026-05-03/hour=10/
 ```
 
 S3 should be treated as optional cold archive/export for recorder profiles.
-TimescaleDB is the primary live raw ingest audit and replay store; canonical
-DB readers are still migration work.
+TimescaleDB is the primary live raw ingest audit, replay, and canonical reader
+store for FeaturePlant and the frontend adapter.
 
 ## Endpoints
 
@@ -73,7 +73,8 @@ The recorder annotates each stored event with `recorder_metadata`:
 - `storage_commit_ts_ns`
 
 Recorded canonical storage is historical input for featureplant, visualization,
-backtesting, and research export when those workflows explicitly choose NDJSON.
+backtesting, frontend demos, and research export when those workflows explicitly
+choose NDJSON.
 Full end-to-end replay defaults to `edu.illinois.group8.replay.raw.RawIngressReplayCli`
 against DB/Timescale raw ingest; local NDJSON replay is explicit
 fixture/import/debug mode.

@@ -22,18 +22,24 @@ public record FrontendAdapterConfig(
     int maxSymbolsIndexed,
     int fragmentLimit,
     int idleSleepMillis,
-    long recordingMaxEvents
+    long recordingMaxEvents,
+    String dbUrl,
+    String dbUser,
+    String dbPassword,
+    boolean dbIncludeReplayEvents,
+    String dbReplayId
 ) {
     public enum SourceMode {
-        AERON, RECORDING;
+        AERON, RECORDING, DB;
 
         public static SourceMode parse(String raw) {
-            if (raw == null) {
-                return RECORDING;
+            if (raw == null || raw.isBlank()) {
+                return DB;
             }
             return switch (raw.trim().toLowerCase(Locale.ROOT)) {
                 case "aeron", "live", "tickerplant" -> AERON;
                 case "recording", "history", "storage" -> RECORDING;
+                case "db", "postgres", "postgresql", "timescale", "timescaledb" -> DB;
                 default -> throw new IllegalArgumentException("Unknown FRONTEND_ADAPTER_SOURCE: " + raw);
             };
         }
@@ -61,6 +67,10 @@ public record FrontendAdapterConfig(
         if (idleSleepMillis < 0) {
             throw new IllegalArgumentException("idleSleepMillis must be non-negative");
         }
+        dbUrl = normalize(dbUrl);
+        dbUser = normalize(dbUser);
+        dbPassword = dbPassword == null ? "" : dbPassword;
+        dbReplayId = normalize(dbReplayId);
     }
 
     public static FrontendAdapterConfig fromEnvironment() {
@@ -69,7 +79,7 @@ public record FrontendAdapterConfig(
 
     public static FrontendAdapterConfig from(Map<String, String> env) {
         String baseDir = value(env, "BASE_DIR", "/app");
-        SourceMode sourceMode = SourceMode.parse(value(env, "FRONTEND_ADAPTER_SOURCE", "recording"));
+        SourceMode sourceMode = SourceMode.parse(value(env, "FRONTEND_ADAPTER_SOURCE", "db"));
         return new FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_HOST", "127.0.0.1"),
             intValue(env, "FRONTEND_ADAPTER_PORT", 8090),
@@ -84,7 +94,12 @@ public record FrontendAdapterConfig(
             intValue(env, "FRONTEND_ADAPTER_MAX_SYMBOLS_INDEXED", 5_000),
             intValue(env, "FRONTEND_ADAPTER_FRAGMENT_LIMIT", 64),
             intValue(env, "FRONTEND_ADAPTER_IDLE_SLEEP_MS", 1),
-            longValue(env, "FRONTEND_ADAPTER_RECORDING_MAX_EVENTS", 0L)
+            longValue(env, "FRONTEND_ADAPTER_RECORDING_MAX_EVENTS", 0L),
+            value(env, "FRONTEND_ADAPTER_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
+            value(env, "FRONTEND_ADAPTER_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
+            value(env, "FRONTEND_ADAPTER_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
+            Boolean.parseBoolean(value(env, "FRONTEND_ADAPTER_DB_INCLUDE_REPLAY", "false")),
+            value(env, "FRONTEND_ADAPTER_DB_REPLAY_ID", "")
         );
     }
 
@@ -117,6 +132,10 @@ public record FrontendAdapterConfig(
     private static String value(Map<String, String> env, String key, String defaultValue) {
         String value = env.get(key);
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private static int intValue(Map<String, String> env, String key, int defaultValue) {

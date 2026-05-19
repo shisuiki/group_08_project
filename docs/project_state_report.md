@@ -53,8 +53,8 @@ Current code differs from the diagram:
   `DataProcessor` / cluster runtime.
 - NDJSON/S3 remains for recording-capture, offline replay, debug, import, and
   export workflows, not the live source of truth.
-- FeaturePlant defaults to the canonical DB source. Recording remains an
-  explicit legacy/debug/demo/import source, and frontend/research DB defaults
+- FeaturePlant and frontend adapter default to canonical DB rows. Recording
+  remains an explicit legacy/debug/demo/import source, and research DB defaults
   remain migration work.
 - Current code adds raw replay, REST backfill, stream recorder, featureplant,
   frontend adapter, stream tap, Prometheus/Grafana, and profiling.
@@ -200,7 +200,7 @@ Legend:
 | MarketStateStore | planned | latest trade/ticker/OI/BBO/depth store absent |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
 | Feature/query API | planned | `/features`, `/bars`, WS features absent |
-| Frontend adapter | current-demo | HTTP polling datafeed demo |
+| Frontend adapter | current-demo | HTTP polling datafeed demo; canonical DB source is default, recording is explicit legacy/debug/demo |
 | Replay viewer controls | planned | pause/resume/seek/speed absent |
 | Research CSV export | current-basic | recording/export path; DB-backed readers remain migration work |
 | Semantic parser/schema | planned | absent |
@@ -319,7 +319,7 @@ Recommended demo scope:
 1. Show current architecture and distinguish roadmap.
 2. Start from sample `recordings/canonical`.
 3. Run `featureplant` over recording only as an explicit demo/legacy mode.
-4. Run `frontend-adapter` against recording.
+4. Run `frontend-adapter` against recording only for offline demo fixtures.
 5. Open static chart demo.
 6. Show `/health` and `/metrics`.
 7. Optionally show raw replay dry-run.
@@ -342,7 +342,7 @@ Do not demo as completed:
 5. Add CI gates: `mvn test`, `mvn package`, Docker build, compose config.
 6. Add health smoke checks for frontend adapter, streamtap, recorder.
 7. Default HTTP admin endpoints to localhost or add auth.
-8. Define remaining DB migration: DB query API, frontend/research DB defaults,
-   and recording import/export boundaries.
+8. Define remaining DB migration: DB query API, research DB defaults, and
+   recording import/export boundaries.
 9. Decide whether to split Maven modules or at least enforce package boundaries.
 10. Mark semantic/pricing/arb modules as future work only.

@@ -42,7 +42,12 @@ class UdfEndpointsTest {
             5_000,
             64,
             1,
-            0L
+            0L,
+            "",
+            "",
+            "",
+            false,
+            ""
         );
         server = new FrontendAdapterServer(
             config,

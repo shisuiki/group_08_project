@@ -3,9 +3,9 @@
 New live storage is DB-primary. The async DB writer stores accepted raw
 websocket input in `raw_ws_events`, and the canonical DB sink stores normalized
 events in `canonical_events` from `DataProcessor` / cluster runtime. FeaturePlant
-defaults to the canonical DB reader. File layouts under `recordings/` remain for
-`recording-capture`, legacy archive/import, local fixtures, demos, and debug
-exports.
+and the frontend adapter default to the canonical DB reader. File layouts under
+`recordings/` remain for `recording-capture`, legacy archive/import, local
+fixtures, demos, and debug exports.
 
 The DB writer auto-enables when `DB_WRITER_DATABASE_URL` is present and
 `DB_WRITER_ENABLED` is blank or unset. Set `DB_WRITER_ENABLED=false` for an
