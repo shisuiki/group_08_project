@@ -3,7 +3,11 @@ package edu.illinois.group8.esb;
 import edu.illinois.group8.metrics.BackendMetrics;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TickerplantMetricsTest {
@@ -39,5 +43,41 @@ class TickerplantMetricsTest {
         assertTrue(text.contains(
             "backend_publication_backpressure_ns_sum{service=\"tickerplant\",stream=\"canonical.orderbook_delta\"} 33\n"
         ));
+    }
+
+    @Test
+    void extractsTopLevelStreamName() throws Exception {
+        String streamName = Tickerplant.extractTopLevelStreamName("""
+            {"event_id":"e1","stream_name":"derived.top_of_book","metadata":{"stream_name":"canonical.trade"}}
+            """);
+
+        assertEquals("derived.top_of_book", streamName);
+    }
+
+    @Test
+    void nestedStreamNameDoesNotRouteAsTopLevel() throws Exception {
+        String streamName = Tickerplant.extractTopLevelStreamName("""
+            {"event_id":"e1","metadata":{"stream_name":"canonical.trade"}}
+            """);
+
+        assertNull(streamName);
+    }
+
+    @Test
+    void missingAndBlankStreamNameAreReturnedForRouteFailureHandling() throws Exception {
+        assertNull(Tickerplant.extractTopLevelStreamName("{\"event_id\":\"e1\"}"));
+
+        String blank = Tickerplant.extractTopLevelStreamName("""
+            {"event_id":"e1","stream_name":"   "}
+            """);
+        assertTrue(blank.isBlank());
+    }
+
+    @Test
+    void malformedJsonThrowsForParseFailureHandling() {
+        assertThrows(
+            IOException.class,
+            () -> Tickerplant.extractTopLevelStreamName("{\"stream_name\":\"canonical.trade\"")
+        );
     }
 }

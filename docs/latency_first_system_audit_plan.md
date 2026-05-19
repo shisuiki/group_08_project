@@ -51,9 +51,10 @@ Kalshi WebSocket
   Impact: avoidable latency and allocation.
   Evidence: WebSocket frame bytes become `String`; ingress wraps raw payload in
   JSON; `KalshiIngressEnvelope` parses envelope; `KalshiCanonicalParser` parses
-  raw payload; `Tickerplant` parses canonical JSON only to read `stream_name`.
-  Fix: use a length-prefixed or binary ingress envelope; carry stream id in a
-  header; remove `Tickerplant` JSON routing parse.
+  raw payload; `Tickerplant` full-tree routing parse has been optimized, but
+  routing still depends on payload-carried stream metadata.
+  Fix: keep the lightweight routing path; long term, carry stream id/name in a
+  header so `Tickerplant` can route without JSON payload inspection.
 
 - [High] Some downstream storage paths are still file-backed.
   Impact: recording/export/debug/import paths still use files; live FeaturePlant,
@@ -211,7 +212,8 @@ Deliverables:
 
 - Replace JSON ingress envelope with length-prefixed/binary envelope or direct
   raw bytes plus metadata header.
-- Add stream id/name header so `Tickerplant` does not parse JSON to route.
+- Add stream id/name header so `Tickerplant` can eventually route from metadata
+  instead of payload inspection; full-tree parse optimization is handled.
 - Avoid `byte[] -> String -> byte[]` round trips where possible.
 - Replace hot `BigDecimal` parsing with fixed-point parser.
 - Replace regex event id sanitization with deterministic low-allocation logic.

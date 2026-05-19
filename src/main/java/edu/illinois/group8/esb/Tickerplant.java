@@ -1,19 +1,22 @@
 package edu.illinois.group8.esb;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.metrics.BackendMetrics;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Tickerplant implements Runnable {
+    private static final JsonFactory JSON_FACTORY = new JsonFactory();
+
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final Subscription internalSubscription;
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private final BackendMetrics metrics;
     private final BackendMetrics.Counter missingStreamNameFailures;
     private final BackendMetrics.Counter parseFailures;
@@ -48,8 +51,7 @@ public class Tickerplant implements Runnable {
 
     public boolean routeMessage(String message, org.agrona.DirectBuffer buffer, int offset, int length) {
         try {
-            JsonNode root = objectMapper.readTree(message);
-            String streamName = root.path("stream_name").asText(null);
+            String streamName = extractTopLevelStreamName(message);
             if (streamName == null || streamName.isBlank()) {
                 missingStreamNameFailures.increment();
                 return false;
@@ -77,6 +79,45 @@ public class Tickerplant implements Runnable {
             parseFailures.increment();
             return false;
         }
+    }
+
+    static String extractTopLevelStreamName(String message) throws IOException {
+        try (JsonParser parser = JSON_FACTORY.createParser(message)) {
+            JsonToken token = parser.nextToken();
+            if (token == null) {
+                return null;
+            }
+            String streamName = null;
+            if (token == JsonToken.START_OBJECT) {
+                while (parser.nextToken() != JsonToken.END_OBJECT) {
+                    if (parser.currentToken() != JsonToken.FIELD_NAME) {
+                        throw new IOException("Malformed JSON object while reading stream_name");
+                    }
+                    String fieldName = parser.currentName();
+                    JsonToken valueToken = parser.nextToken();
+                    if ("stream_name".equals(fieldName)) {
+                        streamName = scalarText(valueToken, parser);
+                    }
+                    parser.skipChildren();
+                }
+            } else {
+                parser.skipChildren();
+            }
+            if (parser.nextToken() != null) {
+                throw new IOException("Trailing JSON content after canonical event");
+            }
+            return streamName;
+        }
+    }
+
+    private static String scalarText(JsonToken token, JsonParser parser) throws IOException {
+        if (token == null || token == JsonToken.VALUE_NULL) {
+            return null;
+        }
+        if (token.isScalarValue()) {
+            return parser.getText();
+        }
+        return "";
     }
 
     public BackendMetrics metrics() {
