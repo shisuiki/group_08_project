@@ -180,6 +180,52 @@ class SourceSequenceMonitorTest {
     }
 
     @Test
+    void restoreWatermarksReplacesExistingAndDefensivelyCopies() {
+        SourceSequenceMonitor monitor = new SourceSequenceMonitor();
+        monitor.apply(event("""
+            {"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"M1","yes_dollars_fp":[],"no_dollars_fp":[]}}
+            """));
+
+        Map<Long, Long> restoredWatermarks = new HashMap<>();
+        restoredWatermarks.put(2L, 4L);
+        restoredWatermarks.put(3L, 7L);
+        monitor.restoreWatermarks(restoredWatermarks);
+        restoredWatermarks.put(2L, 99L);
+
+        assertEquals(Map.of(2L, 4L, 3L, 7L), monitor.snapshotWatermarks());
+        assertTrue(monitor.apply(event("""
+            {"type":"orderbook_delta","sid":2,"seq":5,"msg":{"market_ticker":"M1","price_dollars":"0.4700","delta_fp":"1.00","side":"yes","ts_ms":1}}
+            """)).isEmpty());
+
+        List<CanonicalEvent> duplicateOldWatermark = monitor.apply(event("""
+            {"type":"orderbook_delta","sid":3,"seq":2,"msg":{"market_ticker":"M2","price_dollars":"0.4700","delta_fp":"1.00","side":"yes","ts_ms":1}}
+            """));
+        SequenceGapEvent gap = onlyGap(duplicateOldWatermark);
+        assertEquals(8L, gap.expectedSequence());
+        assertEquals(2L, gap.actualSequence());
+        assertEquals("non_monotonic_source_sequence", gap.reason());
+    }
+
+    @Test
+    void invalidRestoreWatermarksThrowsWithoutReplacingExisting() {
+        SourceSequenceMonitor monitor = new SourceSequenceMonitor(Map.of(2L, 4L));
+
+        assertThrows(IllegalArgumentException.class, () -> monitor.restoreWatermarks(null));
+
+        Map<Long, Long> nullSubscriptionId = new HashMap<>();
+        nullSubscriptionId.put(null, 1L);
+        assertThrows(IllegalArgumentException.class, () -> monitor.restoreWatermarks(nullSubscriptionId));
+
+        Map<Long, Long> nullSequence = new HashMap<>();
+        nullSequence.put(2L, null);
+        assertThrows(IllegalArgumentException.class, () -> monitor.restoreWatermarks(nullSequence));
+
+        assertThrows(IllegalArgumentException.class, () -> monitor.restoreWatermarks(Map.of(-1L, 1L)));
+        assertThrows(IllegalArgumentException.class, () -> monitor.restoreWatermarks(Map.of(2L, -1L)));
+        assertEquals(Map.of(2L, 4L), monitor.snapshotWatermarks());
+    }
+
+    @Test
     void invalidRestoreInputThrows() {
         assertThrows(IllegalArgumentException.class, () -> new SourceSequenceMonitor(null));
 

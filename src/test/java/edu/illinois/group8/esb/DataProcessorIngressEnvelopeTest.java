@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DataProcessorIngressEnvelopeTest {
@@ -403,6 +405,105 @@ class DataProcessorIngressEnvelopeTest {
             Arrays.asList(new OrderBookRecoveryCheckpoint("M", 6L)),
             processor.orderBookRecoveryCheckpoints()
         );
+    }
+
+    @Test
+    void recoveryStateRoundTripRestoresSourceWatermarkAndPausedBook() {
+        CollectingEventPublisher firstPublisher = new CollectingEventPublisher();
+        DataProcessor firstProcessor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            new SourceSequenceMonitor(),
+            true,
+            true,
+            firstPublisher,
+            new BackendMetrics()
+        );
+        firstProcessor.processMessage(envelope(ORDERBOOK_SNAPSHOT_MESSAGE));
+        firstProcessor.processMessage(envelope(ORDERBOOK_DELTA_SEQ4_MESSAGE));
+
+        DataProcessorRecoveryState recoveryState = firstProcessor.recoveryState();
+        assertEquals(Map.of(11L, 4L), recoveryState.sourceWatermarks());
+        assertEquals(
+            Arrays.asList(new OrderBookRecoveryCheckpoint("M", 2L)),
+            recoveryState.orderBookRecoveryCheckpoints()
+        );
+
+        CollectingEventPublisher restoredPublisher = new CollectingEventPublisher();
+        DataProcessor restoredProcessor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            new SourceSequenceMonitor(),
+            true,
+            true,
+            restoredPublisher,
+            new BackendMetrics()
+        );
+        restoredProcessor.restoreRecoveryState(recoveryState);
+
+        restoredProcessor.processMessage(envelope(ORDERBOOK_DELTA_SEQ4_MESSAGE));
+
+        assertEquals(3, restoredPublisher.events().size());
+        assertEquals("raw_source_event", restoredPublisher.events().get(0).eventType());
+        SequenceGapEvent nonMonotonic = assertInstanceOf(SequenceGapEvent.class, restoredPublisher.events().get(1));
+        assertEquals(Long.valueOf(5L), nonMonotonic.expectedSequence());
+        assertEquals(Long.valueOf(4L), nonMonotonic.actualSequence());
+        assertEquals("non_monotonic_source_sequence", nonMonotonic.reason());
+        assertEquals("orderbook_delta", restoredPublisher.events().get(2).eventType());
+        assertEquals(0L, countEvents(restoredPublisher.events(), "top_of_book_update"));
+
+        restoredProcessor.processMessage(envelope(ORDERBOOK_DELTA_SEQ5_MESSAGE));
+
+        assertEquals(6, restoredPublisher.events().size());
+        SequenceGapEvent recoveryGap = assertInstanceOf(SequenceGapEvent.class, restoredPublisher.events().get(5));
+        assertEquals(Long.valueOf(3L), recoveryGap.expectedSequence());
+        assertEquals(Long.valueOf(5L), recoveryGap.actualSequence());
+        assertEquals("market_paused_for_snapshot_recovery", recoveryGap.reason());
+        assertEquals(0L, countEvents(restoredPublisher.events(), "top_of_book_update"));
+
+        restoredProcessor.processMessage(envelope(ORDERBOOK_RECOVERY_SNAPSHOT_SEQ6_MESSAGE));
+
+        assertEquals(9, restoredPublisher.events().size());
+        assertEquals("top_of_book_update", restoredPublisher.events().get(8).eventType());
+        assertEquals(1L, countEvents(restoredPublisher.events(), "top_of_book_update"));
+        assertEquals(
+            new DataProcessorRecoveryState(
+                Map.of(11L, 6L),
+                Arrays.asList(new OrderBookRecoveryCheckpoint("M", 6L))
+            ),
+            restoredProcessor.recoveryState()
+        );
+    }
+
+    @Test
+    void recoveryStateDefensivelyCopiesSourceAndBookInputs() {
+        Map<Long, Long> sourceWatermarks = new HashMap<>();
+        sourceWatermarks.put(11L, 4L);
+        ArrayList<OrderBookRecoveryCheckpoint> checkpoints = new ArrayList<>();
+        checkpoints.add(new OrderBookRecoveryCheckpoint("M", 2L));
+
+        DataProcessorRecoveryState state = new DataProcessorRecoveryState(sourceWatermarks, checkpoints);
+        sourceWatermarks.put(11L, 99L);
+        checkpoints.clear();
+
+        assertEquals(Map.of(11L, 4L), state.sourceWatermarks());
+        assertEquals(
+            Arrays.asList(new OrderBookRecoveryCheckpoint("M", 2L)),
+            state.orderBookRecoveryCheckpoints()
+        );
+        assertThrows(UnsupportedOperationException.class, () -> state.sourceWatermarks().put(12L, 1L));
+        assertThrows(UnsupportedOperationException.class, () ->
+            state.orderBookRecoveryCheckpoints().add(new OrderBookRecoveryCheckpoint("N", 3L)));
+        assertThrows(IllegalArgumentException.class, () -> new DataProcessorRecoveryState(null, List.of()));
+        assertThrows(IllegalArgumentException.class, () -> new DataProcessorRecoveryState(Map.of(11L, 4L), null));
+        assertThrows(IllegalArgumentException.class, () -> new DataProcessorRecoveryState(
+            Map.of(11L, -1L),
+            List.of()
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new DataProcessorRecoveryState(
+            Map.of(),
+            Arrays.asList(new OrderBookRecoveryCheckpoint(" ", 1L))
+        ));
     }
 
     @Test

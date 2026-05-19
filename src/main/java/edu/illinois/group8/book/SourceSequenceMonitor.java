@@ -25,6 +25,12 @@ public class SourceSequenceMonitor {
         return Collections.unmodifiableMap(new HashMap<>(lastSequenceBySubscription));
     }
 
+    public void restoreWatermarks(Map<Long, Long> restoredWatermarks) {
+        Map<Long, Long> copy = copyWatermarks(restoredWatermarks);
+        lastSequenceBySubscription.clear();
+        lastSequenceBySubscription.putAll(copy);
+    }
+
     public List<CanonicalEvent> apply(CanonicalEvent event) {
         if (event == null || event.metadata() == null) {
             return List.of();
@@ -69,7 +75,7 @@ public class SourceSequenceMonitor {
         ));
     }
 
-    private static Map<Long, Long> copyWatermarks(Map<Long, Long> watermarks) {
+    public static Map<Long, Long> copyWatermarks(Map<Long, Long> watermarks) {
         if (watermarks == null) {
             throw new IllegalArgumentException("Source sequence watermarks must not be null.");
         }

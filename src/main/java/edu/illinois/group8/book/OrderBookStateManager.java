@@ -41,19 +41,30 @@ public class OrderBookStateManager {
     }
 
     public void restorePaused(Collection<OrderBookRecoveryCheckpoint> checkpoints) {
-        if (checkpoints == null) {
-            throw new IllegalArgumentException("Order book recovery checkpoints must not be null.");
-        }
+        List<OrderBookRecoveryCheckpoint> checkpointCopy = copyRecoveryCheckpoints(checkpoints);
         Map<String, OrderBookState> restoredBooks = new HashMap<>();
-        for (OrderBookRecoveryCheckpoint checkpoint : checkpoints) {
-            validateCheckpoint(checkpoint);
-            String marketTicker = checkpoint.marketTicker();
-            if (restoredBooks.put(marketTicker, OrderBookState.restoredPaused(checkpoint)) != null) {
-                throw new IllegalArgumentException("Duplicate order book recovery checkpoint: " + marketTicker);
-            }
+        for (OrderBookRecoveryCheckpoint checkpoint : checkpointCopy) {
+            restoredBooks.put(checkpoint.marketTicker(), OrderBookState.restoredPaused(checkpoint));
         }
         booksByMarket.clear();
         booksByMarket.putAll(restoredBooks);
+    }
+
+    public static List<OrderBookRecoveryCheckpoint> copyRecoveryCheckpoints(
+        Collection<OrderBookRecoveryCheckpoint> checkpoints
+    ) {
+        if (checkpoints == null) {
+            throw new IllegalArgumentException("Order book recovery checkpoints must not be null.");
+        }
+        Map<String, OrderBookRecoveryCheckpoint> byTicker = new HashMap<>();
+        for (OrderBookRecoveryCheckpoint checkpoint : checkpoints) {
+            validateCheckpoint(checkpoint);
+            String marketTicker = checkpoint.marketTicker();
+            if (byTicker.put(marketTicker, checkpoint) != null) {
+                throw new IllegalArgumentException("Duplicate order book recovery checkpoint: " + marketTicker);
+            }
+        }
+        return List.copyOf(checkpoints);
     }
 
     public OrderBookState getState(String marketTicker) {

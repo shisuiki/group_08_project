@@ -228,6 +228,19 @@ public class DataProcessor {
         orderBookStateManager.restorePaused(checkpoints);
     }
 
+    public DataProcessorRecoveryState recoveryState() {
+        return new DataProcessorRecoveryState(
+            sourceSequenceMonitor.snapshotWatermarks(),
+            orderBookStateManager.recoveryCheckpoints()
+        );
+    }
+
+    public void restoreRecoveryState(DataProcessorRecoveryState state) {
+        Objects.requireNonNull(state, "state");
+        sourceSequenceMonitor.restoreWatermarks(state.sourceWatermarks());
+        orderBookStateManager.restorePaused(state.orderBookRecoveryCheckpoints());
+    }
+
     private void handleCanonicalEvent(CanonicalEvent event, boolean suppressOrderBookDerived) {
         publish(event, "canonical");
         canonicalEventCounter(event.eventType()).increment();
