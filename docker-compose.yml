@@ -28,8 +28,8 @@ services:
       cluster_net:
         ipv4_address: ${CLUSTER_NODE0_IP:-172.20.0.2}
     ports:
-      - "${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
-      - "${NODE0_AERON_PORT:-40456}:40456"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE0_AERON_PORT:-40456}:40456"
     shm_size: "2gb"
 
   node0-capture:
@@ -61,8 +61,8 @@ services:
       cluster_net:
         ipv4_address: ${CAPTURE_NODE0_IP:-172.20.0.2}
     ports:
-      - "${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
-      - "${NODE0_AERON_PORT:-40456}:40456"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE0_CLUSTER_PORT_RANGE:-9001-9006}:9001-9006"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE0_AERON_PORT:-40456}:40456"
     volumes:
       - ./recordings:/app/recordings
     shm_size: "2gb"
@@ -95,8 +95,8 @@ services:
       cluster_net:
         ipv4_address: ${CLUSTER_NODE1_IP:-172.20.0.3}
     ports:
-      - "${NODE1_CLUSTER_PORT_RANGE:-9101-9106}:9001-9006"
-      - "${NODE1_AERON_PORT:-40458}:40456"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE1_CLUSTER_PORT_RANGE:-9101-9106}:9001-9006"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE1_AERON_PORT:-40458}:40456"
     shm_size: "2gb"
 
   node2:
@@ -127,8 +127,8 @@ services:
       cluster_net:
         ipv4_address: ${CLUSTER_NODE2_IP:-172.20.0.4}
     ports:
-      - "${NODE2_CLUSTER_PORT_RANGE:-9201-9206}:9001-9006"
-      - "${NODE2_AERON_PORT:-40460}:40456"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE2_CLUSTER_PORT_RANGE:-9201-9206}:9001-9006"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${NODE2_AERON_PORT:-40460}:40456"
     shm_size: "2gb"
 
   wsclient:
@@ -179,7 +179,7 @@ services:
       EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
       ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     ports:
-      - "127.0.0.1:${WSCLIENT_METRICS_HOST_PORT:-8091}:8091"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${WSCLIENT_METRICS_HOST_PORT:-8091}:8091"
     networks:
       cluster_net:
         ipv4_address: ${WSCLIENT_IP:-172.20.0.6}
@@ -243,7 +243,7 @@ services:
       EC2_PTP_DEVICE: ${EC2_PTP_DEVICE:-/dev/ptp_ena}
       ENABLE_EC2_PTP: ${ENABLE_EC2_PTP:-false}
     ports:
-      - "127.0.0.1:${WSCLIENT_CAPTURE_METRICS_HOST_PORT:-8093}:8091"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${WSCLIENT_CAPTURE_METRICS_HOST_PORT:-8093}:8091"
     networks:
       cluster_net:
         ipv4_address: ${WSCLIENT_CAPTURE_IP:-172.20.0.6}
@@ -302,7 +302,7 @@ services:
       POSTGRES_USER: ${LOCAL_DB_USER:-kalshi}
       POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:-kalshi}
     ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
     networks:
@@ -395,7 +395,7 @@ services:
       cluster_net:
         ipv4_address: ${STREAM_TAP_IP:-172.20.0.7}
     ports:
-      - "127.0.0.1:${STREAM_TAP_HOST_PORT:-8080}:${STREAM_TAP_PORT:-8080}"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${STREAM_TAP_HOST_PORT:-8080}:${STREAM_TAP_PORT:-8080}"
     shm_size: "512mb"
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.stream.StreamTapServer"
@@ -421,7 +421,7 @@ services:
       cluster_net:
         ipv4_address: ${STREAM_RECORDER_IP:-172.20.0.9}
     ports:
-      - "127.0.0.1:${STREAM_RECORDER_HOST_PORT:-8092}:${STREAM_RECORDER_PORT:-8092}"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${STREAM_RECORDER_HOST_PORT:-8092}:${STREAM_RECORDER_PORT:-8092}"
     volumes:
       - ./recordings:/app/recordings
     shm_size: "512mb"
@@ -511,7 +511,7 @@ services:
     networks:
       - cluster_net
     ports:
-      - "127.0.0.1:${FRONTEND_ADAPTER_HOST_PORT:-8090}:8090"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${FRONTEND_ADAPTER_HOST_PORT:-8090}:8090"
     volumes:
       - ./recordings:/app/recordings:ro
     shm_size: "512mb"
@@ -524,7 +524,7 @@ services:
     depends_on:
       - streamtap
     ports:
-      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${PROMETHEUS_HOST_PORT:-9090}:9090"
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     networks:
@@ -536,7 +536,7 @@ services:
     depends_on:
       - prometheus
     ports:
-      - "127.0.0.1:${GRAFANA_HOST_PORT:-3000}:3000"
+      - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${GRAFANA_HOST_PORT:-3000}:3000"
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer

@@ -137,6 +137,10 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 9. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.
 10. For the reproducible DB-primary demo, run `scripts/db-primary-demo-seed.sh`, follow `docs/demo_db_primary_walkthrough.md`, use `docs/video_demo_checklist.md` for presentation boundaries, and run `scripts/db-primary-demo-smoke.sh` against the frontend adapter.
 
+Docker Compose host-published admin, data, metrics, DB, Aeron, and cluster
+ports default to loopback through `COMPOSE_HOST_BIND_IP=127.0.0.1`. Override
+that only behind a firewall, authenticated reverse proxy, or isolated network.
+
 Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 
 ## Future Work

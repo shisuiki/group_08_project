@@ -57,6 +57,7 @@ jobs:
       EC2_USER: ${{ secrets.EC2_USER }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/group_08_project' }}
       DEPLOY_PROFILE: ${{ vars.DEPLOY_PROFILE || 'cluster-live' }}
+      COMPOSE_HOST_BIND_IP: ${{ vars.COMPOSE_HOST_BIND_IP || '127.0.0.1' }}
       KALSHI_BASE_URL: ${{ vars.KALSHI_BASE_URL || 'https://api.elections.kalshi.com' }}
       KALSHI_KEY_ID: ${{ secrets.KALSHI_KEY_ID }}
       KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
@@ -243,6 +244,7 @@ jobs:
 
           cat > deploy.env <<EOF
           BACKEND_PROFILE=production
+          COMPOSE_HOST_BIND_IP=$COMPOSE_HOST_BIND_IP
           KALSHI_BASE_URL=$KALSHI_BASE_URL
           KALSHI_KEY_ID=$KALSHI_KEY_ID
           KALSHI_KEY_PATH=/run/secrets/kalshi_private_key

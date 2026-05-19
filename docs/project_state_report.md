@@ -359,7 +359,9 @@ Gaps:
 High priority:
 
 - HTTP endpoints have no authentication.
-- Some services bind to `0.0.0.0`.
+- Container-internal services may listen on `0.0.0.0`, but Docker Compose
+  host-published ports default to `COMPOSE_HOST_BIND_IP=127.0.0.1`; explicit
+  non-loopback exposure still needs firewall, proxy, or network isolation.
 - `/events` endpoints can expose payloads/internal data.
 - Aeron/cluster UDP relies on network isolation.
 - Raw recordings may contain sensitive source payloads.
@@ -429,7 +431,9 @@ Do not demo as completed:
    health smoke checks already exist.
 5. Extend health smoke checks beyond `cluster-live` only when the target profile
    has stable HTTP endpoints.
-6. Default HTTP admin endpoints to localhost or add auth.
+6. Keep host-published HTTP/admin/data/metrics/cluster ports loopback by default
+   via `COMPOSE_HOST_BIND_IP`; add auth, proxy, or firewall before external
+   exposure.
 7. Define remaining DB migration: DB query API and recording import/export
    boundaries.
 8. Decide whether to split Maven modules or at least enforce package boundaries.

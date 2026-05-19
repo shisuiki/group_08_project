@@ -29,6 +29,9 @@ Recommended repository variables:
 
 - `DEPLOY_PATH`: remote app path, default `/opt/group_08_project`.
 - `DEPLOY_PROFILE`: Docker Compose profile, default `cluster-live`.
+- `COMPOSE_HOST_BIND_IP`: host IP for Docker Compose published ports, default
+  `127.0.0.1`. Override only behind a firewall, authenticated reverse proxy, or
+  isolated network.
 - `KALSHI_BASE_URL`: default `https://api.elections.kalshi.com`.
 - `KALSHI_MARKET_SERIES_TICKER`: default `KXHIGHCHI`.
 - `KALSHI_MARKET_SELECTION_MODE`: default `configured`. Set `open_markets` to discover every open Kalshi market at startup.
@@ -54,9 +57,9 @@ Recommended repository variables:
 - `DB_WRITER_RAW_SOURCE`: default `kalshi.websocket`.
 - `DB_WRITER_RAW_CAPTURE_ID`: default `live`.
 - `AERON_EXTERNAL_CHANNEL`: default `aeron:udp?endpoint=224.0.1.1:40456`.
-- `STREAM_TAP_HOST_PORT`: default `8080`, bound to `127.0.0.1` on the EC2 host.
+- `STREAM_TAP_HOST_PORT`: default `8080`, bound to `COMPOSE_HOST_BIND_IP` on the EC2 host.
 - `STREAM_TAP_STREAMS`: comma-separated canonical stream names for the local stream tap.
-- `STREAM_RECORDER_HOST_PORT`: default `8092`, bound to `127.0.0.1` on the EC2 host.
+- `STREAM_RECORDER_HOST_PORT`: default `8092`, bound to `COMPOSE_HOST_BIND_IP` on the EC2 host.
 - `STREAM_RECORDER_STREAMS`: comma-separated normalized stream names persisted by the recorder, or `all-normalized`.
 - `STREAM_RECORDER_TIMESTAMP_SOURCE`: default `system_nano`. Use `ptp_system_clock` only when chrony is using EC2 PHC/PTP.
 - `S3_RECORDING_BUCKET`: optional S3 bucket for recorder upload.
@@ -151,3 +154,12 @@ sudo docker compose --env-file .env --profile featureplant run --rm \
 ## Security Notes
 
 The Kalshi private key and runtime `.env` are written only on the EC2 host and are not committed to the repository. The GitHub Actions workflow keeps the SSH key and Kalshi key in repository secrets.
+
+Docker Compose host-published ports default to
+`COMPOSE_HOST_BIND_IP=127.0.0.1`, including cluster/Aeron ports, streamtap,
+stream-recorder, wsclient metrics, frontend adapter, local DB, Prometheus, and
+Grafana. Container processes may still listen on `0.0.0.0` inside the Docker
+network so port publishing works. Set `COMPOSE_HOST_BIND_IP` to a non-loopback
+address only when another firewall, authenticated reverse proxy, or isolated
+network boundary protects unauthenticated `/health`, `/events`, `/metrics`,
+database, and cluster ports.
