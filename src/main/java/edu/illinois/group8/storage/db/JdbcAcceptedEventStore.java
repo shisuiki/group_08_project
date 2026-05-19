@@ -43,7 +43,7 @@ public final class JdbcAcceptedEventStore implements AcceptedEventStore {
             publish_ts_ns,
             payload
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
-        on conflict do nothing
+        on conflict (event_id, replay_id) do nothing
         """;
 
     private static final String DEFAULT_INGEST_STATUS = "stored";

@@ -142,6 +142,24 @@ assert_published_ports_loopback() {
     fi
 }
 
+assert_raw_replay_table_defaults_aligned() {
+    rendered="$(service_config_for raw-ingress-replay --profile raw-replay)"
+    if ! printf '%s\n' "$rendered" | grep -q '^      RAW_REPLAY_TABLE: raw_ws_events$'; then
+        printf 'raw-ingress-replay default RAW_REPLAY_TABLE is not raw_ws_events\n' >&2
+        exit 1
+    fi
+    if ! grep -Fq "RAW_REPLAY_TABLE: \${{ vars.RAW_REPLAY_TABLE || 'raw_ws_events' }}" .github/workflows/deploy-ec2.yml; then
+        printf 'deploy workflow RAW_REPLAY_TABLE fallback is not raw_ws_events\n' >&2
+        exit 1
+    fi
+    if ! grep -Fq 'DEFAULT_RAW_TABLE = "raw_ws_events"' \
+        src/main/java/edu/illinois/group8/replay/raw/RawIngressReplayConfig.java; then
+        printf 'RawIngressReplayConfig DEFAULT_RAW_TABLE is not raw_ws_events\n' >&2
+        exit 1
+    fi
+    printf 'PASS raw_replay_table_defaults table=raw_ws_events\n'
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -163,3 +181,4 @@ assert_published_ports_loopback "local-db,frontend-integration" --profile local-
 assert_published_ports_loopback "historical-backfill" --profile historical-backfill
 assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
+assert_raw_replay_table_defaults_aligned

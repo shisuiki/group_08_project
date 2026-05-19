@@ -60,9 +60,20 @@ class JdbcAcceptedEventStoreTest {
         assertTrue(rawSql.contains("raw_payload"));
         assertTrue(rawSql.contains("on conflict do nothing"));
         assertTrue(canonicalSql.contains("?::jsonb"));
-        assertTrue(canonicalSql.contains("on conflict do nothing"));
+        assertTrue(canonicalSql.contains("on conflict (event_id, replay_id) do nothing"));
         assertFalse(canonicalSql.contains("foreign key"));
         assertFalse(canonicalSql.contains("canonical_commit_seq"));
+    }
+
+    @Test
+    void canonicalReplayIdentityMigrationDefinesReplayAwareIdempotency() throws Exception {
+        String migration = migrationText("db/migration/V008__canonical_replay_identity.sql")
+            .toLowerCase(Locale.ROOT);
+
+        assertTrue(migration.contains("alter column event_id set not null"));
+        assertTrue(migration.contains("canonical_events_event_replay_id_uidx"));
+        assertTrue(migration.contains("on canonical_events (event_id, replay_id) nulls not distinct"));
+        assertTrue(migration.contains("drop constraint if exists canonical_events_pkey"));
     }
 
     @Test
@@ -198,6 +209,11 @@ class JdbcAcceptedEventStoreTest {
         String suffix = UUID.randomUUID().toString();
         RawWsDbEvent rawEvent = rawEvent("raw-" + suffix);
         CanonicalDbEvent canonicalEvent = canonicalEvent("canonical-" + suffix, rawEvent.rawEventId());
+        CanonicalDbEvent replayCanonicalEvent = canonicalEventWithReplay(
+            canonicalEvent.eventId(),
+            rawEvent.rawEventId(),
+            "replay-" + suffix
+        );
 
         try (Connection connection = openDriverManagerConnection(url, user, password)) {
             applyMigration(connection);
@@ -209,6 +225,8 @@ class JdbcAcceptedEventStoreTest {
             store.insertRawBatch(List.of(rawEvent));
             store.insertCanonicalBatch(List.of(canonicalEvent));
             store.insertCanonicalBatch(List.of(canonicalEvent));
+            store.insertCanonicalBatch(List.of(replayCanonicalEvent));
+            store.insertCanonicalBatch(List.of(replayCanonicalEvent));
 
             try (Connection connection = openDriverManagerConnection(url, user, password)) {
                 assertEquals(
@@ -220,11 +238,28 @@ class JdbcAcceptedEventStoreTest {
                     stringById(connection, "select raw_payload from raw_ws_events where raw_event_id = ?", rawEvent.rawEventId())
                 );
                 assertEquals(
-                    1L,
+                    2L,
                     countById(
                         connection,
                         "select count(*) from canonical_events where event_id = ?",
                         canonicalEvent.eventId()
+                    )
+                );
+                assertEquals(
+                    1L,
+                    countByValues(
+                        connection,
+                        "select count(*) from canonical_events where event_id = ? and replay_id is null",
+                        canonicalEvent.eventId()
+                    )
+                );
+                assertEquals(
+                    1L,
+                    countByValues(
+                        connection,
+                        "select count(*) from canonical_events where event_id = ? and replay_id = ?",
+                        replayCanonicalEvent.eventId(),
+                        replayCanonicalEvent.replayId()
                     )
                 );
             }
@@ -262,10 +297,14 @@ class JdbcAcceptedEventStoreTest {
     }
 
     private static CanonicalDbEvent canonicalEvent(String eventId, String rawEventId) {
+        return canonicalEventWithReplay(eventId, rawEventId, null);
+    }
+
+    private static CanonicalDbEvent canonicalEventWithReplay(String eventId, String rawEventId, String replayId) {
         return new CanonicalDbEvent(
             eventId,
             rawEventId,
-            null,
+            replayId,
             "canonical.ticker",
             "ticker",
             1,
@@ -327,15 +366,10 @@ class JdbcAcceptedEventStoreTest {
             "db/migration/V001__accepted_event_storage.sql",
             "db/migration/V002__raw_payload_text.sql",
             "db/migration/V003__canonical_commit_cursor.sql",
-            "db/migration/V004__raw_rest_responses.sql"
+            "db/migration/V004__raw_rest_responses.sql",
+            "db/migration/V008__canonical_replay_identity.sql"
         )) {
-            String migration;
-            try (InputStream inputStream = Objects.requireNonNull(
-                JdbcAcceptedEventStoreTest.class.getClassLoader().getResourceAsStream(resource),
-                "migration resource " + resource
-            )) {
-                migration = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-            }
+            String migration = migrationText(resource);
             if (resource.contains("V002__raw_payload_text")) {
                 executeMigrationStatement(connection, migration);
                 continue;
@@ -347,6 +381,15 @@ class JdbcAcceptedEventStoreTest {
                 }
                 executeMigrationStatement(connection, trimmed);
             }
+        }
+    }
+
+    private static String migrationText(String resource) throws Exception {
+        try (InputStream inputStream = Objects.requireNonNull(
+            JdbcAcceptedEventStoreTest.class.getClassLoader().getResourceAsStream(resource),
+            "migration resource " + resource
+        )) {
+            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 
@@ -383,6 +426,18 @@ class JdbcAcceptedEventStoreTest {
     private static long countById(Connection connection, String sql, String id) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertTrue(resultSet.next());
+                return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private static long countByValues(Connection connection, String sql, Object... values) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int index = 0; index < values.length; index++) {
+                statement.setObject(index + 1, values[index]);
+            }
             try (ResultSet resultSet = statement.executeQuery()) {
                 assertTrue(resultSet.next());
                 return resultSet.getLong(1);

@@ -113,6 +113,43 @@ class JdbcCanonicalEventReaderTest {
     }
 
     @Test
+    void replayIdReadReturnsReplayRowsForMatchingIdentity() {
+        RecordingJdbc jdbc = new RecordingJdbc(List.of(row(
+            "canonical_commit_seq", 44L,
+            "event_id", "event-1",
+            "raw_event_id", "raw-1",
+            "replay_id", "replay-7",
+            "stream_name", "canonical.trade",
+            "event_type", "market_trade",
+            "schema_version", 1,
+            "market_ticker", "MARKET-1",
+            "event_ts_ms", 1000L,
+            "ingest_ts_ns", 2000L,
+            "publish_ts_ns", 3000L,
+            "payload", "{\"event_id\":\"event-1\",\"replay_id\":\"replay-7\"}"
+        )));
+        JdbcCanonicalEventReader reader = new JdbcCanonicalEventReader(jdbc::openConnection);
+
+        List<CanonicalDbReadEvent> events = reader.read(new CanonicalDbReadRequest(
+            new CanonicalDbCursor(0L),
+            List.of(),
+            List.of(),
+            "replay-7",
+            false,
+            10
+        ));
+
+        String sql = jdbc.preparedSql.toLowerCase(Locale.ROOT);
+        assertTrue(sql.contains("replay_id = ?"));
+        assertFalse(sql.contains("replay_id is null"));
+        assertEquals(List.of(0L, "replay-7", 10), jdbc.bindings);
+        assertEquals(1, events.size());
+        assertEquals("event-1", events.get(0).eventId());
+        assertEquals("replay-7", events.get(0).replayId());
+        assertEquals(44L, events.get(0).canonicalCommitSeq());
+    }
+
+    @Test
     void includeReplayEventsOmitsDefaultReplayFilter() {
         RecordingJdbc jdbc = new RecordingJdbc(List.of());
         JdbcCanonicalEventReader reader = new JdbcCanonicalEventReader(jdbc::openConnection);
