@@ -11,6 +11,11 @@ through `CanonicalEnvelopeSource`, so the same feature module can run against:
 The default source is `db`. Recording is explicit legacy/debug/demo/import mode
 with `FEATUREPLANT_SOURCE=recording` or `--source=recording`.
 
+Live `AeronCanonicalEnvelopeSource` parses canonical envelope JSON from copied
+Aeron bytes through `CanonicalEnvelope.fromPayloadBytes`. `CanonicalEnvelope`
+still retains the exact payload string for `payload()` compatibility. DB and
+recording sources continue to read stored string payloads.
+
 Downstream visualization, backtesting, and research export modules should attach
 to `FeatureOutputSink` or a persistent feature store built behind that sink. They
 should not subscribe directly to live tickerplant streams.

@@ -32,9 +32,11 @@ for success, failure, drop, parser error, and order book quality remain exact.
 - `backend_unknown_message_type_total`: unsupported source message counter.
 - `backend_orderbook_snapshot_total`: order book snapshot counter.
 - `backend_orderbook_delta_total`: order book delta counter.
-- `backend_orderbook_sequence_gap_total`: sequence gap counter.
+- `backend_orderbook_sequence_gap_total`: sequence gap counter, including
+  generated source/order-book recovery events.
 - `backend_orderbook_delta_before_snapshot_total`: bad order book lifecycle counter.
-- `backend_orderbook_crossed_total`: crossed book counter.
+- `backend_orderbook_crossed_total`: crossed book counter, including generated
+  crossed `top_of_book_update` events.
 - `backend_orderbook_negative_level_total`: invalid level counter.
 - `backend_publication_offer_total`: publication attempt/success counter.
 - `backend_publication_offer_failed_total`: publication failure counter.
@@ -65,6 +67,10 @@ for success, failure, drop, parser error, and order book quality remain exact.
 - `feature_contract_group_created_total`: contract group counter.
 
 ## Current Implementation Notes
+
+`DataProcessor` observes parsed canonical events and generated recovery/derived
+events for producer-side order book quality counters. Distribution metrics remain
+sampled on the live hot path; counters remain exact.
 
 `stream-recorder` emits the storage, parser visibility, order book quality, and feature input metrics for normalized tickerplant streams. `FeaturePlantService` emits `feature_module_*` metrics when embedded or run by a module host. `streamtap` remains a lightweight inspection tool for recent normalized stream events.
 

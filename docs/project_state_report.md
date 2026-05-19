@@ -87,8 +87,38 @@ Important classes:
   ingress scratch buffer.
 - `DataProcessor`: raw/canonical parsing, order book derived events, metrics,
   and DB offer counters.
+- `SourceSequenceMonitor`: optional monotonic subscription-wide sequence
+  watermark.
+- `OrderBookStateManager`: per-market snapshot/delta state and derived
+  top-of-book recovery pauses.
 - `Tickerplant`: routes internal canonical JSON by `stream_name`.
 - `StreamRegistry`: external stream IDs and stream contracts.
+
+## Sequence And Derived State Semantics
+
+Current:
+
+- `SourceSequenceMonitor` keeps one monotonic watermark per subscription.
+  Forward gaps emit `source_sequence_gap` and advance; duplicate or older
+  events emit `non_monotonic_source_sequence` without rewinding.
+- `OrderBookState` keeps a per-market watermark but does not require forward
+  source sequence values to be contiguous per market. Forward skips can apply as
+  subscription-wide interleaving; duplicate/backward per-market deltas pause
+  before mutation.
+- If a source-sequence anomaly hits an order book delta, `DataProcessor` still
+  publishes raw, source gap, and canonical events, but skips derived order-book
+  apply and marks that market paused until a fresh snapshot. When derived
+  order-book mode is disabled, the anomaly path does not create book state.
+- Crossed books still emit the existing crossed top update and recovery event,
+  then pause the market until a fresh snapshot.
+- Generated sequence-gap and crossed top-of-book events count producer-side
+  `backend_orderbook_sequence_gap_total` and `backend_orderbook_crossed_total`.
+  Distribution metrics remain sampled; counters remain exact.
+
+Planned:
+
+- Automated fresh snapshot reload and cluster snapshot/restore remain roadmap
+  work.
 
 ## Stream Contracts
 
@@ -195,8 +225,8 @@ Legend:
 | Canonical event model | current | stream registry and serializer exist |
 | Kalshi WS parser | current | parser error events exist |
 | Kalshi REST parser | current | used by historical backfill |
-| Order book state/top-of-book | current | pauses before mutation on sequence gaps and after crossed books; automated fresh snapshot reload and cluster restore remain planned |
-| Source sequence monitor | current-basic | optional; semantics caveated in docs |
+| Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books pause after the current crossed update; automated fresh snapshot reload and cluster restore remain planned |
+| Source sequence monitor | current-basic | optional monotonic subscription watermark; forward gaps advance, duplicate/older events do not rewind |
 | Tickerplant routing | current | JSON `stream_name` routing |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
 | Canonical stream recording | current | canonical DB sink wired in `DataProcessor`/cluster runtime; downstream Aeron recording remains capture/offline/debug/export |
@@ -205,7 +235,7 @@ Legend:
 | Object-store loader/query backfill | planned | no full loader/query path |
 | Raw ingress replay | current-basic | Timescale reader default plus local NDJSON import/debug; publishes byte[] ingress envelopes with `replay_id` |
 | Historical REST backfill | current-basic | canonical DB and raw REST DB targets are default; canonical/raw-rest NDJSON are explicit legacy/debug/export |
-| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, recording is explicit legacy/debug/demo/import |
+| FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, live Aeron parses envelopes from byte[] while retaining payload strings, recording is explicit legacy/debug/demo/import |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
 | Persistent feature store | planned | no durable feature DB |

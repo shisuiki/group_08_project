@@ -55,7 +55,9 @@ Kalshi WebSocket
   byte[]; the ESB leader reuses a scratch byte[] and parses byte[] slices
   without allocating a full envelope string. `Tickerplant` full-tree routing
   parse has been optimized, but routing still depends on payload-carried stream
-  metadata.
+  metadata. FeaturePlant live Aeron input parses canonical envelopes from
+  byte[] via `CanonicalEnvelope.fromPayloadBytes` while retaining the
+  `payload()` string API; DB and recording sources still read stored strings.
   Fix: keep the lightweight routing path; long term, carry stream id/name in a
   header so `Tickerplant` can route without JSON payload inspection.
 
@@ -91,7 +93,9 @@ Kalshi WebSocket
   Status: live `DataProcessor` and `AeronEventPublisher` handles are cached, and
   their hot-path latency/age/backpressure distributions are sampled first-event
   plus every 64th event. Success, failure, drop, parser error, and order book
-  quality counters remain exact.
+  quality counters remain exact. Generated `sequence_gap` events and crossed
+  `top_of_book_update` events now count producer-side
+  `backend_orderbook_sequence_gap_total` / `backend_orderbook_crossed_total`.
   Fix: keep sampling distribution-only, precompute remaining metric keys,
   aggregate in counters, export histograms/quantiles outside the hot path.
 
@@ -127,8 +131,9 @@ Deliverables:
 - Define drop policy:
   - drop DB writes on queue full
   - drop metrics samples under pressure
-  - drop derived events before raw/orderbook live publication
-  - count all drops
+  - suppress unsafe derived order-book apply on source anomalies while raw and
+    canonical publication continues
+  - count all drops and generated recovery events
 
 Verification:
 
@@ -224,6 +229,8 @@ Deliverables:
 
 - Landed: live wrapper and raw replay write JSON ingress envelopes as byte[];
   leader-side parsing uses a reusable scratch buffer and byte[] slice parser.
+- Landed: FeaturePlant live Aeron source parses canonical envelope JSON from
+  byte[] and still retains the payload string for compatibility.
 - Remaining: replace JSON ingress envelope with length-prefixed/binary envelope
   or direct raw bytes plus metadata header.
 - Add stream id/name header so `Tickerplant` can eventually route from metadata
@@ -244,8 +251,18 @@ Verification:
 Deliverables:
 
 - Keep current `TreeMap` as correctness baseline.
-- Landed: pause before mutating on order book sequence gaps and pause after
-  crossed books.
+- Landed: `SourceSequenceMonitor` keeps a monotonic subscription watermark:
+  forward gaps emit/advance, duplicate or older sequence values emit
+  `non_monotonic_source_sequence` without rewinding.
+- Landed: `OrderBookState` treats forward source sequence skips as valid
+  subscription-wide interleaving, but duplicate/backward per-market sequences
+  pause before mutation.
+- Landed: source-sequence anomalies on order book deltas still publish raw,
+  source gap, and canonical events, but skip derived order-book apply and mark
+  the market paused until a fresh snapshot. Disabled derived mode does not
+  create order-book state.
+- Landed: crossed books pause after emitting the existing crossed top update
+  and recovery event.
 - Remaining: automated fresh snapshot reload and cluster snapshot/restore.
 - Add primitive/discrete price-level book implementation for Kalshi price
   levels.

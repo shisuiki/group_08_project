@@ -185,8 +185,8 @@ flowchart LR
     ORCH["ESBClusterCommunicationOrchestrator<br/>internal IPC stream + external Aeron channel"]:::bus
     DP["DataProcessor<br/>normalization, publishing,<br/>metrics"]:::current
     PARSER["KalshiCanonicalParser<br/>RawSourceEvent + canonical events<br/>WS parser"]:::current
-    SEQ["SourceSequenceMonitor<br/>optional source sequence gaps"]:::current
-    BOOK["OrderBookStateManager<br/>snapshot/delta state<br/>derived top of book"]:::current
+    SEQ["SourceSequenceMonitor<br/>monotonic subscription watermark<br/>source anomalies"]:::current
+    BOOK["OrderBookStateManager<br/>interleaved seq handling<br/>pause on duplicate/backward"]:::current
     PUB["AeronEventPublisher<br/>serializes canonical JSON"]:::bus
     CDB["canonical_events<br/>Postgres/Timescale canonical DB"]:::storage
     INTERNAL["Internal event bus<br/>StreamRegistry ID 20"]:::bus
@@ -247,7 +247,7 @@ flowchart LR
 
   subgraph FeatureCurrent["Current Featureplant Templates"]
     DBSRC["DbCanonicalEnvelopeSource<br/>default canonical_events input"]:::current
-    AERONSRC["AeronCanonicalEnvelopeSource<br/>live external stream input"]:::current
+    AERONSRC["AeronCanonicalEnvelopeSource<br/>live byte parse<br/>retains payload String"]:::current
     RECSRC["RecordingCanonicalEnvelopeSource<br/>recordings/canonical input"]:::current
     FPSVC1["FeaturePlantCli / FeaturePlantService<br/>poll + module dispatch + metrics text"]:::current
     FMODS["Current modules<br/>feature.bbo, feature.ticker_snapshot,<br/>feature.trade_tape"]:::current
