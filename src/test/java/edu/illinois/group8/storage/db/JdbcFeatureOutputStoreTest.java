@@ -51,6 +51,15 @@ class JdbcFeatureOutputStoreTest {
     }
 
     @Test
+    void refreshCursorMigrationIndexesCreatedAtCursorReads() throws Exception {
+        String sql = migrationSql("db/migration/V009__feature_output_refresh_cursor_index.sql")
+            .toLowerCase(Locale.ROOT);
+
+        assertTrue(sql.contains("feature_outputs_created_cursor_idx"));
+        assertTrue(sql.contains("on feature_outputs (created_at, feature_event_id, feature_name)"));
+    }
+
+    @Test
     void insertSqlUsesJsonbValuesAndConflictIgnore() {
         String sql = JdbcFeatureOutputStore.INSERT_SQL.toLowerCase(Locale.ROOT);
 
@@ -126,7 +135,10 @@ class JdbcFeatureOutputStoreTest {
     }
 
     private static String migrationSql() throws Exception {
-        String resource = "db/migration/V006__feature_outputs.sql";
+        return migrationSql("db/migration/V006__feature_outputs.sql");
+    }
+
+    private static String migrationSql(String resource) throws Exception {
         try (InputStream inputStream = JdbcFeatureOutputStoreTest.class.getClassLoader()
             .getResourceAsStream(resource)) {
             if (inputStream == null) {
