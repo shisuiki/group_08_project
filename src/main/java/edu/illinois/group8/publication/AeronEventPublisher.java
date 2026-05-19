@@ -9,11 +9,14 @@ import org.agrona.ExpandableArrayBuffer;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class AeronEventPublisher implements EventPublisher {
+    static final int HOT_PATH_DISTRIBUTION_SAMPLE_MASK = 63;
+
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final JsonCanonicalSerializer serializer;
     private final BackendMetrics metrics;
     private final ExpandableArrayBuffer buffer = new ExpandableArrayBuffer();
     private final ConcurrentHashMap<PublicationMetricKey, PublicationMetricHandles> metricHandles = new ConcurrentHashMap<>();
+    private long publicationDistributionSampleCursor;
 
     public AeronEventPublisher(
         ESBClusterCommunicationOrchestrator communicationOrchestrator,
@@ -27,7 +30,8 @@ public class AeronEventPublisher implements EventPublisher {
 
     @Override
     public boolean publish(CanonicalEvent event) {
-        long offerStartTsNs = System.nanoTime();
+        boolean sampleDistributions = shouldSamplePublicationDistribution();
+        long offerStartTsNs = sampleDistributions ? System.nanoTime() : 0L;
         byte[] bytes = serializer.toBytes(event);
         buffer.putBytes(0, bytes);
         PublicationMetricHandles handles = metricHandles.computeIfAbsent(
@@ -36,16 +40,38 @@ public class AeronEventPublisher implements EventPublisher {
         );
         handles.offerTotal.increment();
         long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, bytes.length);
-        long offerEndTsNs = System.nanoTime();
-        handles.latency.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
+        long elapsedNs = sampleDistributions ? Math.max(0L, System.nanoTime() - offerStartTsNs) : 0L;
+        return recordPublicationOutcome(handles, result, bytes.length, elapsedNs, sampleDistributions);
+    }
+
+    static boolean shouldSampleHotPathDistribution(long cursor) {
+        return (cursor & HOT_PATH_DISTRIBUTION_SAMPLE_MASK) == 0L;
+    }
+
+    private boolean shouldSamplePublicationDistribution() {
+        return shouldSampleHotPathDistribution(publicationDistributionSampleCursor++);
+    }
+
+    static boolean recordPublicationOutcome(
+        PublicationMetricHandles handles,
+        long result,
+        int bytesLength,
+        long elapsedNs,
+        boolean sampleDistributions
+    ) {
+        if (sampleDistributions) {
+            handles.latency.observe(Math.max(0L, elapsedNs));
+        }
         if (result < 0L) {
             handles.offerFailed.increment();
-            handles.backpressure.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
+            if (sampleDistributions) {
+                handles.backpressure.observe(Math.max(0L, elapsedNs));
+            }
             handles.legacyOfferFailed.increment();
             return false;
         }
         handles.legacyOfferSuccess.increment();
-        handles.legacyBytes.add(bytes.length);
+        handles.legacyBytes.add(bytesLength);
         return true;
     }
 

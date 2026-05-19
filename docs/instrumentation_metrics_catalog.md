@@ -15,16 +15,20 @@ Use these labels where they apply:
 
 Avoid labels for `trade_id`, raw error messages, raw payload values, and unconstrained market tickers. Use sampled logs or recent-event buffers for payload-level investigation.
 
+Backend live hot-path latency, age, and backpressure distributions emitted with
+`service="backend"` are sampled to keep the live path latency-first. Counters
+for success, failure, drop, parser error, and order book quality remain exact.
+
 ## Core Metrics
 
 - `backend_ws_connected`: WebSocket connection state gauge.
 - `backend_ws_reconnect_total`: reconnect counter.
 - `backend_ws_messages_total`: source message counter.
 - `backend_ws_bytes_total`: source byte counter.
-- `backend_ws_message_age_ms`: source event age distribution.
+- `backend_ws_message_age_ms`: source event age distribution; sampled for backend live processor.
 - `backend_parser_messages_total`: parsed message counter.
 - `backend_parser_errors_total`: parser error counter.
-- `backend_parser_latency_ns`: parser latency distribution.
+- `backend_parser_latency_ns`: parser latency distribution; sampled for backend live processor.
 - `backend_unknown_message_type_total`: unsupported source message counter.
 - `backend_orderbook_snapshot_total`: order book snapshot counter.
 - `backend_orderbook_delta_total`: order book delta counter.
@@ -34,8 +38,8 @@ Avoid labels for `trade_id`, raw error messages, raw payload values, and unconst
 - `backend_orderbook_negative_level_total`: invalid level counter.
 - `backend_publication_offer_total`: publication attempt/success counter.
 - `backend_publication_offer_failed_total`: publication failure counter.
-- `backend_publication_backpressure_ns`: publication backpressure distribution.
-- `backend_publication_latency_ns`: publication latency distribution.
+- `backend_publication_backpressure_ns`: publication backpressure distribution; sampled for backend live publisher.
+- `backend_publication_latency_ns`: publication latency distribution; sampled for backend live publisher.
 - `backend_storage_enqueue_total`: durable storage enqueue counter.
 - `backend_storage_commit_total`: durable storage commit counter.
 - `backend_storage_error_total`: durable storage error counter.

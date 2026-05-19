@@ -20,6 +20,8 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class DataProcessor {
+    static final int HOT_PATH_DISTRIBUTION_SAMPLE_MASK = 63;
+
     private final KalshiCanonicalParser parser;
     private final OrderBookStateManager orderBookStateManager;
     private final SourceSequenceMonitor sourceSequenceMonitor;
@@ -38,6 +40,8 @@ public class DataProcessor {
     private final ConcurrentHashMap<String, BackendMetrics.Counter> canonicalEventCounters = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, BackendMetrics.Counter> generatedEventCounters = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<EventMetricKey, EventMetricHandles> eventMetricHandles = new ConcurrentHashMap<>();
+    private long parserLatencySampleCursor;
+    private long messageAgeSampleCursor;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this(communicationOrchestrator, CanonicalDbSink.disabled());
@@ -159,7 +163,9 @@ public class DataProcessor {
             ingress.replayId()
         );
         backendParserMessages.increment();
-        backendParserLatency.observe(Math.max(0L, System.nanoTime() - parseStartTsNs));
+        if (shouldSampleParserLatency()) {
+            backendParserLatency.observe(Math.max(0L, System.nanoTime() - parseStartTsNs));
+        }
         publish(parseResult.rawSourceEvent());
         rawEvents.increment();
 
@@ -213,7 +219,7 @@ public class DataProcessor {
             this::eventMetricHandles
         );
         Long eventTsMs = event.metadata().eventTsMs();
-        if (eventTsMs != null && eventTsMs > 0L) {
+        if (eventTsMs != null && eventTsMs > 0L && shouldSampleMessageAge()) {
             handles.messageAge.observe(Math.max(0L, System.currentTimeMillis() - eventTsMs));
         }
         switch (event.eventType()) {
@@ -267,6 +273,18 @@ public class DataProcessor {
             metrics.counter("backend_orderbook_sequence_gap_total", labels),
             metrics.counter("backend_orderbook_crossed_total", labels)
         );
+    }
+
+    static boolean shouldSampleHotPathDistribution(long cursor) {
+        return (cursor & HOT_PATH_DISTRIBUTION_SAMPLE_MASK) == 0L;
+    }
+
+    private boolean shouldSampleParserLatency() {
+        return shouldSampleHotPathDistribution(parserLatencySampleCursor++);
+    }
+
+    private boolean shouldSampleMessageAge() {
+        return shouldSampleHotPathDistribution(messageAgeSampleCursor++);
     }
 
     private static String normalizeLabelValue(String value) {

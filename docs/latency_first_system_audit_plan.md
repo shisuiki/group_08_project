@@ -78,13 +78,17 @@ Kalshi WebSocket
   `BigDecimal` parsing with fixed-point string parsing; consider primitive
   price-level arrays/maps.
 
-- [Medium] Metrics are too expensive for per-message hot path.
+- [Medium, partially resolved] Metrics are too expensive for per-message hot path.
   Impact: each call allocates label maps and metric key strings.
   Evidence: `BackendMetrics.labels` and `metricKey` run repeatedly in
   `DataProcessor`, `AeronEventPublisher`, `Tickerplant`, recorder, and feature
   code.
-  Fix: precompute metric keys, sample latency metrics, aggregate in counters,
-  export histograms/quantiles outside the hot path.
+  Status: live `DataProcessor` and `AeronEventPublisher` handles are cached, and
+  their hot-path latency/age/backpressure distributions are sampled first-event
+  plus every 64th event. Success, failure, drop, parser error, and order book
+  quality counters remain exact.
+  Fix: keep sampling distribution-only, precompute remaining metric keys,
+  aggregate in counters, export histograms/quantiles outside the hot path.
 
 - [Medium] File writers still have blocking or expensive behavior.
   Impact: recording can slow downstream consumers and create false confidence
