@@ -18,6 +18,9 @@ class FrontendAdapterConfigTest {
         assertEquals(FrontendAdapterConfig.FeatureSource.MODULES, config.featureSource());
         assertEquals(FrontendAdapterConfig.MetadataSource.AUTO, config.metadataSource());
         assertEquals(10_000, config.featureOutputMaxRows());
+        assertFalse(config.featureOutputRefreshEnabled());
+        assertEquals(1_000, config.featureOutputRefreshIntervalMs());
+        assertEquals(10_000, config.featureOutputRefreshMaxRows());
         assertEquals(1_000, config.metadataMaxRows());
     }
 
@@ -91,6 +94,14 @@ class FrontendAdapterConfigTest {
         );
         assertThrows(
             IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS", "0"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "0"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
             () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_METADATA_SOURCE", "kafka"))
         );
         assertThrows(
@@ -143,6 +154,23 @@ class FrontendAdapterConfigTest {
 
         assertEquals(FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS, config.featureSource());
         assertEquals(250, config.featureOutputMaxRows());
+        assertTrue(config.featureOutputRefreshEnabled());
+        assertEquals(1_000, config.featureOutputRefreshIntervalMs());
+        assertEquals(250, config.featureOutputRefreshMaxRows());
+    }
+
+    @Test
+    void featureOutputRefreshConfigCanBeOverridden() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED", "false",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS", "2500",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "75"
+        ));
+
+        assertFalse(config.featureOutputRefreshEnabled());
+        assertEquals(2500, config.featureOutputRefreshIntervalMs());
+        assertEquals(75, config.featureOutputRefreshMaxRows());
     }
 
     @Test

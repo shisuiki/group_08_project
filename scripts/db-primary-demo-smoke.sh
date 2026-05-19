@@ -4,6 +4,7 @@ set -eu
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:8090}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 EXPECTED_FEATURE_SOURCE="${EXPECTED_FEATURE_SOURCE:-feature_outputs}"
+EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED="${EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED:-true}"
 EXPECTED_MARKET_METADATA_STATUS="${EXPECTED_MARKET_METADATA_STATUS:-loaded}"
 EXPECTED_MARKET_METADATA_MIN_ROWS="${EXPECTED_MARKET_METADATA_MIN_ROWS:-1}"
 DEMO_FEATURE="${DEMO_FEATURE:-feature.bbo}"
@@ -54,7 +55,7 @@ PY
 health_json="$tmpdir/health.json"
 fetch_json "/health" "$health_json"
 health_selection="$tmpdir/health-selection.txt"
-python3 - "$health_json" "$EXPECTED_FEATURE_SOURCE" "$EXPECTED_MARKET_METADATA_STATUS" "$EXPECTED_MARKET_METADATA_MIN_ROWS" > "$health_selection" <<'PY'
+python3 - "$health_json" "$EXPECTED_FEATURE_SOURCE" "$EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED" "$EXPECTED_MARKET_METADATA_STATUS" "$EXPECTED_MARKET_METADATA_MIN_ROWS" > "$health_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -70,13 +71,26 @@ if expected and feature_source != expected:
         f"health check failed: feature_source is {feature_source!r}, expected {expected!r}; "
         "restart frontend-adapter with FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"
     )
+refresh = body.get("feature_output_refresh")
+if feature_source == "feature_outputs":
+    if not isinstance(refresh, dict):
+        raise SystemExit("health check failed: feature_output_refresh is missing")
+    expected_refresh = sys.argv[3].strip().lower() if len(sys.argv) > 3 else ""
+    if expected_refresh:
+        expected_enabled = expected_refresh == "true"
+        actual_enabled = refresh.get("enabled")
+        if actual_enabled != expected_enabled:
+            raise SystemExit(
+                f"health check failed: feature_output_refresh.enabled is {actual_enabled!r}, "
+                f"expected {expected_enabled!r}"
+            )
 metadata = body.get("market_metadata")
 if not isinstance(metadata, dict):
     raise SystemExit("health check failed: market_metadata is missing")
 metadata_status = metadata.get("status")
 if not metadata_status:
     raise SystemExit("health check failed: market_metadata.status is missing")
-expected_metadata_status = sys.argv[3].strip() if len(sys.argv) > 3 else ""
+expected_metadata_status = sys.argv[4].strip() if len(sys.argv) > 4 else ""
 if expected_metadata_status and metadata_status != expected_metadata_status:
     raise SystemExit(
         f"health check failed: market_metadata.status is {metadata_status!r}, "
@@ -86,7 +100,7 @@ raw_rows = metadata.get("markets")
 if isinstance(raw_rows, bool) or not isinstance(raw_rows, int):
     raise SystemExit("health check failed: market_metadata.markets is not an integer")
 try:
-    min_rows = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4].strip() else 0
+    min_rows = int(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5].strip() else 0
 except ValueError as exc:
     raise SystemExit("health check failed: EXPECTED_MARKET_METADATA_MIN_ROWS must be an integer") from exc
 if raw_rows < min_rows:
@@ -96,12 +110,14 @@ if raw_rows < min_rows:
 print(feature_source)
 print(metadata_status)
 print(raw_rows)
+print(refresh.get("enabled") if isinstance(refresh, dict) else "")
 PY
 feature_source="$(sed -n '1p' "$health_selection")"
 market_metadata_status="$(sed -n '2p' "$health_selection")"
 market_metadata_rows="$(sed -n '3p' "$health_selection")"
-printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s market_metadata_status=%s market_metadata_rows=%s\n' \
-    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$market_metadata_status" "$market_metadata_rows"
+feature_output_refresh_enabled="$(sed -n '4p' "$health_selection")"
+printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s feature_output_refresh_enabled=%s market_metadata_status=%s market_metadata_rows=%s\n' \
+    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$feature_output_refresh_enabled" "$market_metadata_status" "$market_metadata_rows"
 
 symbols_json="$tmpdir/symbols.json"
 fetch_json "/symbols" "$symbols_json"

@@ -3,6 +3,7 @@ package edu.illinois.group8.frontend;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.illinois.group8.feature.FeatureOutput;
+import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,8 +17,10 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -222,8 +225,87 @@ class UdfEndpointsTest {
         assertEquals("modules", body.path("feature_source").asText());
         assertEquals("loaded", body.path("market_metadata").path("status").asText());
         assertEquals(2, body.path("market_metadata").path("markets").asInt());
+        assertFalse(body.path("feature_output_refresh").path("enabled").asBoolean());
         assertEquals(42L, body.path("feature_plant").path("events_in").asLong());
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
+    }
+
+    @Test
+    void healthReportsFeatureOutputRefreshStatus() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi"
+        ));
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            () -> new FeatureOutputRefreshStatus(
+                true,
+                true,
+                Instant.parse("2026-05-20T00:00:01Z"),
+                Instant.parse("2026-05-20T00:00:02Z"),
+                "db unavailable",
+                7,
+                11L,
+                2L
+            )
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode refresh = getJson("/health").path("feature_output_refresh");
+
+        assertTrue(refresh.path("enabled").asBoolean());
+        assertTrue(refresh.path("running").asBoolean());
+        assertEquals("2026-05-20T00:00:01Z", refresh.path("last_success_at").asText());
+        assertEquals("db unavailable", refresh.path("last_error").asText());
+        assertEquals(7, refresh.path("last_row_count").asInt());
+        assertEquals(11L, refresh.path("total_loaded").asLong());
+        assertEquals(2L, refresh.path("refresh_errors").asLong());
+    }
+
+    @Test
+    void quotesReflectFeatureOutputRefreshWithoutServerRestart() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "10"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        AtomicInteger reads = new AtomicInteger();
+        FeatureOutputRefreshService refresh = new FeatureOutputRefreshService(config, store, request -> {
+            return switch (reads.getAndIncrement()) {
+                case 0 -> List.of(row("feature-1", "2026-05-20T00:00:01Z", 1_000L, "seed", 500_000L));
+                case 1 -> List.of(row("feature-2", "2026-05-20T00:00:02Z", 2_000L, "refresh", 600_000L));
+                default -> List.of();
+            };
+        });
+        refresh.seedOnce();
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            refresh::status
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        assertEquals(500_000L, getJson("/quotes?symbols=MKT-1")
+            .path("quotes").get(0).path("midpoint_micros").asLong());
+
+        refresh.refreshOnce();
+
+        JsonNode quote = getJson("/quotes?symbols=MKT-1").path("quotes").get(0);
+        assertEquals(600_000L, quote.path("midpoint_micros").asLong());
+        assertEquals(2_000L, quote.path("event_ts_ms").asLong());
+        assertEquals(2L, getJson("/health").path("feature_output_refresh").path("total_loaded").asLong());
     }
 
     @Test
@@ -294,6 +376,31 @@ class UdfEndpointsTest {
             null,
             "{\"rule\":\"value\"}",
             "{\"ticker\":\"" + ticker + "\"}"
+        );
+    }
+
+    private static FeatureOutputRow row(
+        String eventId,
+        String createdAt,
+        long eventTsMs,
+        String sourceEventId,
+        long midpointMicros
+    ) {
+        return new FeatureOutputRow(
+            eventId,
+            Instant.parse(createdAt),
+            new FeatureOutput(
+                FrontendFeatureStore.BBO_FEATURE,
+                FrontendFeatureStore.BBO_FEATURE,
+                "MKT-1",
+                eventTsMs,
+                sourceEventId,
+                Map.of(
+                    "bid_price_micros", midpointMicros - 10_000L,
+                    "ask_price_micros", midpointMicros + 10_000L,
+                    "midpoint_micros", midpointMicros
+                )
+            )
         );
     }
 }

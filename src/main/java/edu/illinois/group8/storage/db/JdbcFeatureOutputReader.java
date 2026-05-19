@@ -9,6 +9,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +29,7 @@ public final class JdbcFeatureOutputReader implements FeatureOutputReader {
             feature_version,
             market_ticker,
             event_ts_ms,
+            created_at,
             "values"::text as values
         from feature_outputs
         """;
@@ -48,6 +52,12 @@ public final class JdbcFeatureOutputReader implements FeatureOutputReader {
 
     @Override
     public List<FeatureOutput> read(FeatureOutputReadRequest request) {
+        return readRows(request).stream()
+            .map(FeatureOutputRow::output)
+            .toList();
+    }
+
+    public List<FeatureOutputRow> readRows(FeatureOutputReadRequest request) {
         FeatureOutputReadRequest normalized = request == null
             ? FeatureOutputReadRequest.defaultRecent()
             : request;
@@ -62,9 +72,9 @@ public final class JdbcFeatureOutputReader implements FeatureOutputReader {
                 statement.setObject(index + 1, bindings.get(index));
             }
             try (ResultSet resultSet = statement.executeQuery()) {
-                List<FeatureOutput> outputs = new ArrayList<>();
+                List<FeatureOutputRow> outputs = new ArrayList<>();
                 while (resultSet.next()) {
-                    outputs.add(readOutput(resultSet));
+                    outputs.add(readRow(resultSet));
                 }
                 return List.copyOf(outputs);
             }
@@ -88,7 +98,18 @@ public final class JdbcFeatureOutputReader implements FeatureOutputReader {
             sql.append(" and event_ts_ms <= ?");
             bindings.add(request.toEventTsMs());
         }
-        sql.append(" order by event_ts_ms desc nulls last, feature_event_id asc");
+        if (request.after() != null) {
+            Timestamp createdAt = Timestamp.from(request.after().createdAt());
+            sql.append(" and (created_at > ? or (created_at = ? and feature_event_id > ?))");
+            bindings.add(createdAt);
+            bindings.add(createdAt);
+            bindings.add(request.after().featureEventId());
+        }
+        if (request.ascending()) {
+            sql.append(" order by created_at asc, feature_event_id asc");
+        } else {
+            sql.append(" order by event_ts_ms desc nulls last, feature_event_id asc");
+        }
         sql.append(" limit ?");
         bindings.add(request.maxRows());
         return sql.toString();
@@ -114,22 +135,28 @@ public final class JdbcFeatureOutputReader implements FeatureOutputReader {
         sql.append(")");
     }
 
-    private FeatureOutput readOutput(ResultSet resultSet) throws SQLException {
+    private FeatureOutputRow readRow(ResultSet resultSet) throws SQLException {
+        String featureEventId = resultSet.getString("feature_event_id");
+        Instant createdAt = instantOrNull(resultSet, "created_at");
         String featureName = resultSet.getString("feature_name");
         String valuesJson = resultSet.getString("values");
         try {
             Map<String, Object> values = mapper.readValue(valuesJson, VALUE_MAP);
-            return new FeatureOutput(
-                featureName,
-                featureName,
-                resultSet.getString("market_ticker"),
-                longOrNull(resultSet, "event_ts_ms"),
-                resultSet.getString("source_event_id"),
-                values
+            return new FeatureOutputRow(
+                featureEventId,
+                createdAt,
+                new FeatureOutput(
+                    featureName,
+                    featureName,
+                    resultSet.getString("market_ticker"),
+                    longOrNull(resultSet, "event_ts_ms"),
+                    resultSet.getString("source_event_id"),
+                    values
+                )
             );
         } catch (Exception e) {
             throw new IllegalStateException(
-                "Failed to map feature output row " + resultSet.getString("feature_event_id"),
+                "Failed to map feature output row " + featureEventId,
                 e
             );
         }
@@ -144,5 +171,22 @@ public final class JdbcFeatureOutputReader implements FeatureOutputReader {
             return number.longValue();
         }
         return Long.parseLong(value.toString());
+    }
+
+    private static Instant instantOrNull(ResultSet resultSet, String column) throws SQLException {
+        Object value = resultSet.getObject(column);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        if (value instanceof OffsetDateTime offsetDateTime) {
+            return offsetDateTime.toInstant();
+        }
+        return Instant.parse(value.toString());
     }
 }

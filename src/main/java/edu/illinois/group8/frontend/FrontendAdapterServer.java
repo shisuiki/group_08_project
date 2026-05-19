@@ -42,6 +42,7 @@ public class FrontendAdapterServer {
     private final FrontendFeatureStore store;
     private final FrontendMarketMetadataCatalog metadataCatalog;
     private final Supplier<FeaturePlantStats> featurePlantStats;
+    private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
     private final BackendMetrics metrics = new BackendMetrics();
     private final ConcurrentHashMap<String, LongAdder> requestCounters = new ConcurrentHashMap<>();
@@ -64,12 +65,25 @@ public class FrontendAdapterServer {
         FrontendMarketMetadataCatalog metadataCatalog,
         Supplier<FeaturePlantStats> featurePlantStats
     ) {
+        this(config, store, metadataCatalog, featurePlantStats, FeatureOutputRefreshStatus::disabled);
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus
+    ) {
         this.config = config;
         this.store = store;
         this.metadataCatalog = metadataCatalog == null
             ? FrontendMarketMetadataCatalog.disabled("disabled")
             : metadataCatalog;
         this.featurePlantStats = featurePlantStats == null ? () -> FeaturePlantStats.EMPTY : featurePlantStats;
+        this.featureOutputRefreshStatus = featureOutputRefreshStatus == null
+            ? FeatureOutputRefreshStatus::disabled
+            : featureOutputRefreshStatus;
     }
 
     public void start() throws IOException {
@@ -374,6 +388,7 @@ public class FrontendAdapterServer {
         fp.put("events_out", stats.eventsOut());
         fp.put("errors", stats.errors());
         health.put("feature_plant", fp);
+        health.put("feature_output_refresh", featureOutputRefreshBody(featureOutputRefreshStatus.get()));
         writeJson(exchange, 200, health);
     }
 
@@ -413,6 +428,20 @@ public class FrontendAdapterServer {
         body.put("event_ts_ms", output.eventTsMs());
         body.put("source_event_id", output.sourceEventId());
         body.put("values", output.values());
+        return body;
+    }
+
+    private static Map<String, Object> featureOutputRefreshBody(FeatureOutputRefreshStatus status) {
+        FeatureOutputRefreshStatus view = status == null ? FeatureOutputRefreshStatus.disabled() : status;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("enabled", view.enabled());
+        body.put("running", view.running());
+        body.put("last_success_at", view.lastSuccessAt() == null ? null : view.lastSuccessAt().toString());
+        body.put("last_error_at", view.lastErrorAt() == null ? null : view.lastErrorAt().toString());
+        body.put("last_error", view.lastError());
+        body.put("last_row_count", view.lastRowCount());
+        body.put("total_loaded", view.totalLoaded());
+        body.put("refresh_errors", view.refreshErrors());
         return body;
     }
 

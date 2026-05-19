@@ -43,23 +43,34 @@ public final class FrontendAdapterMain {
             config.maxSymbolsIndexed()
         );
         if (config.featureSource() == FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS) {
-            int seeded = seedFeatureOutputs(config, store, buildFeatureOutputReader(config));
+            JdbcFeatureOutputReader featureOutputReader = buildFeatureOutputReader(config);
+            FeatureOutputRefreshService refreshService = new FeatureOutputRefreshService(
+                config,
+                store,
+                featureOutputReader::readRows
+            );
+            int seeded = refreshService.seedOnce();
             FrontendMarketMetadataCatalog metadataCatalog = buildMarketMetadataCatalog(config);
             FrontendAdapterServer server = new FrontendAdapterServer(
                 config,
                 store,
                 metadataCatalog,
-                () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+                () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+                refreshService::status
             );
             server.start();
+            refreshService.start();
             CountDownLatch stop = new CountDownLatch(1);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                refreshService.close();
                 server.stop();
                 stop.countDown();
             }, "frontend-adapter-shutdown"));
             System.out.println("FrontendAdapter listening on " + config.host() + ":" + server.boundPort()
                 + " feature_source=" + config.featureSource().name().toLowerCase(Locale.ROOT)
                 + " seeded_feature_outputs=" + seeded
+                + " feature_output_refresh_enabled=" + config.featureOutputRefreshEnabled()
+                + " feature_output_refresh_interval_ms=" + config.featureOutputRefreshIntervalMs()
                 + " market_metadata_status=" + metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT)
                 + " market_metadata_rows=" + metadataCatalog.size()
                 + " max_feature_output_rows=" + config.featureOutputMaxRows());
@@ -119,7 +130,7 @@ public final class FrontendAdapterMain {
         return FeatureOutputReadRequest.recent(resolveFeatureNames(config.moduleNames()), config.featureOutputMaxRows());
     }
 
-    static FeatureOutputReader buildFeatureOutputReader(FrontendAdapterConfig config) {
+    static JdbcFeatureOutputReader buildFeatureOutputReader(FrontendAdapterConfig config) {
         if (config.dbUrl().isBlank()) {
             throw new IllegalArgumentException(
                 "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when "

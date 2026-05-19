@@ -67,13 +67,18 @@ assert_frontend_adapter_metadata_env_present() {
     label="$1"
     shift
     rendered="$(service_config_for frontend-adapter "$@")"
-    for env_name in FRONTEND_ADAPTER_METADATA_SOURCE FRONTEND_ADAPTER_METADATA_MAX_ROWS; do
+    for env_name in \
+        FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED \
+        FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS \
+        FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS \
+        FRONTEND_ADAPTER_METADATA_SOURCE \
+        FRONTEND_ADAPTER_METADATA_MAX_ROWS; do
         if ! printf '%s\n' "$rendered" | grep -q "^      ${env_name}:"; then
             printf 'profile %s frontend-adapter is missing environment %s\n' "$label" "$env_name" >&2
             exit 1
         fi
     done
-    printf 'PASS compose_service_environment profiles=%s service=frontend-adapter env=FRONTEND_ADAPTER_METADATA_SOURCE,FRONTEND_ADAPTER_METADATA_MAX_ROWS\n' "$label"
+    printf 'PASS compose_service_environment profiles=%s service=frontend-adapter env=feature-output-refresh,metadata\n' "$label"
 }
 
 assert_published_ports_loopback() {

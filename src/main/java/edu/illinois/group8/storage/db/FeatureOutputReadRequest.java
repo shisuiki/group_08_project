@@ -7,9 +7,21 @@ public record FeatureOutputReadRequest(
     String marketTicker,
     Long fromEventTsMs,
     Long toEventTsMs,
+    FeatureOutputCursor after,
+    boolean ascending,
     int maxRows
 ) {
     public static final int DEFAULT_MAX_ROWS = 10_000;
+
+    public FeatureOutputReadRequest(
+        List<String> featureNames,
+        String marketTicker,
+        Long fromEventTsMs,
+        Long toEventTsMs,
+        int maxRows
+    ) {
+        this(featureNames, marketTicker, fromEventTsMs, toEventTsMs, null, false, maxRows);
+    }
 
     public FeatureOutputReadRequest {
         featureNames = normalizeList(featureNames);
@@ -23,7 +35,15 @@ public record FeatureOutputReadRequest(
     }
 
     public static FeatureOutputReadRequest recent(List<String> featureNames, int maxRows) {
-        return new FeatureOutputReadRequest(featureNames, null, null, null, maxRows);
+        return new FeatureOutputReadRequest(featureNames, null, null, null, null, false, maxRows);
+    }
+
+    public static FeatureOutputReadRequest afterCreatedAt(
+        List<String> featureNames,
+        FeatureOutputCursor after,
+        int maxRows
+    ) {
+        return new FeatureOutputReadRequest(featureNames, null, null, null, after, true, maxRows);
     }
 
     public static FeatureOutputReadRequest defaultRecent() {

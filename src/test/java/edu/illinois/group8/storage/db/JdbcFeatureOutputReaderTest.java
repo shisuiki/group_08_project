@@ -10,6 +10,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +43,7 @@ class JdbcFeatureOutputReaderTest {
             "feature_version", 1,
             "market_ticker", "MKT-1",
             "event_ts_ms", 1000L,
+            "created_at", Instant.parse("2026-05-20T00:00:01Z"),
             "values", "{\"midpoint_micros\":123,\"score\":1.25,\"active\":true}"
         )));
         JdbcFeatureOutputReader reader = new JdbcFeatureOutputReader(jdbc::openConnection);
@@ -123,6 +126,7 @@ class JdbcFeatureOutputReaderTest {
             "feature_version", 1,
             "market_ticker", "MKT-1",
             "event_ts_ms", null,
+            "created_at", Instant.parse("2026-05-20T00:00:01Z"),
             "values", "{\"trade_id\":\"T1\"}"
         )));
         JdbcFeatureOutputReader reader = new JdbcFeatureOutputReader(jdbc::openConnection);
@@ -157,6 +161,7 @@ class JdbcFeatureOutputReaderTest {
             "feature_version", 1,
             "market_ticker", "MKT-1",
             "event_ts_ms", 1L,
+            "created_at", Instant.parse("2026-05-20T00:00:01Z"),
             "values", "{bad-json"
         )));
         JdbcFeatureOutputReader reader = new JdbcFeatureOutputReader(jdbc::openConnection);
@@ -167,6 +172,43 @@ class JdbcFeatureOutputReaderTest {
         );
 
         assertTrue(thrown.getMessage().contains("feature-bad"));
+    }
+
+    @Test
+    void readsRowsWithStableCreatedAtCursor() {
+        Instant cursorTime = Instant.parse("2026-05-20T00:00:01Z");
+        RecordingJdbc jdbc = new RecordingJdbc(List.of(row(
+            "feature_event_id", "feature-2",
+            "source_event_id", "source-2",
+            "feature_name", "feature.bbo",
+            "feature_version", 1,
+            "market_ticker", "MKT-1",
+            "event_ts_ms", 2000L,
+            "created_at", Instant.parse("2026-05-20T00:00:02Z"),
+            "values", "{\"midpoint_micros\":456}"
+        )));
+        JdbcFeatureOutputReader reader = new JdbcFeatureOutputReader(jdbc::openConnection);
+
+        List<FeatureOutputRow> rows = reader.readRows(FeatureOutputReadRequest.afterCreatedAt(
+            List.of("feature.bbo"),
+            new FeatureOutputCursor(cursorTime, "feature-1"),
+            10
+        ));
+
+        String sql = jdbc.preparedSql.toLowerCase(Locale.ROOT);
+        assertTrue(sql.contains("created_at > ? or (created_at = ? and feature_event_id > ?)"));
+        assertTrue(sql.contains("order by created_at asc, feature_event_id asc"));
+        assertEquals(List.of(
+            "feature.bbo",
+            Timestamp.from(cursorTime),
+            Timestamp.from(cursorTime),
+            "feature-1",
+            10
+        ), jdbc.bindings);
+        assertEquals(1, rows.size());
+        assertEquals("feature-2", rows.get(0).featureEventId());
+        assertEquals(Instant.parse("2026-05-20T00:00:02Z"), rows.get(0).createdAt());
+        assertEquals(456L, ((Number) rows.get(0).output().values().get("midpoint_micros")).longValue());
     }
 
     private static Map<String, Object> row(Object... keyValues) {

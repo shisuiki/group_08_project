@@ -25,6 +25,9 @@ public record FrontendAdapterConfig(
     int idleSleepMillis,
     long recordingMaxEvents,
     int featureOutputMaxRows,
+    boolean featureOutputRefreshEnabled,
+    int featureOutputRefreshIntervalMs,
+    int featureOutputRefreshMaxRows,
     MetadataSource metadataSource,
     int metadataMaxRows,
     String dbUrl,
@@ -34,6 +37,7 @@ public record FrontendAdapterConfig(
     String dbReplayId
 ) {
     private static final int DEFAULT_FEATURE_OUTPUT_MAX_ROWS = 10_000;
+    private static final int DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS = 1_000;
     private static final int DEFAULT_METADATA_MAX_ROWS = 1_000;
 
     public enum SourceMode {
@@ -114,6 +118,12 @@ public record FrontendAdapterConfig(
         if (featureOutputMaxRows < 1) {
             throw new IllegalArgumentException("featureOutputMaxRows must be positive");
         }
+        if (featureOutputRefreshIntervalMs < 1) {
+            throw new IllegalArgumentException("featureOutputRefreshIntervalMs must be positive");
+        }
+        if (featureOutputRefreshMaxRows < 1) {
+            throw new IllegalArgumentException("featureOutputRefreshMaxRows must be positive");
+        }
         if (metadataMaxRows < 1) {
             throw new IllegalArgumentException("metadataMaxRows must be positive");
         }
@@ -157,6 +167,9 @@ public record FrontendAdapterConfig(
             idleSleepMillis,
             recordingMaxEvents,
             DEFAULT_FEATURE_OUTPUT_MAX_ROWS,
+            false,
+            DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS,
+            DEFAULT_FEATURE_OUTPUT_MAX_ROWS,
             MetadataSource.AUTO,
             DEFAULT_METADATA_MAX_ROWS,
             dbUrl,
@@ -174,11 +187,17 @@ public record FrontendAdapterConfig(
     public static FrontendAdapterConfig from(Map<String, String> env) {
         String baseDir = value(env, "BASE_DIR", "/app");
         SourceMode sourceMode = SourceMode.parse(value(env, "FRONTEND_ADAPTER_SOURCE", "db"));
+        FeatureSource featureSource = FeatureSource.parse(value(env, "FRONTEND_ADAPTER_FEATURE_SOURCE", "modules"));
+        int featureOutputMaxRows = intValue(
+            env,
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS",
+            DEFAULT_FEATURE_OUTPUT_MAX_ROWS
+        );
         return new FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_HOST", "127.0.0.1"),
             intValue(env, "FRONTEND_ADAPTER_PORT", 8090),
             sourceMode,
-            FeatureSource.parse(value(env, "FRONTEND_ADAPTER_FEATURE_SOURCE", "modules")),
+            featureSource,
             value(env, "FRONTEND_ADAPTER_AERON_CHANNEL",
                 value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
             Path.of(value(env, "FRONTEND_ADAPTER_RECORDING_ROOT", baseDir + "/recordings")),
@@ -190,7 +209,22 @@ public record FrontendAdapterConfig(
             intValue(env, "FRONTEND_ADAPTER_FRAGMENT_LIMIT", 64),
             intValue(env, "FRONTEND_ADAPTER_IDLE_SLEEP_MS", 1),
             longValue(env, "FRONTEND_ADAPTER_RECORDING_MAX_EVENTS", 0L),
-            intValue(env, "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", DEFAULT_FEATURE_OUTPUT_MAX_ROWS),
+            featureOutputMaxRows,
+            booleanValue(
+                env,
+                "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED",
+                featureSource == FeatureSource.FEATURE_OUTPUTS
+            ),
+            intValue(
+                env,
+                "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS",
+                DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS
+            ),
+            intValue(
+                env,
+                "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS",
+                featureOutputMaxRows
+            ),
             MetadataSource.parse(value(env, "FRONTEND_ADAPTER_METADATA_SOURCE", "auto")),
             intValue(env, "FRONTEND_ADAPTER_METADATA_MAX_ROWS", DEFAULT_METADATA_MAX_ROWS),
             value(env, "FRONTEND_ADAPTER_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
@@ -242,5 +276,9 @@ public record FrontendAdapterConfig(
 
     private static long longValue(Map<String, String> env, String key, long defaultValue) {
         return Long.parseLong(value(env, key, Long.toString(defaultValue)));
+    }
+
+    private static boolean booleanValue(Map<String, String> env, String key, boolean defaultValue) {
+        return Boolean.parseBoolean(value(env, key, Boolean.toString(defaultValue)));
     }
 }

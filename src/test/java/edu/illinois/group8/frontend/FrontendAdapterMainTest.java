@@ -5,6 +5,7 @@ import edu.illinois.group8.feature.DbCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
+import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
@@ -12,11 +13,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -123,6 +129,78 @@ class FrontendAdapterMainTest {
     }
 
     @Test
+    void featureOutputRefreshUsesCursorAndKeepsStoreOnReaderError() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "10",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "3"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 10);
+        List<FeatureOutputReadRequest> requests = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        FeatureOutputRefreshService service = new FeatureOutputRefreshService(config, store, request -> {
+            requests.add(request);
+            return switch (calls.getAndIncrement()) {
+                case 0 -> List.of(
+                    row("feature-2", "2026-05-20T00:00:02Z", 2_000L, "new"),
+                    row("feature-1", "2026-05-20T00:00:01Z", 1_000L, "old")
+                );
+                case 1 -> List.of(row("feature-3", "2026-05-20T00:00:03Z", 3_000L, "refresh"));
+                default -> throw new IllegalStateException("db unavailable");
+            };
+        });
+
+        assertEquals(2, service.seedOnce());
+        assertEquals("new", store.latest("MKT-1", "feature.bbo").orElseThrow().sourceEventId());
+        assertEquals(1, requests.size());
+        assertFalse(requests.get(0).ascending());
+        assertEquals(10, requests.get(0).maxRows());
+
+        assertEquals(1, service.refreshOnce());
+        assertEquals(2, requests.size());
+        FeatureOutputReadRequest refreshRequest = requests.get(1);
+        assertTrue(refreshRequest.ascending());
+        assertEquals(3, refreshRequest.maxRows());
+        assertEquals("feature-2", refreshRequest.after().featureEventId());
+        assertEquals(Instant.parse("2026-05-20T00:00:02Z"), refreshRequest.after().createdAt());
+        assertEquals("refresh", store.latest("MKT-1", "feature.bbo").orElseThrow().sourceEventId());
+        assertEquals(3L, service.status().totalLoaded());
+        assertEquals(1, service.status().lastRowCount());
+
+        assertEquals(0, service.refreshOnce());
+        assertEquals(1L, service.status().refreshErrors());
+        assertTrue(service.status().lastError().contains("db unavailable"));
+        assertEquals("refresh", store.latest("MKT-1", "feature.bbo").orElseThrow().sourceEventId());
+    }
+
+    @Test
+    void featureOutputRefreshCloseStopsBackgroundLoop() throws Exception {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS", "1000"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 10);
+        CountDownLatch slept = new CountDownLatch(1);
+        FeatureOutputRefreshService service = new FeatureOutputRefreshService(
+            config,
+            store,
+            ignored -> List.of(),
+            millis -> {
+                slept.countDown();
+                Thread.sleep(millis);
+            }
+        );
+
+        service.seedOnce();
+        service.start();
+        assertTrue(slept.await(2, TimeUnit.SECONDS));
+
+        service.close();
+
+        assertFalse(service.status().running());
+    }
+
+    @Test
     void explicitMetadataDbModeRequiresDatabaseUrl() {
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
             "FRONTEND_ADAPTER_METADATA_SOURCE", "db",
@@ -226,6 +304,10 @@ class FrontendAdapterMainTest {
             sourceEventId,
             Map.of("midpoint_micros", eventTsMs)
         );
+    }
+
+    private static FeatureOutputRow row(String eventId, String createdAt, long eventTsMs, String sourceEventId) {
+        return new FeatureOutputRow(eventId, Instant.parse(createdAt), output(eventTsMs, sourceEventId));
     }
 
     private static MarketMetadata metadata(String ticker, String status) {
