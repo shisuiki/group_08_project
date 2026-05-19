@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 
 public class BackendMetrics {
     private final ConcurrentHashMap<String, LongAdder> counters = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap.KeySetView<String, Boolean> exportedCounters = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, AtomicLong> gauges = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Distribution> distributions = new ConcurrentHashMap<>();
 
@@ -18,7 +19,8 @@ public class BackendMetrics {
     }
 
     public Counter counter(String name, Map<String, String> labels) {
-        return new Counter(metricKey(name, labels));
+        String key = metricKey(name, labels);
+        return new Counter(key, counters.computeIfAbsent(key, ignored -> new LongAdder()));
     }
 
     public DistributionHandle distribution(String name) {
@@ -26,7 +28,7 @@ public class BackendMetrics {
     }
 
     public DistributionHandle distribution(String name, Map<String, String> labels) {
-        return new DistributionHandle(metricKey(name, labels));
+        return new DistributionHandle(distributions.computeIfAbsent(metricKey(name, labels), ignored -> new Distribution()));
     }
 
     public void increment(String counterName) {
@@ -74,6 +76,7 @@ public class BackendMetrics {
     public Map<String, Long> snapshot() {
         Map<String, Long> snapshot = new LinkedHashMap<>();
         counters.entrySet().stream()
+            .filter(entry -> exportedCounters.contains(entry.getKey()))
             .sorted(Map.Entry.comparingByKey())
             .forEach(entry -> snapshot.put(entry.getKey(), entry.getValue().sum()));
         return Collections.unmodifiableMap(snapshot);
@@ -82,12 +85,14 @@ public class BackendMetrics {
     public String prometheusText() {
         StringBuilder body = new StringBuilder();
         counters.entrySet().stream()
+            .filter(entry -> exportedCounters.contains(entry.getKey()))
             .sorted(Map.Entry.comparingByKey())
             .forEach(entry -> body.append(entry.getKey()).append(' ').append(entry.getValue().sum()).append('\n'));
         gauges.entrySet().stream()
             .sorted(Map.Entry.comparingByKey())
             .forEach(entry -> body.append(entry.getKey()).append(' ').append(entry.getValue().get()).append('\n'));
         distributions.entrySet().stream()
+            .filter(entry -> entry.getValue().count() > 0L)
             .sorted(Map.Entry.comparingByKey())
             .forEach(entry -> entry.getValue().appendPrometheus(body, entry.getKey()));
         return body.toString();
@@ -128,6 +133,7 @@ public class BackendMetrics {
 
     private void addCounter(String key, long amount) {
         counters.computeIfAbsent(key, ignored -> new LongAdder()).add(amount);
+        exportedCounters.add(key);
     }
 
     private void observeDistribution(String key, long value) {
@@ -136,9 +142,12 @@ public class BackendMetrics {
 
     public final class Counter {
         private final String key;
+        private final LongAdder adder;
+        private boolean exported;
 
-        private Counter(String key) {
+        private Counter(String key, LongAdder adder) {
             this.key = key;
+            this.adder = adder;
         }
 
         public void increment() {
@@ -146,19 +155,23 @@ public class BackendMetrics {
         }
 
         public void add(long amount) {
-            addCounter(key, amount);
+            adder.add(amount);
+            if (!exported) {
+                exportedCounters.add(key);
+                exported = true;
+            }
         }
     }
 
     public final class DistributionHandle {
-        private final String key;
+        private final Distribution distribution;
 
-        private DistributionHandle(String key) {
-            this.key = key;
+        private DistributionHandle(Distribution distribution) {
+            this.distribution = distribution;
         }
 
         public void observe(long value) {
-            observeDistribution(key, value);
+            distribution.observe(value);
         }
     }
 
@@ -180,6 +193,10 @@ public class BackendMetrics {
             body.append(countKey).append(' ').append(count.sum()).append('\n');
             body.append(sumKey).append(' ').append(sum.sum()).append('\n');
             body.append(maxKey).append(' ').append(max.get()).append('\n');
+        }
+
+        private long count() {
+            return count.sum();
         }
 
         private static String insertSuffix(String key, String suffix) {

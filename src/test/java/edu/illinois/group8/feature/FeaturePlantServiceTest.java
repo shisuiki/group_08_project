@@ -17,6 +17,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FeaturePlantServiceTest {
@@ -154,6 +155,72 @@ class FeaturePlantServiceTest {
         ));
     }
 
+    @Test
+    void moduleMetricHandlesRemainSeparatedByStream() {
+        List<CanonicalEnvelope> envelopes = new ArrayList<>();
+        for (int i = 0; i < 65; i++) {
+            envelopes.add(new CanonicalEnvelope(
+                "canonical.trade",
+                "{}",
+                com.fasterxml.jackson.databind.node.NullNode.getInstance(),
+                1L,
+                null
+            ));
+        }
+        envelopes.add(new CanonicalEnvelope(
+            "canonical.ticker",
+            "{}",
+            com.fasterxml.jackson.databind.node.NullNode.getInstance(),
+            1L,
+            null
+        ));
+        BackendMetrics metrics = new BackendMetrics();
+        CollectingFeatureOutputSink sink = new CollectingFeatureOutputSink();
+
+        try (FeaturePlantService service = new FeaturePlantService(
+            new ListCanonicalEnvelopeSource(envelopes),
+            List.of(new FailingMultiStreamModule()),
+            sink,
+            metrics
+        )) {
+            assertThrows(IllegalStateException.class, () -> service.runUntilExhausted(10));
+        }
+
+        assertEquals(65, sink.outputs().size());
+        var tradeLabels = BackendMetrics.labels("service", "featureplant", "module", "feature.multi", "stream", "canonical.trade");
+        var tickerLabels = BackendMetrics.labels("service", "featureplant", "module", "feature.multi", "stream", "canonical.ticker");
+        assertEquals(65L, metrics.get("feature_module_events_in_total", tradeLabels));
+        assertEquals(65L, metrics.get("feature_module_events_out_total", tradeLabels));
+        assertEquals(0L, metrics.get("feature_module_errors_total", tradeLabels));
+        assertEquals(1L, metrics.get("feature_module_events_in_total", tickerLabels));
+        assertEquals(0L, metrics.get("feature_module_events_out_total", tickerLabels));
+        assertEquals(1L, metrics.get("feature_module_errors_total", tickerLabels));
+
+        String text = metrics.prometheusText();
+        assertTrue(text.contains(
+            "feature_module_enabled{module=\"feature.multi\",service=\"featureplant\"} 1\n"
+        ));
+        assertFalse(text.contains("feature_module_enabled{module=\"feature.multi\",service=\"featureplant\",stream="));
+        assertTrue(text.contains(
+            "feature_module_events_in_total{module=\"feature.multi\",service=\"featureplant\",stream=\"canonical.ticker\"} 1\n"
+        ));
+        assertTrue(text.contains(
+            "feature_module_errors_total{module=\"feature.multi\",service=\"featureplant\",stream=\"canonical.ticker\"} 1\n"
+        ));
+        assertTrue(text.contains(
+            "feature_module_latency_ns_count{module=\"feature.multi\",service=\"featureplant\",stream=\"canonical.trade\"} 2\n"
+        ));
+        assertTrue(text.contains(
+            "feature_module_lag_ms_count{module=\"feature.multi\",service=\"featureplant\",stream=\"canonical.trade\"} 2\n"
+        ));
+        assertFalse(text.contains(
+            "feature_module_latency_ns_count{module=\"feature.multi\",service=\"featureplant\",stream=\"canonical.ticker\"}"
+        ));
+        assertFalse(text.contains(
+            "feature_module_lag_ms_count{module=\"feature.multi\",service=\"featureplant\",stream=\"canonical.ticker\"}"
+        ));
+    }
+
     private void write(String streamName, String payload) throws Exception {
         Path file = tempDir
             .resolve("canonical")
@@ -228,6 +295,33 @@ class FeaturePlantServiceTest {
             collector.emit(new FeatureOutput(
                 name,
                 streamName,
+                "M",
+                envelope.eventTsMs(),
+                envelope.eventId(),
+                Map.of("value", 1L)
+            ));
+        }
+    }
+
+    private static final class FailingMultiStreamModule implements FeatureModule {
+        @Override
+        public String name() {
+            return "feature.multi";
+        }
+
+        @Override
+        public Set<String> inputStreams() {
+            return Set.of("canonical.trade", "canonical.ticker");
+        }
+
+        @Override
+        public void onEvent(CanonicalEnvelope envelope, FeatureOutputCollector collector) {
+            if ("canonical.ticker".equals(envelope.streamName())) {
+                throw new IllegalStateException("ticker failure");
+            }
+            collector.emit(new FeatureOutput(
+                name(),
+                envelope.streamName(),
                 "M",
                 envelope.eventTsMs(),
                 envelope.eventId(),

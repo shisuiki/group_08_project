@@ -22,6 +22,19 @@ class BackendMetricsTest {
     }
 
     @Test
+    void stringApiCreatedCounterStorageIsSharedWithHandle() {
+        BackendMetrics metrics = new BackendMetrics();
+        Map<String, String> labels = BackendMetrics.labels("b", "2", "a", "1");
+
+        metrics.increment("shared_total", labels);
+        BackendMetrics.Counter counter = metrics.counter("shared_total", Map.of("a", "1", "b", "2"));
+        counter.add(4L);
+
+        assertEquals(5L, metrics.get("shared_total", labels));
+        assertEquals(Map.of("shared_total{a=\"1\",b=\"2\"}", 5L), metrics.snapshot());
+    }
+
+    @Test
     void counterHandleDropsBlankAndNullLabelsLikeExistingApi() {
         BackendMetrics metrics = new BackendMetrics();
         Map<String, String> labels = new LinkedHashMap<>();
@@ -49,6 +62,46 @@ class BackendMetricsTest {
         assertTrue(prometheus.contains("latency_ns_count{a=\"1\",b=\"2\"} 2\n"));
         assertTrue(prometheus.contains("latency_ns_sum{a=\"1\",b=\"2\"} 12\n"));
         assertTrue(prometheus.contains("latency_ns_max{a=\"1\",b=\"2\"} 7\n"));
+    }
+
+    @Test
+    void unusedHandlesDoNotEmitZeroSeriesUntilUsed() {
+        BackendMetrics metrics = new BackendMetrics();
+        Map<String, String> labels = BackendMetrics.labels("stream", "canonical.trade");
+
+        BackendMetrics.Counter counter = metrics.counter("unused_total", labels);
+        BackendMetrics.DistributionHandle distribution = metrics.distribution("unused_latency_ns", labels);
+
+        assertEquals(0L, metrics.get("unused_total", labels));
+        assertEquals(Map.of(), metrics.snapshot());
+        String unusedPrometheus = metrics.prometheusText();
+        assertTrue(unusedPrometheus.isBlank());
+
+        counter.increment();
+        distribution.observe(9L);
+
+        assertEquals(Map.of("unused_total{stream=\"canonical.trade\"}", 1L), metrics.snapshot());
+        String prometheus = metrics.prometheusText();
+        assertTrue(prometheus.contains("unused_total{stream=\"canonical.trade\"} 1\n"));
+        assertTrue(prometheus.contains("unused_latency_ns_count{stream=\"canonical.trade\"} 1\n"));
+        assertTrue(prometheus.contains("unused_latency_ns_sum{stream=\"canonical.trade\"} 9\n"));
+        assertTrue(prometheus.contains("unused_latency_ns_max{stream=\"canonical.trade\"} 9\n"));
+    }
+
+    @Test
+    void stringApiCreatedDistributionStorageIsSharedWithHandle() {
+        BackendMetrics metrics = new BackendMetrics();
+        Map<String, String> labels = BackendMetrics.labels("b", "2", "a", "1");
+
+        metrics.observe("shared_latency_ns", labels, 2L);
+        BackendMetrics.DistributionHandle distribution =
+            metrics.distribution("shared_latency_ns", Map.of("a", "1", "b", "2"));
+        distribution.observe(4L);
+
+        String prometheus = metrics.prometheusText();
+        assertTrue(prometheus.contains("shared_latency_ns_count{a=\"1\",b=\"2\"} 2\n"));
+        assertTrue(prometheus.contains("shared_latency_ns_sum{a=\"1\",b=\"2\"} 6\n"));
+        assertTrue(prometheus.contains("shared_latency_ns_max{a=\"1\",b=\"2\"} 4\n"));
     }
 
     @Test
