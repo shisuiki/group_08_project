@@ -17,6 +17,7 @@ public record FrontendAdapterConfig(
     FeatureSource featureSource,
     String aeronChannel,
     Path recordingRoot,
+    Path staticRoot,
     List<StreamContract> streams,
     List<String> moduleNames,
     int maxFeaturesPerMarket,
@@ -101,6 +102,8 @@ public record FrontendAdapterConfig(
         if (metadataSource == null) {
             throw new IllegalArgumentException("metadataSource is required");
         }
+        recordingRoot = recordingRoot == null ? Path.of("recordings") : recordingRoot;
+        staticRoot = staticRoot == null ? Path.of("frontend/tradingview-lightweight") : staticRoot;
         streams = List.copyOf(streams);
         moduleNames = List.copyOf(moduleNames);
         if (maxFeaturesPerMarket < 1) {
@@ -159,6 +162,7 @@ public record FrontendAdapterConfig(
             FeatureSource.MODULES,
             aeronChannel,
             recordingRoot,
+            Path.of("frontend/tradingview-lightweight"),
             streams,
             moduleNames,
             maxFeaturesPerMarket,
@@ -201,6 +205,7 @@ public record FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_AERON_CHANNEL",
                 value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
             Path.of(value(env, "FRONTEND_ADAPTER_RECORDING_ROOT", baseDir + "/recordings")),
+            Path.of(value(env, "FRONTEND_ADAPTER_STATIC_ROOT", "frontend/tradingview-lightweight")),
             resolveStreams(value(env, "FRONTEND_ADAPTER_STREAMS",
                 "canonical.trade,canonical.ticker,derived.top_of_book")),
             csv(value(env, "FRONTEND_ADAPTER_MODULES", "bbo,ticker_snapshot,trade_tape")),

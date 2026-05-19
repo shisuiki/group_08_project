@@ -308,6 +308,7 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("staleQuoteLoop"));
         assertTrue(app.contains("startQuotesFallback"));
         assertTrue(app.contains("QUOTES_UPDATE_ERROR_LIMIT"));
+        assertTrue(app.contains("window.location.origin"));
         assertTrue(app.contains("/quotes?symbols="));
     }
 

@@ -82,7 +82,14 @@
     }
 
     function adapterBase() {
-        return dom.adapterUrl.value.trim().replace(/\/+$/, '');
+        const override = dom.adapterUrl.value.trim();
+        if (override) {
+            return override.replace(/\/+$/, '');
+        }
+        if (window.location.origin && window.location.origin !== 'null') {
+            return window.location.origin;
+        }
+        return 'http://127.0.0.1:8090';
     }
 
     async function fetchJsonFromBase(base, path, options) {

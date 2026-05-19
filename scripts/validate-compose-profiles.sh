@@ -95,13 +95,14 @@ assert_frontend_adapter_metadata_env_present() {
         FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS \
         FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS \
         FRONTEND_ADAPTER_METADATA_SOURCE \
-        FRONTEND_ADAPTER_METADATA_MAX_ROWS; do
+        FRONTEND_ADAPTER_METADATA_MAX_ROWS \
+        FRONTEND_ADAPTER_STATIC_ROOT; do
         if ! printf '%s\n' "$rendered" | grep -q "^      ${env_name}:"; then
             printf 'profile %s frontend-adapter is missing environment %s\n' "$label" "$env_name" >&2
             exit 1
         fi
     done
-    printf 'PASS compose_service_environment profiles=%s service=frontend-adapter env=feature-output-refresh,metadata\n' "$label"
+    printf 'PASS compose_service_environment profiles=%s service=frontend-adapter env=feature-output-refresh,metadata,static-root\n' "$label"
 }
 
 assert_db_primary_product_services_present() {
@@ -159,6 +160,7 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_SOURCE: db" \
         "FRONTEND_ADAPTER_FEATURE_SOURCE: feature_outputs" \
         "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: \"true\"" \
+        "FRONTEND_ADAPTER_STATIC_ROOT: /app/frontend/tradingview-lightweight" \
         "FRONTEND_ADAPTER_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
         "FRONTEND_ADAPTER_DB_USER: kalshi" \
         "FRONTEND_ADAPTER_DB_PASSWORD: kalshi"; do
@@ -202,6 +204,18 @@ assert_db_primary_product_defaults_aligned() {
         fi
     done
     printf 'PASS db_primary_product_defaults featureplant=follower frontend=feature_outputs\n'
+}
+
+assert_frontend_adapter_db_primary_static_root() {
+    for profile in db-primary-product live-product; do
+        rendered="$(service_config_for frontend-adapter-db-primary --profile "$profile")"
+        if ! printf '%s\n' "$rendered" \
+            | grep -q '^      FRONTEND_ADAPTER_STATIC_ROOT: /app/frontend/tradingview-lightweight$'; then
+            printf '%s frontend-adapter-db-primary missing static root default\n' "$profile" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS frontend_adapter_db_primary_static_root\n'
 }
 
 assert_cluster_live_db_writer_stays_opt_in() {
@@ -485,6 +499,7 @@ assert_live_product_manual_smoke_contract() {
         'feature_outputs' \
         'source_event_id like' \
         'FEATUREPLANT_DB_CURSOR_NAME' \
+        'frontend_static_ui' \
         'LIVE_PRODUCT_SMOKE_DOCKER_SUDO="${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}"' \
         'docker_compose()' \
         'sudo docker compose "$@"' \
@@ -535,6 +550,7 @@ assert_services_present "recording-capture" --profile recording-capture
 assert_db_primary_product_services_present
 assert_live_product_services_present
 assert_db_primary_product_defaults_aligned
+assert_frontend_adapter_db_primary_static_root
 assert_cluster_live_db_writer_stays_opt_in
 assert_live_product_db_writer_expectations
 assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration

@@ -397,6 +397,20 @@ wait_frontend_refresh_progress() {
     done
 }
 
+check_product_static_ui() {
+    index_file="$tmpdir/frontend-index.html"
+    app_file="$tmpdir/frontend-app.js"
+    css_file="$tmpdir/frontend-styles.css"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
+    grep -q 'Kalshi Frontend Adapter Demo' "$index_file"
+    grep -q 'same origin' "$index_file"
+    grep -q '/quotes/updates' "$app_file"
+    grep -q 'chart-container' "$css_file"
+    printf 'PASS frontend_static_ui url=%s/\n' "$FRONTEND_BASE_URL"
+}
+
 wait_frontend_feature_output() {
     market="$1"
     source_event_id="$2"
@@ -508,6 +522,7 @@ frontend_loaded_before="$(printf '%s\n' "$frontend_before" | sed -n '2p')"
 frontend_errors_before="$(printf '%s\n' "$frontend_before" | sed -n '3p')"
 printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s\n' \
     "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before"
+check_product_static_ui
 
 cursor_before="$(cursor_commit_seq)"
 max_commit_before="$(psql_scalar "select coalesce(max(canonical_commit_seq), 0) from canonical_events")"

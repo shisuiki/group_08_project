@@ -8,8 +8,9 @@ WORKDIR /app
 COPY pom.xml .
 RUN mvn dependency:go-offline
 
-# Copy the source code
+# Copy source and frontend contract files used by tests
 COPY src ./src
+COPY frontend ./frontend
 
 # Build the application
 ARG MAVEN_PACKAGE_ARGS="package"
@@ -23,6 +24,7 @@ WORKDIR /app
 
 # Copy the built jar from the previous stage
 COPY --from=build /app/target/kalshi-project-1.0-SNAPSHOT.jar /app/app.jar
+COPY frontend/tradingview-lightweight /app/frontend/tradingview-lightweight
 
 # Set environment variables (to be overridden in docker-compose)
 ENV CLUSTER_ADDRESSES=""

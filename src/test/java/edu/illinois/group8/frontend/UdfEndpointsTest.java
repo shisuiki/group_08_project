@@ -181,6 +181,70 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void servesTradingViewStaticIndex() throws Exception {
+        HttpResponse<String> root = get("/");
+        HttpResponse<String> index = get("/index.html");
+
+        assertEquals(200, root.statusCode());
+        assertEquals(200, index.statusCode());
+        assertTrue(root.headers().firstValue("content-type").orElse("").contains("text/html"));
+        assertTrue(root.body().contains("Kalshi Frontend Adapter Demo"));
+        assertTrue(root.body().contains("placeholder=\"same origin\""));
+        assertTrue(index.body().contains("<script src=\"app.js\"></script>"));
+    }
+
+    @Test
+    void servesTradingViewJavascriptAndStyles() throws Exception {
+        HttpResponse<String> js = get("/app.js");
+        HttpResponse<String> css = get("/styles.css");
+
+        assertEquals(200, js.statusCode());
+        assertEquals(200, css.statusCode());
+        assertTrue(js.headers().firstValue("content-type").orElse("").contains("text/javascript"));
+        assertTrue(css.headers().firstValue("content-type").orElse("").contains("text/css"));
+        assertTrue(js.body().contains("/quotes/updates?symbols="));
+        assertTrue(js.body().contains("window.location.origin"));
+        assertTrue(css.body().contains("chart-container"));
+    }
+
+    @Test
+    void staticFallbackRejectsUnknownAndTraversalPaths() throws Exception {
+        HttpResponse<String> missing = get("/missing.js");
+        HttpResponse<String> traversal = get("/%2e%2e/pom.xml");
+
+        assertEquals(404, missing.statusCode());
+        assertEquals(404, traversal.statusCode());
+        assertFalse(traversal.body().contains("<artifactId>"));
+    }
+
+    @Test
+    void apiRoutesStillWinOverStaticFallback() throws Exception {
+        assertTrue(getJson("/datafeed/config").path("supports_search").asBoolean());
+        assertEquals("ok", getJson("/health").path("status").asText());
+        assertEquals(1, getJson("/quotes?symbols=MKT-1").path("quotes").size());
+    }
+
+    @Test
+    void missingStaticRootReturnsNotFoundWithoutCrashingApi() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_STATIC_ROOT", "target/missing-static-assets"
+        ));
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        assertEquals(404, get("/").statusCode());
+        assertEquals("ok", getJson("/health").path("status").asText());
+    }
+
+    @Test
     void symbolsAndQuotesShape() throws Exception {
         JsonNode symbols = getJson("/symbols");
         assertTrue(symbols.path("symbols").isArray());

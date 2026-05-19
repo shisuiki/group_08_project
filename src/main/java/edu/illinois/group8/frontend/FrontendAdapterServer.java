@@ -15,6 +15,8 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,6 +37,7 @@ public class FrontendAdapterServer {
     private static final int MAX_MARKET_LIMIT = 500;
     private static final long DEFAULT_QUOTE_UPDATE_TIMEOUT_MS = 15_000L;
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
+    private static final Set<String> STATIC_ASSETS = Set.of("index.html", "app.js", "styles.css");
 
     public record FeaturePlantStats(long eventsIn, long eventsOut, long errors) {
         public static final FeaturePlantStats EMPTY = new FeaturePlantStats(0L, 0L, 0L);
@@ -106,6 +109,7 @@ public class FrontendAdapterServer {
         bind("/markets", this::handleMarkets);
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
+        bind("/", this::handleStaticAsset);
         httpServer.setExecutor(Executors.newFixedThreadPool(4));
         httpServer.start();
     }
@@ -506,6 +510,40 @@ public class FrontendAdapterServer {
         write(exchange, 200, "text/plain; charset=utf-8", body.toString());
     }
 
+    private void handleStaticAsset(HttpExchange exchange) throws IOException {
+        String rawPath = exchange.getRequestURI().getRawPath();
+        String path;
+        try {
+            path = rawPath == null || rawPath.isBlank()
+                ? "/"
+                : URLDecoder.decode(rawPath, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 404, "static asset not found");
+            return;
+        }
+
+        String assetName;
+        if ("/".equals(path) || "/index.html".equals(path)) {
+            assetName = "index.html";
+        } else if (path.startsWith("/")) {
+            assetName = path.substring(1);
+        } else {
+            assetName = path;
+        }
+        if (!STATIC_ASSETS.contains(assetName)) {
+            writeError(exchange, 404, "static asset not found");
+            return;
+        }
+
+        Path root = config.staticRoot().toAbsolutePath().normalize();
+        Path file = root.resolve(assetName).normalize();
+        if (!file.startsWith(root) || !Files.isRegularFile(file)) {
+            writeError(exchange, 404, "static asset not found: " + assetName);
+            return;
+        }
+        writeBytes(exchange, 200, staticContentType(assetName), Files.readAllBytes(file));
+    }
+
     private static Map<String, Object> featureOutputBody(FeatureOutput output) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("feature_name", output.featureName());
@@ -635,6 +673,19 @@ public class FrontendAdapterServer {
         return timestamp > 10_000_000_000L ? timestamp : timestamp * 1000L;
     }
 
+    private static String staticContentType(String assetName) {
+        if (assetName.endsWith(".html")) {
+            return "text/html; charset=utf-8";
+        }
+        if (assetName.endsWith(".js")) {
+            return "text/javascript; charset=utf-8";
+        }
+        if (assetName.endsWith(".css")) {
+            return "text/css; charset=utf-8";
+        }
+        return "application/octet-stream";
+    }
+
     private static Map<String, String> parseQuery(URI uri) {
         Map<String, String> params = new LinkedHashMap<>();
         String raw = uri.getRawQuery();
@@ -690,6 +741,10 @@ public class FrontendAdapterServer {
 
     private void write(HttpExchange exchange, int status, String contentType, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        writeBytes(exchange, status, contentType, bytes);
+    }
+
+    private void writeBytes(HttpExchange exchange, int status, String contentType, byte[] bytes) throws IOException {
         exchange.getResponseHeaders().set("content-type", contentType);
         exchange.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = exchange.getResponseBody()) {

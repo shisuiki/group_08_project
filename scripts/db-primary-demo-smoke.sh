@@ -55,6 +55,20 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 PY
 }
 
+check_product_static_ui() {
+    index_file="$tmpdir/frontend-index.html"
+    app_file="$tmpdir/frontend-app.js"
+    css_file="$tmpdir/frontend-styles.css"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
+    grep -q 'Kalshi Frontend Adapter Demo' "$index_file"
+    grep -q 'same origin' "$index_file"
+    grep -q '/quotes/updates' "$app_file"
+    grep -q 'chart-container' "$css_file"
+    printf 'PASS frontend_static_ui url=%s/\n' "$FRONTEND_BASE_URL"
+}
+
 health_json="$tmpdir/health.json"
 health_selection="$tmpdir/health-selection.txt"
 health_attempt=1
@@ -171,6 +185,8 @@ feature_output_refresh_total_loaded="$(sed -n '6p' "$health_selection")"
 frontend_started_at="$(sed -n '7p' "$health_selection")"
 printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s feature_output_refresh_enabled=%s feature_output_refresh_running=%s feature_output_refresh_total_loaded=%s started_at=%s market_metadata_status=%s market_metadata_rows=%s\n' \
     "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$feature_output_refresh_enabled" "$feature_output_refresh_running" "$feature_output_refresh_total_loaded" "$frontend_started_at" "$market_metadata_status" "$market_metadata_rows"
+
+check_product_static_ui
 
 symbols_json="$tmpdir/symbols.json"
 fetch_json "/symbols" "$symbols_json"

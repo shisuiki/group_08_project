@@ -2,6 +2,7 @@ package edu.illinois.group8.frontend;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +23,7 @@ class FrontendAdapterConfigTest {
         assertEquals(1_000, config.featureOutputRefreshIntervalMs());
         assertEquals(10_000, config.featureOutputRefreshMaxRows());
         assertEquals(1_000, config.metadataMaxRows());
+        assertEquals(Path.of("frontend/tradingview-lightweight"), config.staticRoot());
     }
 
     @Test
@@ -182,5 +184,14 @@ class FrontendAdapterConfigTest {
 
         assertEquals(FrontendAdapterConfig.MetadataSource.DB, config.metadataSource());
         assertEquals(250, config.metadataMaxRows());
+    }
+
+    @Test
+    void staticRootCanBeOverridden() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_STATIC_ROOT", "/app/frontend/tradingview-lightweight"
+        ));
+
+        assertEquals(Path.of("/app/frontend/tradingview-lightweight"), config.staticRoot());
     }
 }
