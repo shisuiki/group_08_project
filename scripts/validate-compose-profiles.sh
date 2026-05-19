@@ -31,6 +31,12 @@ services_for() {
     compose "$@" config --services
 }
 
+service_config_for() {
+    service="$1"
+    shift
+    compose "$@" config "$service"
+}
+
 assert_services_absent() {
     label="$1"
     shift
@@ -57,6 +63,19 @@ assert_services_present() {
     printf 'PASS compose_services_present profiles=%s services=stream-recorder,s3-recording-sync\n' "$label"
 }
 
+assert_frontend_adapter_metadata_env_present() {
+    label="$1"
+    shift
+    rendered="$(service_config_for frontend-adapter "$@")"
+    for env_name in FRONTEND_ADAPTER_METADATA_SOURCE FRONTEND_ADAPTER_METADATA_MAX_ROWS; do
+        if ! printf '%s\n' "$rendered" | grep -q "^      ${env_name}:"; then
+            printf 'profile %s frontend-adapter is missing environment %s\n' "$label" "$env_name" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS compose_service_environment profiles=%s service=frontend-adapter env=FRONTEND_ADAPTER_METADATA_SOURCE,FRONTEND_ADAPTER_METADATA_MAX_ROWS\n' "$label"
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -69,3 +88,4 @@ validate_config "raw-replay" --profile raw-replay
 assert_services_absent "observability" --profile observability
 assert_services_absent "cluster-live,observability" --profile cluster-live --profile observability
 assert_services_present "recording-capture" --profile recording-capture
+assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration
