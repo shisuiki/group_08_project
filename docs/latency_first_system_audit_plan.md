@@ -26,7 +26,7 @@ Kalshi WebSocket
   -> WebSocketClient frame parser
   -> KalshiWebSocketClient.onMessage
   -> optional RawIngestRecorder
-  -> KalshiIngressEnvelope byte[] JSON envelope
+  -> KalshiIngressEnvelope binary outer envelope
   -> per-shard ClientClusterOrchestrator.writeToCluster(byte[])
   -> ESBClusteredService.onSessionMessage scratch byte[] slice
   -> DataProcessor.processMessage(byte[], offset, length)
@@ -232,14 +232,15 @@ Verification:
 
 Deliverables:
 
-- Landed: live wrapper and raw replay write JSON ingress envelopes as byte[];
-  leader-side parsing uses a reusable scratch buffer and byte[] slice parser.
+- Landed: live wrapper and raw replay write binary outer ingress envelopes as
+  byte[]; leader-side parsing uses a reusable scratch buffer and byte[] slice
+  parser without parsing an outer JSON envelope.
 - Landed: FeaturePlant live Aeron source parses canonical envelope JSON from
   byte[] and still retains the payload string for compatibility.
 - Landed: FeaturePlant live Aeron source fair-polls subscriptions across calls;
   coverage uses fake pollers, not a live Aeron integration test.
-- Remaining: replace JSON ingress envelope with length-prefixed/binary envelope
-  or direct raw bytes plus metadata header.
+- Landed: replaced the JSON ingress envelope with a length-prefixed binary
+  outer envelope. Raw Kalshi payload parsing remains JSON.
 - Add stream id/name header so `Tickerplant` can eventually route from metadata
   instead of payload inspection; full-tree parse optimization is handled.
 - Avoid remaining `byte[] -> String -> byte[]` round trips where possible.
@@ -370,12 +371,12 @@ Verification:
 
 Ranked by expected impact:
 
-1. Remove JSON envelope double parse.
-2. Header-based tickerplant routing.
-3. Precomputed metric keys and sampled latency metrics.
-4. Move raw event id SHA-256 off the mandatory processor path where possible.
-5. Primitive price-level order book.
-6. Binary canonical serialization for internal streams.
+1. Header-based tickerplant routing.
+2. Precomputed metric keys and sampled latency metrics.
+3. Move raw event id SHA-256 off the mandatory processor path where possible.
+4. Primitive price-level order book.
+5. Binary canonical serialization for internal streams.
+6. Remove remaining raw payload parse/copy overhead.
 7. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
    tickerplant, and DB writer.
 8. GC tuning only after allocation reductions are measured.

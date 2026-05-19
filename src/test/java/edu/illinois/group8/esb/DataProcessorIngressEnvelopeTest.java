@@ -115,6 +115,7 @@ class DataProcessorIngressEnvelopeTest {
             "live-1",
             null
         );
+        assertEquals((byte) 'K', envelopedMessage[0]);
 
         processor.processMessage(envelopedMessage);
 

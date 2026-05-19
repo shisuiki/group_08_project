@@ -17,6 +17,7 @@ class ClusterRawIngressReplayPublisherTest {
 
         assertTrue(publisher.publish(event, "replay-1"));
 
+        assertEquals((byte) 'K', sink.lastMessage[0]);
         KalshiIngressEnvelope envelope = KalshiIngressEnvelope.parse(sink.lastMessage, -1L);
         assertTrue(envelope.enveloped());
         assertEquals(event.rawPayload(), envelope.rawPayload());

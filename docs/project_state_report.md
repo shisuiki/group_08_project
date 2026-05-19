@@ -69,7 +69,7 @@ Main path:
 ```text
 Kalshi REST/WebSocket
   -> KalshiSystem / KalshiWebSocketClient
-  -> KalshiIngressEnvelope byte[] ingress
+  -> KalshiIngressEnvelope binary ingress carrying raw Kalshi payload
   -> per-shard ClientClusterOrchestrator.writeToCluster(byte[])
   -> Aeron Cluster / ESBClusteredService scratch byte[] parse
   -> DataProcessor.processMessage(byte[], offset, length)

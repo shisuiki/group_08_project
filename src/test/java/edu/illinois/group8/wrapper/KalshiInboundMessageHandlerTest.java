@@ -9,7 +9,6 @@ import edu.illinois.group8.storage.db.DbWriterStats;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -251,7 +250,7 @@ class KalshiInboundMessageHandlerTest {
     }
 
     private static KalshiIngressEnvelope parseClusterPayload(byte[] payload) {
-        return KalshiIngressEnvelope.parse(new String(payload, StandardCharsets.UTF_8), -1L);
+        return KalshiIngressEnvelope.parse(payload, -1L);
     }
 
     private static final class RecordingDeps {
