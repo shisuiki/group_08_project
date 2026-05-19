@@ -202,7 +202,7 @@ Deliverables:
 - DB migrations:
   - `raw_ws_events` (landed)
   - `canonical_events` (landed)
-  - `latest_market_state`
+  - `latest_market_state` (landed schema/store boundary; not wired live)
   - `feature_outputs`
 - Landed: `AsyncDbWriter` uses split bounded raw/canonical queues and JDBC
   batch insert.
@@ -407,7 +407,8 @@ Smallest useful slice:
 2. Perf baseline script for `HotPathProfileCli` is present.
 3. Default single-offer/drop-first ingress with drop metrics is landed.
 4. `AsyncDbWriter` has split raw/canonical bounded queues and drop metrics.
-5. DB migrations for `raw_ws_events` and `canonical_events` are landed.
+5. DB migrations for `raw_ws_events`, `canonical_events`, and
+   `latest_market_state` are landed.
 6. Tests cover duplicate insert and queue overflow.
 
 This slice proves the latency-first contract without rewriting the full system.

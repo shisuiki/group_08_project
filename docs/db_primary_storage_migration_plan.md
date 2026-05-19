@@ -412,7 +412,7 @@ Exit criteria:
 
 - empty DB can be created from repo
 - V001 creates `raw_ws_events` and `canonical_events`
-- `latest_market_state` exists in a later migration
+- V005 creates `latest_market_state`
 - CI validates migrations
 
 ### Phase 2: Storage Interfaces
@@ -590,16 +590,15 @@ and drop-visible through writer metrics.
 
 ## Completed Batches
 
-- V001/V002/V003/V004 migrations exist for raw websocket events, canonical
+- V001/V002/V003/V004/V005 migrations exist for raw websocket events, canonical
   events, canonical commit cursoring, raw payload text storage, and raw REST
-  response capture.
+  response capture, plus timestamp-fenced `latest_market_state`.
 - `AsyncDbWriter`, bounded DB writer queues, raw/canonical JDBC writes, raw REST
   JDBC storage, canonical DB reads, and DB-default replay/feature/frontend/export
   paths exist.
 
 ## Remaining Next Batches
 
-1. Add schema batches for `latest_market_state`, `market_metadata`, and
-   `feature_outputs`.
+1. Add schema batches for `market_metadata` and `feature_outputs`.
 2. Finish DB query/API migration and DB-seeded demo data.
 3. Define the S3 archive/import/export retention and restore policy.
