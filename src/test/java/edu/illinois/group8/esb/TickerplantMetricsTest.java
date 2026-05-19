@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +44,75 @@ class TickerplantMetricsTest {
         ));
         assertTrue(text.contains(
             "backend_publication_backpressure_ns_sum{service=\"tickerplant\",stream=\"canonical.orderbook_delta\"} 33\n"
+        ));
+    }
+
+    @Test
+    void routeSamplerSamplesFirstAttemptAndEverySixtyFourthAfter() {
+        assertTrue(Tickerplant.shouldSampleHotPathDistribution(0L));
+        for (long cursor = 1L; cursor < 64L; cursor++) {
+            assertFalse(Tickerplant.shouldSampleHotPathDistribution(cursor));
+        }
+        assertTrue(Tickerplant.shouldSampleHotPathDistribution(64L));
+        assertFalse(Tickerplant.shouldSampleHotPathDistribution(65L));
+    }
+
+    @Test
+    void sampledRouteMetricsKeepSuccessCountersExact() {
+        BackendMetrics metrics = new BackendMetrics();
+        Tickerplant.RouteMetricHandles handles =
+            Tickerplant.routeMetricHandles(metrics, "canonical.orderbook_delta");
+
+        for (int i = 0; i < 65; i++) {
+            handles.offerTotal().increment();
+            assertTrue(Tickerplant.recordRouteOutcome(
+                handles,
+                1L,
+                1_000L + i,
+                Tickerplant.shouldSampleHotPathDistribution(i)
+            ));
+        }
+
+        var labels = BackendMetrics.labels("service", "tickerplant", "stream", "canonical.orderbook_delta");
+        assertEquals(65L, metrics.get("backend_publication_offer_total", labels));
+        assertEquals(0L, metrics.get("backend_publication_offer_failed_total", labels));
+        assertEquals(0L, metrics.get("tickerplant.route_failed.offer.canonical.orderbook_delta"));
+        assertEquals(65L, metrics.get("tickerplant.route_success.canonical.orderbook_delta"));
+
+        String text = metrics.prometheusText();
+        assertTrue(text.contains(
+            "backend_publication_latency_ns_count{service=\"tickerplant\",stream=\"canonical.orderbook_delta\"} 2\n"
+        ));
+    }
+
+    @Test
+    void sampledRouteMetricsKeepFailureCountersExact() {
+        BackendMetrics metrics = new BackendMetrics();
+        Tickerplant.RouteMetricHandles handles =
+            Tickerplant.routeMetricHandles(metrics, "canonical.orderbook_delta");
+
+        for (int i = 0; i < 65; i++) {
+            handles.offerTotal().increment();
+            assertFalse(Tickerplant.recordRouteOutcome(
+                handles,
+                -1L,
+                2_000L + i,
+                Tickerplant.shouldSampleHotPathDistribution(i)
+            ));
+        }
+
+        var labels = BackendMetrics.labels("service", "tickerplant", "stream", "canonical.orderbook_delta");
+        assertEquals(65L, metrics.get("backend_publication_offer_total", labels));
+        assertEquals(65L, metrics.get("backend_publication_offer_failed_total", labels));
+        assertEquals(65L, metrics.get("tickerplant.route_failed.offer.canonical.orderbook_delta"));
+        assertEquals(0L, metrics.get("tickerplant.route_success.canonical.orderbook_delta"));
+
+        String text = metrics.prometheusText();
+        assertTrue(text.contains(
+            "backend_publication_latency_ns_count{service=\"tickerplant\",stream=\"canonical.orderbook_delta\"} 2\n"
+        ));
+        assertTrue(text.contains(
+            "backend_publication_backpressure_ns_count{service=\"tickerplant\",stream=\"canonical.orderbook_delta\"} 2\n"
         ));
     }
 

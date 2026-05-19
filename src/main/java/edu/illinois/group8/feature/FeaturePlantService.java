@@ -6,10 +6,13 @@ import java.util.List;
 import java.util.Map;
 
 public class FeaturePlantService implements AutoCloseable {
+    static final int HOT_PATH_DISTRIBUTION_SAMPLE_MASK = 63;
+
     private final CanonicalEnvelopeSource source;
     private final List<FeatureModule> modules;
     private final FeatureOutputSink sink;
     private final BackendMetrics metrics;
+    private long moduleDistributionSampleCursor;
 
     public FeaturePlantService(CanonicalEnvelopeSource source, List<FeatureModule> modules, FeatureOutputSink sink) {
         this(source, modules, sink, new BackendMetrics());
@@ -63,7 +66,8 @@ public class FeaturePlantService implements AutoCloseable {
                 continue;
             }
             Map<String, String> labels = labels(module, envelope.streamName());
-            long startNs = System.nanoTime();
+            boolean sampleDistributions = shouldSampleModuleDistributions();
+            long startNs = sampleDistributions ? System.nanoTime() : 0L;
             metrics.increment("feature_module_events_in_total", labels);
             try {
                 module.onEvent(envelope, output -> {
@@ -74,12 +78,22 @@ public class FeaturePlantService implements AutoCloseable {
                 metrics.increment("feature_module_errors_total", labels);
                 throw e;
             } finally {
-                metrics.observe("feature_module_latency_ns", labels, Math.max(0L, System.nanoTime() - startNs));
-                if (envelope.eventTsMs() != null) {
+                if (sampleDistributions) {
+                    metrics.observe("feature_module_latency_ns", labels, Math.max(0L, System.nanoTime() - startNs));
+                }
+                if (sampleDistributions && envelope.eventTsMs() != null) {
                     metrics.observe("feature_module_lag_ms", labels, Math.max(0L, System.currentTimeMillis() - envelope.eventTsMs()));
                 }
             }
         }
+    }
+
+    static boolean shouldSampleHotPathDistribution(long cursor) {
+        return (cursor & HOT_PATH_DISTRIBUTION_SAMPLE_MASK) == 0L;
+    }
+
+    private boolean shouldSampleModuleDistributions() {
+        return shouldSampleHotPathDistribution(moduleDistributionSampleCursor++);
     }
 
     private Map<String, String> labels(FeatureModule module, String streamName) {

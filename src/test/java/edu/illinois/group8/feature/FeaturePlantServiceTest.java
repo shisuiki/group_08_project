@@ -10,9 +10,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FeaturePlantServiceTest {
@@ -101,6 +105,55 @@ class FeaturePlantServiceTest {
         assertEquals(30000L, sink.outputs().get(0).values().get("spread_micros"));
     }
 
+    @Test
+    void moduleSamplerSamplesFirstDispatchAndEverySixtyFourthAfter() {
+        assertTrue(FeaturePlantService.shouldSampleHotPathDistribution(0L));
+        for (long cursor = 1L; cursor < 64L; cursor++) {
+            assertFalse(FeaturePlantService.shouldSampleHotPathDistribution(cursor));
+        }
+        assertTrue(FeaturePlantService.shouldSampleHotPathDistribution(64L));
+        assertFalse(FeaturePlantService.shouldSampleHotPathDistribution(65L));
+    }
+
+    @Test
+    void sampledModuleDistributionsKeepCountersExact() {
+        List<CanonicalEnvelope> envelopes = new ArrayList<>();
+        for (int i = 0; i < 65; i++) {
+            envelopes.add(new CanonicalEnvelope(
+                "canonical.test",
+                "{}",
+                com.fasterxml.jackson.databind.node.NullNode.getInstance(),
+                1L,
+                null
+            ));
+        }
+        BackendMetrics metrics = new BackendMetrics();
+        CollectingFeatureOutputSink sink = new CollectingFeatureOutputSink();
+
+        try (FeaturePlantService service = new FeaturePlantService(
+            new ListCanonicalEnvelopeSource(envelopes),
+            List.of(new EmittingFeatureModule("feature.test", "canonical.test")),
+            sink,
+            metrics
+        )) {
+            assertEquals(65L, service.runUntilExhausted(10));
+        }
+
+        assertEquals(65, sink.outputs().size());
+        var labels = BackendMetrics.labels("service", "featureplant", "module", "feature.test", "stream", "canonical.test");
+        assertEquals(65L, metrics.get("feature_module_events_in_total", labels));
+        assertEquals(65L, metrics.get("feature_module_events_out_total", labels));
+        assertEquals(0L, metrics.get("feature_module_errors_total", labels));
+
+        String text = metrics.prometheusText();
+        assertTrue(text.contains(
+            "feature_module_latency_ns_count{module=\"feature.test\",service=\"featureplant\",stream=\"canonical.test\"} 2\n"
+        ));
+        assertTrue(text.contains(
+            "feature_module_lag_ms_count{module=\"feature.test\",service=\"featureplant\",stream=\"canonical.test\"} 2\n"
+        ));
+    }
+
     private void write(String streamName, String payload) throws Exception {
         Path file = tempDir
             .resolve("canonical")
@@ -129,6 +182,57 @@ class FeaturePlantServiceTest {
             }
             consumed = true;
             return events;
+        }
+    }
+
+    private static final class ListCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
+        private final List<CanonicalEnvelope> envelopes;
+        private int cursor;
+
+        private ListCanonicalEnvelopeSource(List<CanonicalEnvelope> envelopes) {
+            this.envelopes = List.copyOf(envelopes);
+        }
+
+        @Override
+        public int poll(CanonicalEnvelopeHandler handler, int fragmentLimit) {
+            int dispatched = 0;
+            while (dispatched < fragmentLimit && cursor < envelopes.size()) {
+                handler.onEvent(envelopes.get(cursor++));
+                dispatched++;
+            }
+            return dispatched;
+        }
+    }
+
+    private static final class EmittingFeatureModule implements FeatureModule {
+        private final String name;
+        private final String streamName;
+
+        private EmittingFeatureModule(String name, String streamName) {
+            this.name = name;
+            this.streamName = streamName;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public Set<String> inputStreams() {
+            return Set.of(streamName);
+        }
+
+        @Override
+        public void onEvent(CanonicalEnvelope envelope, FeatureOutputCollector collector) {
+            collector.emit(new FeatureOutput(
+                name,
+                streamName,
+                "M",
+                envelope.eventTsMs(),
+                envelope.eventId(),
+                Map.of("value", 1L)
+            ));
         }
     }
 }

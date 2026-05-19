@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Tickerplant implements Runnable {
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
+    static final int HOT_PATH_DISTRIBUTION_SAMPLE_MASK = 63;
 
     private final ESBClusterCommunicationOrchestrator communicationOrchestrator;
     private final Subscription internalSubscription;
@@ -21,6 +22,7 @@ public class Tickerplant implements Runnable {
     private final BackendMetrics.Counter missingStreamNameFailures;
     private final BackendMetrics.Counter parseFailures;
     private final ConcurrentHashMap<String, RouteMetricHandles> routeMetricHandles = new ConcurrentHashMap<>();
+    private long routeDistributionSampleCursor;
 
     public Tickerplant(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this(communicationOrchestrator, new BackendMetrics());
@@ -71,19 +73,12 @@ public class Tickerplant implements Runnable {
                 return false;
             }
             RouteMetricHandles handles = routeMetricHandles.computeIfAbsent(streamName, this::routeMetricHandles);
-            long offerStartTsNs = System.nanoTime();
+            boolean sampleDistributions = shouldSampleRouteDistribution();
+            long offerStartTsNs = sampleDistributions ? System.nanoTime() : 0L;
             handles.offerTotal.increment();
             long result = publication.offer(buffer, offset, length);
-            long offerEndTsNs = System.nanoTime();
-            handles.latency.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
-            if (result < 0L) {
-                handles.offerFailed.increment();
-                handles.backpressure.observe(Math.max(0L, offerEndTsNs - offerStartTsNs));
-                handles.routeOfferFailed.increment();
-                return false;
-            }
-            handles.routeSuccess.increment();
-            return true;
+            long elapsedNs = sampleDistributions ? Math.max(0L, System.nanoTime() - offerStartTsNs) : 0L;
+            return recordRouteOutcome(handles, result, elapsedNs, sampleDistributions);
         } catch (Exception e) {
             parseFailures.increment();
             return false;
@@ -140,6 +135,35 @@ public class Tickerplant implements Runnable {
 
     public BackendMetrics metrics() {
         return metrics;
+    }
+
+    static boolean shouldSampleHotPathDistribution(long cursor) {
+        return (cursor & HOT_PATH_DISTRIBUTION_SAMPLE_MASK) == 0L;
+    }
+
+    private boolean shouldSampleRouteDistribution() {
+        return shouldSampleHotPathDistribution(routeDistributionSampleCursor++);
+    }
+
+    static boolean recordRouteOutcome(
+        RouteMetricHandles handles,
+        long result,
+        long elapsedNs,
+        boolean sampleDistributions
+    ) {
+        if (sampleDistributions) {
+            handles.latency.observe(Math.max(0L, elapsedNs));
+        }
+        if (result < 0L) {
+            handles.offerFailed.increment();
+            if (sampleDistributions) {
+                handles.backpressure.observe(Math.max(0L, elapsedNs));
+            }
+            handles.routeOfferFailed.increment();
+            return false;
+        }
+        handles.routeSuccess.increment();
+        return true;
     }
 
     private RouteMetricHandles routeMetricHandles(String streamName) {
