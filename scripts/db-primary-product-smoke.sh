@@ -19,6 +19,10 @@ FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED="${FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED:-tr
 FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY="${FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY:-250000}"
 FEATUREPLANT_DB_OUTPUT_BATCH_SIZE="${FEATUREPLANT_DB_OUTPUT_BATCH_SIZE:-500}"
 FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS="${FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS:-5000}"
+FEATUREPLANT_METRICS_HOST="${FEATUREPLANT_METRICS_HOST:-0.0.0.0}"
+FEATUREPLANT_METRICS_PORT="${FEATUREPLANT_METRICS_PORT:-8094}"
+FEATUREPLANT_METRICS_HOST_PORT="${FEATUREPLANT_METRICS_HOST_PORT:-8094}"
+FEATUREPLANT_METRICS_BASE_URL="${FEATUREPLANT_METRICS_BASE_URL:-http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}}"
 FRONTEND_ADAPTER_DB_URL="${FRONTEND_ADAPTER_DB_URL:-$FEATUREPLANT_DB_URL}"
 FRONTEND_ADAPTER_DB_USER="${FRONTEND_ADAPTER_DB_USER:-$FEATUREPLANT_DB_USER}"
 FRONTEND_ADAPTER_DB_PASSWORD="${FRONTEND_ADAPTER_DB_PASSWORD:-$FEATUREPLANT_DB_PASSWORD}"
@@ -39,6 +43,7 @@ export FEATUREPLANT_DB_CURSOR_NAME FEATUREPLANT_STREAMS FEATUREPLANT_MODULES
 export FEATUREPLANT_BATCH_SIZE FEATUREPLANT_IDLE_SLEEP_MS
 export FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY
 export FEATUREPLANT_DB_OUTPUT_BATCH_SIZE FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS
+export FEATUREPLANT_METRICS_HOST FEATUREPLANT_METRICS_PORT FEATUREPLANT_METRICS_HOST_PORT
 export FRONTEND_ADAPTER_DB_URL FRONTEND_ADAPTER_DB_USER FRONTEND_ADAPTER_DB_PASSWORD
 export FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS
 export DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT
@@ -142,7 +147,82 @@ wait_featureplant_followed_seed() {
     done
 }
 
+wait_featureplant_metrics_health() {
+    health_file="$tmpdir/featureplant-health.txt"
+    attempt=1
+    while :; do
+        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FEATUREPLANT_METRICS_BASE_URL}/health" -o "$health_file" \
+            && grep -q 'status ok' "$health_file"; then
+            printf 'PASS featureplant_health url=%s/health\n' "$FEATUREPLANT_METRICS_BASE_URL"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'FeaturePlant metrics health endpoint did not become reachable at %s/health\n' \
+                "$FEATUREPLANT_METRICS_BASE_URL" >&2
+            print_product_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_featureplant_metrics() {
+    expected="$1"
+    metrics_file="$tmpdir/featureplant.metrics"
+    values_file="$tmpdir/featureplant.metrics.values"
+    attempt=1
+    while :; do
+        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FEATUREPLANT_METRICS_BASE_URL}/metrics" -o "$metrics_file" \
+            && python3 - "$metrics_file" "$expected" > "$values_file" <<'PY'
+import re
+import sys
+
+metrics_path = sys.argv[1]
+expected = int(sys.argv[2])
+with open(metrics_path, "r", encoding="utf-8") as handle:
+    body = handle.read()
+
+def metric_value(key):
+    match = re.search(r"^" + re.escape(key) + r" (-?\d+)$", body, re.MULTILINE)
+    if match is None:
+        raise SystemExit(f"missing metric {key}")
+    return int(match.group(1))
+
+accepted = metric_value('featureplant_db_output_events_total{result="accepted",service="featureplant"}')
+written = metric_value('featureplant_db_output_events_total{result="written",service="featureplant"}')
+queue_depth = metric_value('featureplant_db_output_queue_depth{service="featureplant"}')
+if accepted < expected:
+    raise SystemExit(f"accepted {accepted} below expected {expected}")
+if written < expected:
+    raise SystemExit(f"written {written} below expected {expected}")
+if queue_depth < 0:
+    raise SystemExit(f"queue depth {queue_depth} is negative")
+print(accepted)
+print(written)
+print(queue_depth)
+PY
+        then
+            accepted="$(sed -n '1p' "$values_file")"
+            written="$(sed -n '2p' "$values_file")"
+            queue_depth="$(sed -n '3p' "$values_file")"
+            printf 'PASS featureplant_metrics accepted=%s written=%s queue_depth=%s expected_written_at_least=%s\n' \
+                "$accepted" "$written" "$queue_depth" "$expected"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'FeaturePlant metrics did not reach expected DB output counts at %s/metrics\n' \
+                "$FEATUREPLANT_METRICS_BASE_URL" >&2
+            print_product_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
 docker compose --profile db-primary-product stop featureplant-db-follower >/dev/null 2>&1 || true
+docker compose --profile db-primary-product rm -f featureplant-db-follower >/dev/null 2>&1 || true
 
 "$SCRIPT_DIR/db-primary-demo-seed.sh"
 
@@ -178,11 +258,18 @@ FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED="$FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED" \
 FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY="$FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY" \
 FEATUREPLANT_DB_OUTPUT_BATCH_SIZE="$FEATUREPLANT_DB_OUTPUT_BATCH_SIZE" \
 FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS="$FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS" \
+FEATUREPLANT_METRICS_HOST="$FEATUREPLANT_METRICS_HOST" \
+FEATUREPLANT_METRICS_PORT="$FEATUREPLANT_METRICS_PORT" \
+FEATUREPLANT_METRICS_HOST_PORT="$FEATUREPLANT_METRICS_HOST_PORT" \
 docker compose --profile db-primary-product up -d --build --force-recreate featureplant-db-follower
+
+wait_featureplant_metrics_health
 
 follow_result="$(wait_featureplant_followed_seed "$expected_commit_seq")"
 feature_outputs_after="$(printf '%s\n' "$follow_result" | sed -n '1p')"
 cursor_after="$(printf '%s\n' "$follow_result" | sed -n '2p')"
+
+wait_featureplant_metrics "$EXPECTED_FEATURE_OUTPUTS_MIN"
 
 FRONTEND_BASE_URL="$FRONTEND_BASE_URL" \
 EXPECTED_FRONTEND_STARTED_AT="$frontend_started_at" \

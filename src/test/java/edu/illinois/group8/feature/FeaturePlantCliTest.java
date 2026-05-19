@@ -8,7 +8,11 @@ import java.util.ArrayList;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -233,6 +237,73 @@ class FeaturePlantCliTest {
             () -> FeaturePlantCli.Config.from(Map.of("FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS", "-1"))
         );
         assertTrue(invalidCloseTimeout.getMessage().contains("FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS"));
+    }
+
+    @Test
+    void metricsServerFactoryNoopsWhenDisabledByDefault() {
+        AtomicInteger factoryCalls = new AtomicInteger();
+
+        FeaturePlantCli.MetricsServerHandle server = FeaturePlantCli.Config.from(Map.of())
+            .metricsServer(new BackendMetrics(), (host, port, metrics) -> {
+                factoryCalls.incrementAndGet();
+                return () -> {
+                };
+            });
+
+        server.close();
+
+        assertEquals(0, factoryCalls.get());
+    }
+
+    @Test
+    void metricsServerFactoryUsesConfiguredEndpointAndSharedMetrics() {
+        BackendMetrics sharedMetrics = new BackendMetrics();
+        AtomicReference<String> capturedHost = new AtomicReference<>();
+        AtomicInteger capturedPort = new AtomicInteger();
+        AtomicReference<BackendMetrics> capturedMetrics = new AtomicReference<>();
+        AtomicInteger closeCalls = new AtomicInteger();
+
+        FeaturePlantCli.MetricsServerHandle server = FeaturePlantCli.Config.from(Map.of(
+            "FEATUREPLANT_METRICS_HOST", "127.0.0.1",
+            "FEATUREPLANT_METRICS_PORT", "19094"
+        )).metricsServer(sharedMetrics, (host, port, metrics) -> {
+            capturedHost.set(host);
+            capturedPort.set(port);
+            capturedMetrics.set(metrics);
+            return closeCalls::incrementAndGet;
+        });
+
+        assertEquals("127.0.0.1", capturedHost.get());
+        assertEquals(19094, capturedPort.get());
+        assertSame(sharedMetrics, capturedMetrics.get());
+
+        server.close();
+
+        assertEquals(1, closeCalls.get());
+    }
+
+    @Test
+    void metricsConfigParsesArgsAndRejectsInvalidValues() {
+        FeaturePlantCli.Config config = FeaturePlantCli.Config.from(Map.of())
+            .withArgs(new String[] {"--metrics-host=127.0.0.1", "--metrics-port=19095"});
+
+        assertEquals("127.0.0.1", config.metricsHost());
+        assertEquals(19095, config.metricsPort());
+
+        IllegalArgumentException invalidPort = assertThrows(
+            IllegalArgumentException.class,
+            () -> FeaturePlantCli.Config.from(Map.of("FEATUREPLANT_METRICS_PORT", "-1"))
+        );
+        assertTrue(invalidPort.getMessage().contains("FEATUREPLANT_METRICS_PORT"));
+
+        IllegalArgumentException invalidHost = assertThrows(
+            IllegalArgumentException.class,
+            () -> FeaturePlantCli.Config.from(Map.of("FEATUREPLANT_METRICS_PORT", "8094"))
+                .withArgs(new String[] {"--metrics-host="})
+                .metricsServer(new BackendMetrics(), (host, port, metrics) -> () -> {
+                })
+        );
+        assertTrue(invalidHost.getMessage().contains("FEATUREPLANT_METRICS_HOST"));
     }
 
     private record DbSinkCall(

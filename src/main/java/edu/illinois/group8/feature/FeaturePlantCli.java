@@ -1,5 +1,6 @@
 package edu.illinois.group8.feature;
 
+import edu.illinois.group8.KalshiMetricsServer;
 import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.metrics.BackendMetrics;
@@ -26,9 +27,10 @@ public final class FeaturePlantCli {
     public static void main(String[] args) {
         Config config = Config.fromEnvironment().withArgs(args);
         BackendMetrics metrics = new BackendMetrics();
-        FeatureOutputSink sink = config.outputSink(metrics);
-        CanonicalEnvelopeSource source = config.source();
         try (
+             MetricsServerHandle ignored = config.metricsServer(metrics);
+             FeatureOutputSink sink = config.outputSink(metrics);
+             CanonicalEnvelopeSource source = config.source();
              FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink, metrics)) {
             if (config.runOnce()) {
                 long consumed = service.runUntilExhausted(config.batchSize());
@@ -55,6 +57,8 @@ public final class FeaturePlantCli {
         int batchSize,
         int idleSleepMillis,
         boolean runOnce,
+        String metricsHost,
+        int metricsPort,
         String outputMode,
         String dbUrl,
         String dbUser,
@@ -86,6 +90,8 @@ public final class FeaturePlantCli {
                 intValue(env, "FEATUREPLANT_BATCH_SIZE", 100),
                 intValue(env, "FEATUREPLANT_IDLE_SLEEP_MS", 1),
                 Boolean.parseBoolean(value(env, "FEATUREPLANT_RUN_ONCE", "true")),
+                value(env, "FEATUREPLANT_METRICS_HOST", "0.0.0.0"),
+                nonNegativeIntValue(env, "FEATUREPLANT_METRICS_PORT", 0),
                 value(env, "FEATUREPLANT_OUTPUT", "stdout"),
                 value(env, "FEATUREPLANT_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
                 value(env, "FEATUREPLANT_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
@@ -124,6 +130,8 @@ public final class FeaturePlantCli {
             int nextBatchSize = batchSize;
             int nextIdleSleepMillis = idleSleepMillis;
             boolean nextRunOnce = runOnce;
+            String nextMetricsHost = metricsHost;
+            int nextMetricsPort = metricsPort;
             String nextOutputMode = outputMode;
             String nextDbUrl = dbUrl;
             String nextDbUser = dbUser;
@@ -155,6 +163,13 @@ public final class FeaturePlantCli {
                     nextBatchSize = Integer.parseInt(arg.substring("--batch-size=".length()));
                 } else if (arg.startsWith("--idle-sleep-ms=")) {
                     nextIdleSleepMillis = Integer.parseInt(arg.substring("--idle-sleep-ms=".length()));
+                } else if (arg.startsWith("--metrics-host=")) {
+                    nextMetricsHost = arg.substring("--metrics-host=".length());
+                } else if (arg.startsWith("--metrics-port=")) {
+                    nextMetricsPort = parseNonNegativeInt(
+                        arg.substring("--metrics-port=".length()),
+                        "FEATUREPLANT_METRICS_PORT"
+                    );
                 } else if (arg.startsWith("--output=")) {
                     nextOutputMode = arg.substring("--output=".length());
                 } else if (arg.startsWith("--db-url=")) {
@@ -206,6 +221,8 @@ public final class FeaturePlantCli {
                 Math.max(1, nextBatchSize),
                 Math.max(0, nextIdleSleepMillis),
                 nextRunOnce,
+                nextMetricsHost,
+                Math.max(0, nextMetricsPort),
                 nextOutputMode,
                 nextDbUrl,
                 nextDbUser,
@@ -218,6 +235,28 @@ public final class FeaturePlantCli {
                 Math.max(1, nextDbOutputBatchSize),
                 Math.max(0L, nextDbOutputCloseTimeoutMs)
             );
+        }
+
+        MetricsServerHandle metricsServer(BackendMetrics metrics) {
+            return metricsServer(metrics, Config::defaultMetricsServer);
+        }
+
+        MetricsServerHandle metricsServer(BackendMetrics metrics, MetricsServerFactory serverFactory) {
+            Objects.requireNonNull(metrics, "metrics");
+            Objects.requireNonNull(serverFactory, "serverFactory");
+            if (metricsPort == 0) {
+                return () -> {
+                };
+            }
+            if (metricsHost == null || metricsHost.isBlank()) {
+                throw new IllegalArgumentException("FEATUREPLANT_METRICS_HOST must not be blank when metrics are enabled.");
+            }
+            return serverFactory.start(metricsHost, metricsPort, metrics);
+        }
+
+        private static MetricsServerHandle defaultMetricsServer(String host, int port, BackendMetrics metrics) {
+            KalshiMetricsServer server = KalshiMetricsServer.start(host, port, metrics);
+            return server::close;
         }
 
         FeatureOutputSink outputSink() {
@@ -386,6 +425,10 @@ public final class FeaturePlantCli {
             return parsePositiveInt(value(env, key, defaultValue), key);
         }
 
+        private static int nonNegativeIntValue(Map<String, String> env, String key, int defaultValue) {
+            return parseNonNegativeInt(value(env, key, Integer.toString(defaultValue)), key);
+        }
+
         private static long nonNegativeLongValue(Map<String, String> env, String key, long defaultValue) {
             return parseNonNegativeLong(value(env, key, Long.toString(defaultValue)), key);
         }
@@ -405,6 +448,14 @@ public final class FeaturePlantCli {
             int parsed = parseInt(value, key);
             if (parsed <= 0) {
                 throw new IllegalArgumentException(key + " must be positive.");
+            }
+            return parsed;
+        }
+
+        private static int parseNonNegativeInt(String value, String key) {
+            int parsed = parseInt(value, key);
+            if (parsed < 0) {
+                throw new IllegalArgumentException(key + " must be non-negative.");
             }
             return parsed;
         }
@@ -432,6 +483,17 @@ public final class FeaturePlantCli {
                 throw new IllegalArgumentException(key + " must be an integer.", e);
             }
         }
+    }
+
+    @FunctionalInterface
+    interface MetricsServerHandle extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    @FunctionalInterface
+    interface MetricsServerFactory {
+        MetricsServerHandle start(String host, int port, BackendMetrics metrics);
     }
 
     @FunctionalInterface
@@ -466,6 +528,8 @@ public final class FeaturePlantCli {
               --modules=bbo,ticker_snapshot,trade_tape
               --max-events=100000
               --batch-size=100
+              --metrics-host=0.0.0.0
+              --metrics-port=8094
               --output=stdout|db|stdout,db
               --db-output-async
               --db-output-sync

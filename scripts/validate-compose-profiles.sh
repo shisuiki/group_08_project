@@ -111,9 +111,25 @@ assert_db_primary_product_defaults_aligned() {
         "FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY: \"250000\"" \
         "FEATUREPLANT_DB_OUTPUT_BATCH_SIZE: \"500\"" \
         "FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS: \"5000\"" \
-        "FEATUREPLANT_RUN_ONCE: \"false\""; do
+        "FEATUREPLANT_RUN_ONCE: \"false\"" \
+        "FEATUREPLANT_METRICS_HOST: 0.0.0.0" \
+        "FEATUREPLANT_METRICS_PORT: \"8094\""; do
         if ! printf '%s\n' "$featureplant_rendered" | grep -q "^      ${expected}$"; then
             printf 'db-primary-product featureplant-db-follower missing default %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    for expected in 'published: "8094"' 'target: 8094'; do
+        if ! printf '%s\n' "$featureplant_rendered" | grep -q "^        ${expected}$"; then
+            printf 'db-primary-product featureplant-db-follower missing metrics port %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    for expected in \
+        "FEATUREPLANT_METRICS_HOST_PORT: \${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}" \
+        'FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT'; do
+        if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing featureplant metrics propagation: %s\n' "$expected" >&2
             exit 1
         fi
     done
@@ -292,7 +308,9 @@ assert_featureplant_cursor_config_propagated() {
         'FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED: "false"' \
         'FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY: "250000"' \
         'FEATUREPLANT_DB_OUTPUT_BATCH_SIZE: "500"' \
-        'FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS: "5000"'; do
+        'FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS: "5000"' \
+        'FEATUREPLANT_METRICS_HOST: 0.0.0.0' \
+        'FEATUREPLANT_METRICS_PORT: "0"'; do
         if ! printf '%s\n' "$rendered" | grep -q "^      ${expected}$"; then
             printf 'featureplant service is missing default %s\n' "$expected" >&2
             exit 1

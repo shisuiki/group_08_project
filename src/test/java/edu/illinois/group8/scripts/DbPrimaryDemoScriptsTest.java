@@ -71,7 +71,18 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY=\"${FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY:-250000}\""));
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_BATCH_SIZE=\"${FEATUREPLANT_DB_OUTPUT_BATCH_SIZE:-500}\""));
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS=\"${FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS:-5000}\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_HOST=\"${FEATUREPLANT_METRICS_HOST:-0.0.0.0}\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_PORT=\"${FEATUREPLANT_METRICS_PORT:-8094}\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_HOST_PORT=\"${FEATUREPLANT_METRICS_HOST_PORT:-8094}\""));
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED=\"$FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_HOST=\"$FEATUREPLANT_METRICS_HOST\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_PORT=\"$FEATUREPLANT_METRICS_PORT\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_HOST_PORT=\"$FEATUREPLANT_METRICS_HOST_PORT\""));
+        assertTrue(script.contains("PASS featureplant_health"));
+        assertTrue(script.contains("PASS featureplant_metrics"));
+        assertTrue(script.contains("featureplant_db_output_events_total{result=\"accepted\",service=\"featureplant\"}"));
+        assertTrue(script.contains("featureplant_db_output_events_total{result=\"written\",service=\"featureplant\"}"));
+        assertTrue(script.contains("featureplant_db_output_queue_depth{service=\"featureplant\"}"));
         assertTrue(script.contains("featureplant-db-follower"));
         assertTrue(script.contains("frontend-adapter-db-primary"));
         assertTrue(script.contains("docker compose --profile db-primary-product up -d --build --force-recreate"));
