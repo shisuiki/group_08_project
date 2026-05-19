@@ -281,6 +281,7 @@ flowchart LR
     CDB2["canonical_events<br/>Postgres/Timescale canonical DB"]:::current
     RAWDB2["raw_ws_events<br/>Postgres/Timescale raw DB"]:::current
     RAWREST2["raw_rest_responses<br/>Postgres/Timescale REST response DB"]:::current
+    METADB2["market_metadata<br/>schema + JDBC upsert boundary<br/>not wired to backfill/runtime"]:::current
     RAWSTORE["Raw/canonical recordings<br/>raw-ingest + raw-rest + recordings/canonical"]:::current
     REPLAY2["RawIngressReplayCli<br/>Timescale raw rows by default<br/>+ explicit local NDJSON import/debug"]:::current
     RESTHELPERS["KalshiWrapper + KalshiRestParser<br/>current REST helper/parser code"]:::current
@@ -304,6 +305,7 @@ flowchart LR
   RESTHELPERS --> RESTBACK2
   RESTBACK2 --> CDB2
   RESTBACK2 --> RAWREST2
+  RESTHELPERS -. schema/store boundary .-> METADB2
   RESTBACK2 -. explicit recording target .-> RAWSTORE
   CDB2 -->|default canonical DB source| CURFEATURE
   CANON -.->|live Aeron source| CURFEATURE
@@ -316,14 +318,14 @@ flowchart LR
     RECOVERY["Live recovery hardening<br/>fresh snapshot actuator<br/>reconnect/subscription restore"]:::planned
     OBJECTBACKFILL["Object-store archive/import/export<br/>S3 retention + restore policy"]:::plannedStorage
     BINARY["Binary serialization experiment<br/>SBE, FlatBuffers, protobuf,<br/>or Agrona buffers"]:::planned
-    METASTORE["Market metadata and terms store<br/>markets, events, series, rules text"]:::plannedStorage
+    METASTORE["Market metadata runtime wiring<br/>REST discovery/backfill writer<br/>terms/query use"]:::plannedStorage
   end
 
   CORE --> HEARTBEAT
   RECBASE --> RECOVERY
   RAWSTORE --> OBJECTBACKFILL
   CANON --> BINARY
-  RESTHELPERS --> METASTORE
+  METADB2 --> METASTORE
 
   subgraph Feature["Planned Feature Plant Production Layer"]
     FSRC["CanonicalEnvelopeSource<br/>DB default, live, or recording input boundary"]:::current

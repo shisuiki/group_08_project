@@ -115,6 +115,25 @@ Set `HISTORICAL_BACKFILL_PARTITION_GRANULARITY=minute` to add `minute=mm`.
 Set `HISTORICAL_BACKFILL_CANONICAL_TARGET=recording` only for explicit
 legacy/debug/export canonical NDJSON under `recordings/canonical`.
 
+## Market Metadata
+
+`market_metadata` is the DB table for market/event/series metadata discovered
+through REST workflows. The schema and JDBC upsert boundary exist, but
+historical backfill/runtime writes are not wired in the current code path.
+
+```text
+market_ticker text primary key
+event_ticker text
+series_ticker text
+status text
+open_time timestamptz
+close_time timestamptz
+settlement_time timestamptz
+rules_payload jsonb
+market_payload jsonb not null
+updated_at timestamptz not null default now()
+```
+
 ## Replay
 
 Use `edu.illinois.group8.replay.raw.RawIngressReplayCli` to replay raw

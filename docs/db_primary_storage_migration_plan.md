@@ -590,16 +590,15 @@ and drop-visible through writer metrics.
 
 ## Completed Batches
 
-- V001/V002/V003/V004/V005/V006 migrations exist for raw websocket events, canonical
+- V001/V002/V003/V004/V005/V006/V007 migrations exist for raw websocket events, canonical
   events, canonical commit cursoring, raw payload text storage, and raw REST
   response capture, timestamp-fenced `latest_market_state`, and
-  `feature_outputs`.
+  `feature_outputs` plus `market_metadata`.
 - `AsyncDbWriter`, bounded DB writer queues, raw/canonical JDBC writes, raw REST
   JDBC storage, canonical DB reads, and DB-default replay/feature/frontend/export
   paths exist.
 
 ## Remaining Next Batches
 
-1. Add the schema batch for `market_metadata`.
-2. Finish DB query/API migration and DB-seeded demo data.
-3. Define the S3 archive/import/export retention and restore policy.
+1. Finish DB query/API migration and DB-seeded demo data.
+2. Define the S3 archive/import/export retention and restore policy.

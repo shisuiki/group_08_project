@@ -184,6 +184,8 @@ Current database status:
   default FeaturePlant, frontend adapter, and research export DB sources. Its
   cursor is global over `canonical_commit_seq`; replay rows are excluded unless
   a replay id or include-replay option is supplied.
+- `market_metadata` schema and an isolated JDBC store boundary exist; historical
+  backfill/runtime writes are not wired.
 - `feature_outputs` schema and an isolated JDBC store boundary exist; FeaturePlant
   live/runtime writes are not wired.
 - No S3-to-Timescale loader is implemented in this repo.
@@ -252,7 +254,7 @@ Legend:
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
 | Persistent feature store | current-basic | `feature_outputs` schema and isolated JDBC store boundary exist; no FeaturePlant live/runtime wiring |
-| MarketStateStore | planned | latest trade/ticker/OI/BBO/depth store absent |
+| MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` DB schema/store boundary exists |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
 | Feature/query API | planned | `/features`, `/bars`, WS features absent |
 | Frontend adapter | current-demo | HTTP polling datafeed demo; canonical DB source is default, recording is explicit legacy/debug/demo |
