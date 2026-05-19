@@ -8,6 +8,7 @@ cd "$REPO_ROOT"
 
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:-.env}"
 COMPOSE_PROFILE="${COMPOSE_PROFILE:-live-product}"
+LIVE_PRODUCT_SMOKE_DOCKER_SUDO="${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 SMOKE_HTTP_ATTEMPTS="${SMOKE_HTTP_ATTEMPTS:-45}"
 SMOKE_HTTP_RETRY_SLEEP_SECONDS="${SMOKE_HTTP_RETRY_SLEEP_SECONDS:-1}"
@@ -69,11 +70,26 @@ FRONTEND_HEALTH_URL="${FRONTEND_HEALTH_URL:-${FRONTEND_BASE_URL}/health}"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/live-product-smoke.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT INT HUP TERM
 
+is_true() {
+    case "$1" in
+        true|TRUE|True|1|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+docker_compose() {
+    if is_true "$LIVE_PRODUCT_SMOKE_DOCKER_SUDO"; then
+        sudo docker compose "$@"
+    else
+        docker compose "$@"
+    fi
+}
+
 compose() {
     if [ -f "$COMPOSE_ENV_FILE" ]; then
-        docker compose --env-file "$COMPOSE_ENV_FILE" --profile "$COMPOSE_PROFILE" "$@"
+        docker_compose --env-file "$COMPOSE_ENV_FILE" --profile "$COMPOSE_PROFILE" "$@"
     else
-        docker compose --profile "$COMPOSE_PROFILE" "$@"
+        docker_compose --profile "$COMPOSE_PROFILE" "$@"
     fi
 }
 
@@ -466,13 +482,6 @@ PY
         attempt=$((attempt + 1))
         sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
     done
-}
-
-is_true() {
-    case "$1" in
-        true|TRUE|True|1|yes|YES|Yes) return 0 ;;
-        *) return 1 ;;
-    esac
 }
 
 check_optional_live_data() {

@@ -455,7 +455,7 @@ jobs:
         run: |
           printf -v q_deploy_path '%q' "$DEPLOY_PATH"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
-            "cd $q_deploy_path && sh scripts/live-product-smoke.sh"
+            "cd $q_deploy_path && LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh"
 
       - name: Show service status
         if: always()

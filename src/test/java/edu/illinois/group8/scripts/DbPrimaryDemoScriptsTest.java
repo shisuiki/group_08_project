@@ -101,6 +101,12 @@ class DbPrimaryDemoScriptsTest {
         String script = read("scripts/live-product-smoke.sh");
 
         assertTrue(script.contains("COMPOSE_PROFILE=\"${COMPOSE_PROFILE:-live-product}\""));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=\"${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}\""));
+        assertTrue(script.contains("docker_compose()"));
+        assertTrue(script.contains("sudo docker compose \"$@\""));
+        assertTrue(script.contains("docker compose \"$@\""));
+        assertTrue(script.contains("docker_compose --env-file \"$COMPOSE_ENV_FILE\" --profile \"$COMPOSE_PROFILE\" \"$@\""));
+        assertTrue(script.contains("docker_compose --profile \"$COMPOSE_PROFILE\" \"$@\""));
         assertTrue(script.contains("WSCLIENT_HEALTH_URL"));
         assertTrue(script.contains("STREAM_TAP_HEALTH_URL"));
         assertTrue(script.contains("FEATUREPLANT_HEALTH_URL"));
@@ -227,7 +233,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("bash -n scripts/live-product-smoke.sh"));
         assertTrue(workflow.contains("sh -n scripts/live-product-smoke.sh"));
         assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));
-        assertTrue(workflow.contains("sh scripts/live-product-smoke.sh"));
+        assertTrue(workflow.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh"));
     }
 
     private static String read(String path) throws Exception {

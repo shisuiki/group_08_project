@@ -466,7 +466,7 @@ assert_live_product_manual_smoke_contract() {
         "DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
         "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}" \
         "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
-        "sh scripts/live-product-smoke.sh" \
+        "LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh" \
         "bash -n scripts/live-product-smoke.sh" \
         "sh -n scripts/live-product-smoke.sh"; do
         if ! grep -Fq "$expected" "$workflow"; then
@@ -485,6 +485,12 @@ assert_live_product_manual_smoke_contract() {
         'feature_outputs' \
         'source_event_id like' \
         'FEATUREPLANT_DB_CURSOR_NAME' \
+        'LIVE_PRODUCT_SMOKE_DOCKER_SUDO="${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}"' \
+        'docker_compose()' \
+        'sudo docker compose "$@"' \
+        'docker compose "$@"' \
+        'docker_compose --env-file "$COMPOSE_ENV_FILE" --profile "$COMPOSE_PROFILE" "$@"' \
+        'docker_compose --profile "$COMPOSE_PROFILE" "$@"' \
         'LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA'; do
         if ! grep -Fq "$expected" "$smoke_script"; then
             printf 'live-product smoke script missing contract fragment: %s\n' "$expected" >&2
