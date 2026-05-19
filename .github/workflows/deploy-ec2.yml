@@ -28,6 +28,13 @@ jobs:
       - name: Run Maven tests
         run: mvn -B test
 
+      - name: Validate Docker Compose profiles
+        run: |
+          set -euo pipefail
+          for profile in cluster-live recording-capture observability; do
+            docker compose --env-file /dev/null --profile "$profile" config --quiet
+          done
+
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
