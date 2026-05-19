@@ -45,14 +45,26 @@ public class OrderBookState {
 
     public BookUpdateResult applyDelta(OrderBookDeltaEvent delta) {
         Long actualSequence = delta.metadata().sourceSequence();
+        Long expectedNextSequence = expectedNextSequence();
 
         if (!hasSnapshot || pausedForRecovery) {
             return BookUpdateResult.single(sequenceGap(
                 delta.eventId(),
                 delta.metadata(),
-                expectedNextSequence(),
+                expectedNextSequence,
                 actualSequence,
                 !hasSnapshot ? "delta_before_snapshot" : "market_paused_for_snapshot_recovery"
+            ));
+        }
+
+        if (actualSequence != null && expectedNextSequence != null && !actualSequence.equals(expectedNextSequence)) {
+            pausedForRecovery = true;
+            return BookUpdateResult.single(sequenceGap(
+                delta.eventId(),
+                delta.metadata(),
+                expectedNextSequence,
+                actualSequence,
+                "orderbook_sequence_gap"
             ));
         }
 

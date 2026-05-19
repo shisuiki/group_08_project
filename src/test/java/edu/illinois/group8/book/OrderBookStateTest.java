@@ -41,19 +41,81 @@ class OrderBookStateTest {
     }
 
     @Test
-    void sourceSubscriptionSequenceSkipsDoNotPauseMarketBook() {
+    void sequenceGapPausesMarketBookWithoutApplyingDelta() {
         OrderBookState state = new OrderBookState("M");
         state.applySnapshot(snapshot("""
             {"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
             """));
+        TopOfBook beforeGap = state.currentTopOfBook();
         BookUpdateResult result = state.applyDelta(delta("""
             {"type":"orderbook_delta","sid":2,"seq":4,"msg":{"market_ticker":"M","price_dollars":"0.4600","delta_fp":"1.00","side":"yes","ts_ms":1}}
             """));
 
         assertEquals(1, result.generatedEvents().size());
-        TopOfBookUpdate top = assertInstanceOf(TopOfBookUpdate.class, result.generatedEvents().get(0));
-        assertEquals(460_000L, top.bidPriceMicros());
+        SequenceGapEvent gap = assertInstanceOf(SequenceGapEvent.class, result.generatedEvents().get(0));
+        assertEquals(Long.valueOf(3L), gap.expectedSequence());
+        assertEquals(Long.valueOf(4L), gap.actualSequence());
+        assertEquals("orderbook_sequence_gap", gap.reason());
+        assertEquals("pause_market_and_request_fresh_snapshot", gap.recoveryAction());
+        assertTrue(state.pausedForRecovery());
+        assertEquals(Long.valueOf(2L), state.lastSequence());
+        assertEquals(beforeGap, state.currentTopOfBook());
+    }
+
+    @Test
+    void pausedMarketDeltaReturnsRecoveryGapWithoutChangingBook() {
+        OrderBookState state = new OrderBookState("M");
+        state.applySnapshot(snapshot("""
+            {"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
+            """));
+        state.applyDelta(delta("""
+            {"type":"orderbook_delta","sid":2,"seq":4,"msg":{"market_ticker":"M","price_dollars":"0.4600","delta_fp":"1.00","side":"yes","ts_ms":1}}
+            """));
+        TopOfBook pausedTop = state.currentTopOfBook();
+
+        BookUpdateResult result = state.applyDelta(delta("""
+            {"type":"orderbook_delta","sid":2,"seq":5,"msg":{"market_ticker":"M","price_dollars":"0.4700","delta_fp":"1.00","side":"yes","ts_ms":1}}
+            """));
+
+        assertEquals(1, result.generatedEvents().size());
+        SequenceGapEvent gap = assertInstanceOf(SequenceGapEvent.class, result.generatedEvents().get(0));
+        assertEquals(Long.valueOf(3L), gap.expectedSequence());
+        assertEquals(Long.valueOf(5L), gap.actualSequence());
+        assertEquals("market_paused_for_snapshot_recovery", gap.reason());
+        assertTrue(state.pausedForRecovery());
+        assertEquals(Long.valueOf(2L), state.lastSequence());
+        assertEquals(pausedTop, state.currentTopOfBook());
+    }
+
+    @Test
+    void freshSnapshotClearsPauseAndRestoresDeltaUpdates() {
+        OrderBookState state = new OrderBookState("M");
+        state.applySnapshot(snapshot("""
+            {"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
+            """));
+        state.applyDelta(delta("""
+            {"type":"orderbook_delta","sid":2,"seq":4,"msg":{"market_ticker":"M","price_dollars":"0.4600","delta_fp":"1.00","side":"yes","ts_ms":1}}
+            """));
+        assertTrue(state.pausedForRecovery());
+
+        BookUpdateResult snapshotResult = state.applySnapshot(snapshot("""
+            {"type":"orderbook_snapshot","sid":2,"seq":10,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4700","8.00"]],"no_dollars_fp":[["0.3900","4.00"]]}}
+            """));
+
         assertFalse(state.pausedForRecovery());
+        assertEquals(Long.valueOf(10L), state.lastSequence());
+        TopOfBookUpdate snapshotTop = assertInstanceOf(TopOfBookUpdate.class, snapshotResult.generatedEvents().get(0));
+        assertEquals(470_000L, snapshotTop.bidPriceMicros());
+        assertEquals(610_000L, snapshotTop.askPriceMicros());
+
+        BookUpdateResult deltaResult = state.applyDelta(delta("""
+            {"type":"orderbook_delta","sid":2,"seq":11,"msg":{"market_ticker":"M","price_dollars":"0.4800","delta_fp":"1.00","side":"yes","ts_ms":1}}
+            """));
+
+        TopOfBookUpdate deltaTop = assertInstanceOf(TopOfBookUpdate.class, deltaResult.generatedEvents().get(0));
+        assertEquals(480_000L, deltaTop.bidPriceMicros());
+        assertFalse(state.pausedForRecovery());
+        assertEquals(Long.valueOf(11L), state.lastSequence());
     }
 
     @Test
