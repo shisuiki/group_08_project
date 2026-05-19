@@ -329,6 +329,66 @@ jobs:
         run: |
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile cluster-live --profile recording-capture --profile observability --profile featureplant --profile raw-replay --profile historical-backfill down --remove-orphans && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' up -d --build --remove-orphans"
 
+      - name: Smoke test deployed health endpoints
+        run: |
+          printf -v q_deploy_path '%q' "$DEPLOY_PATH"
+          printf -v q_deploy_profile '%q' "$DEPLOY_PROFILE"
+          printf -v q_wsclient_metrics_host_port '%q' "$WSCLIENT_METRICS_HOST_PORT"
+          printf -v q_stream_tap_host_port '%q' "$STREAM_TAP_HOST_PORT"
+          printf -v q_wsclient_start_delay_seconds '%q' "$WSCLIENT_START_DELAY_SECONDS"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "DEPLOY_PATH=$q_deploy_path DEPLOY_PROFILE=$q_deploy_profile WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          if [ "$DEPLOY_PROFILE" != "cluster-live" ]; then
+            echo "Skipping cluster-live health smoke checks for DEPLOY_PROFILE=$DEPLOY_PROFILE."
+            exit 0
+          fi
+
+          cd "$DEPLOY_PATH"
+
+          wsclient_url="http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT:-8091}/health"
+          streamtap_url="http://127.0.0.1:${STREAM_TAP_HOST_PORT:-8080}/health"
+          start_delay="${WSCLIENT_START_DELAY_SECONDS:-20}"
+          if ! [[ "$start_delay" =~ ^[0-9]+$ ]]; then
+            start_delay=20
+          fi
+          if [ "$start_delay" -gt 120 ]; then
+            start_delay=120
+          fi
+
+          interval_seconds=5
+          timeout_seconds=$((start_delay + 120))
+          attempts=$(((timeout_seconds + interval_seconds - 1) / interval_seconds))
+          wsclient_ok=0
+          streamtap_ok=0
+
+          for attempt in $(seq 1 "$attempts"); do
+            if [ "$wsclient_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$wsclient_url" >/dev/null 2>&1; then
+              echo "wsclient health check passed: $wsclient_url"
+              wsclient_ok=1
+            fi
+            if [ "$streamtap_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$streamtap_url" >/dev/null 2>&1; then
+              echo "streamtap health check passed: $streamtap_url"
+              streamtap_ok=1
+            fi
+            if [ "$wsclient_ok" -eq 1 ] && [ "$streamtap_ok" -eq 1 ]; then
+              exit 0
+            fi
+
+            echo "Health checks pending ($attempt/$attempts): wsclient=$wsclient_ok streamtap=$streamtap_ok"
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep "$interval_seconds"
+            fi
+          done
+
+          echo "Health smoke check failed after ${timeout_seconds}s." >&2
+          echo "Docker Compose status:" >&2
+          sudo docker compose --env-file .env --profile "$DEPLOY_PROFILE" ps --all >&2 || true
+          echo "Recent wsclient/streamtap logs:" >&2
+          sudo docker compose --env-file .env --profile "$DEPLOY_PROFILE" logs --tail=120 wsclient streamtap >&2 || true
+          exit 1
+          REMOTE
+
       - name: Show service status
         run: |
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "cd '$DEPLOY_PATH' && sudo docker compose --env-file .env --profile '$DEPLOY_PROFILE' ps"
