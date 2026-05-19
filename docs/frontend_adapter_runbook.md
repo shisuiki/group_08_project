@@ -104,9 +104,12 @@ ordered by recent event time, and serves that startup snapshot without refresh.
 
 ## Curl Smoke Tests
 
-For the persisted-feature demo path, `scripts/db-primary-demo-smoke.sh` wraps
-the `/health`, `/symbols`, `/features`, `/quotes`, and `/datafeed/config`
-checks without requiring `jq`.
+For the persisted-feature demo path, `scripts/db-primary-demo-seed.sh` creates
+local DB rows for two demo symbols, and `scripts/db-primary-demo-smoke.sh` wraps
+the `/health`, `/symbols`, `/features`, `/quotes`, `/datafeed/history`, and
+`/datafeed/config` checks without requiring `jq`. The smoke defaults to
+`EXPECTED_FEATURE_SOURCE=feature_outputs` so module-driven frontend runs do not
+accidentally pass the persisted-feature demo.
 
 ```bash
 curl -s http://127.0.0.1:8090/health | jq
