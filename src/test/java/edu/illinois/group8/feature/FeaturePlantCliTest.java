@@ -200,6 +200,66 @@ class FeaturePlantCliTest {
     }
 
     @Test
+    void dbSourceDbOutputWithCursorUsesTransactionalProjectorEvenWhenAsyncEnabled() {
+        RecordingDbProjectorFactory factory = new RecordingDbProjectorFactory();
+        BackendMetrics metrics = new BackendMetrics();
+
+        FeaturePlantCli.Config config = FeaturePlantCli.Config.from(Map.of(
+            "FEATUREPLANT_SOURCE", "db",
+            "FEATUREPLANT_OUTPUT", "db",
+            "FEATUREPLANT_DB_URL", "jdbc:postgresql://db/kalshi",
+            "FEATUREPLANT_DB_USER", "writer",
+            "FEATUREPLANT_DB_PASSWORD", "secret",
+            "FEATUREPLANT_DB_CURSOR_NAME", "featureplant-prod",
+            "FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED", "true",
+            "FEATUREPLANT_BATCH_SIZE", "17"
+        ));
+
+        assertTrue(config.usesTransactionalDbProjector());
+
+        FeaturePlantDbProjector projector = config.dbProjector(metrics, factory);
+
+        projector.close();
+
+        assertEquals(1, factory.calls.size());
+        DbProjectorCall call = factory.calls.get(0);
+        assertEquals("jdbc:postgresql://db/kalshi", call.dbUrl());
+        assertEquals("writer", call.dbUser());
+        assertEquals("secret", call.dbPassword());
+        assertEquals("featureplant-prod", call.cursorName());
+        assertSame(metrics, call.metrics());
+    }
+
+    @Test
+    void postgresAliasesCanUseTransactionalProjector() {
+        FeaturePlantCli.Config config = FeaturePlantCli.Config.from(Map.of(
+            "FEATUREPLANT_SOURCE", "postgres",
+            "FEATUREPLANT_OUTPUT", "postgres",
+            "FEATUREPLANT_DB_URL", "jdbc:postgresql://db/kalshi",
+            "FEATUREPLANT_DB_CURSOR_NAME", "featureplant-prod"
+        ));
+
+        assertTrue(config.usesTransactionalDbProjector());
+    }
+
+    @Test
+    void durableCursorRejectsAsyncDbSinkOutsideTransactionalProjectorMode() {
+        IllegalArgumentException thrown = assertThrows(
+            IllegalArgumentException.class,
+            () -> FeaturePlantCli.Config.from(Map.of(
+                "FEATUREPLANT_SOURCE", "db",
+                "FEATUREPLANT_OUTPUT", "both",
+                "FEATUREPLANT_DB_URL", "jdbc:postgresql://db/kalshi",
+                "FEATUREPLANT_DB_CURSOR_NAME", "featureplant-prod",
+                "FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED", "true"
+            )).outputSink(new BackendMetrics(), new RecordingDbSinkFactory())
+        );
+
+        assertTrue(thrown.getMessage().contains("FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED"));
+        assertTrue(thrown.getMessage().contains("durable DB cursor"));
+    }
+
+    @Test
     void bothOutputCreatesOneDbSink() {
         RecordingDbSinkFactory factory = new RecordingDbSinkFactory();
 
@@ -317,6 +377,15 @@ class FeaturePlantCliTest {
     ) {
     }
 
+    private record DbProjectorCall(
+        String dbUrl,
+        String dbUser,
+        String dbPassword,
+        String cursorName,
+        BackendMetrics metrics
+    ) {
+    }
+
     private static final class RecordingDbSinkFactory implements FeaturePlantCli.DbOutputSinkFactory {
         private final List<DbSinkCall> calls = new ArrayList<>();
 
@@ -347,6 +416,52 @@ class FeaturePlantCliTest {
     private static final class NoopFeatureOutputSink implements FeatureOutputSink {
         @Override
         public void write(FeatureOutput output) {
+        }
+    }
+
+    private static final class RecordingDbProjectorFactory implements FeaturePlantCli.DbProjectorFactory {
+        private final List<DbProjectorCall> calls = new ArrayList<>();
+
+        @Override
+        public FeaturePlantDbProjector create(
+            String dbUrl,
+            String dbUser,
+            String dbPassword,
+            List<edu.illinois.group8.canonical.StreamContract> streams,
+            List<FeatureModule> modules,
+            long maxEvents,
+            boolean includeReplayEvents,
+            String replayId,
+            String cursorName,
+            BackendMetrics metrics
+        ) {
+            calls.add(new DbProjectorCall(dbUrl, dbUser, dbPassword, cursorName, metrics));
+            return new FeaturePlantDbProjector(
+                request -> List.of(),
+                new NoopProjectionStore(),
+                streams,
+                modules,
+                maxEvents,
+                includeReplayEvents,
+                replayId,
+                cursorName,
+                metrics
+            );
+        }
+    }
+
+    private static final class NoopProjectionStore implements edu.illinois.group8.storage.db.FeatureOutputProjectionStore {
+        @Override
+        public java.util.Optional<edu.illinois.group8.storage.db.CanonicalDbCursor> loadCursor(String cursorName) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public void commitProjection(
+            String cursorName,
+            edu.illinois.group8.storage.db.CanonicalDbCursor cursor,
+            List<edu.illinois.group8.storage.db.FeatureOutputDbEvent> outputs
+        ) {
         }
     }
 }

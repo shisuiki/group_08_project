@@ -233,6 +233,12 @@ if [ "$expected_commit_seq" -le 0 ]; then
     printf 'demo seed did not create canonical commit sequence rows\n' >&2
     exit 1
 fi
+cursor_before="$(cursor_commit_seq)"
+if [ "$expected_commit_seq" -le "$cursor_before" ]; then
+    printf 'demo seed target commit sequence is not ahead of FeaturePlant cursor: target=%s cursor_before=%s\n' \
+        "$expected_commit_seq" "$cursor_before" >&2
+    exit 1
+fi
 expected_feature_output_count="$(
     psql_scalar "select count(*) from canonical_events where event_id like 'demo-db-primary-canonical-%' and stream_name in ('canonical.trade','canonical.ticker','derived.top_of_book')"
 )"
@@ -283,3 +289,5 @@ SMOKE_HTTP_RETRY_SLEEP_SECONDS="$SMOKE_HTTP_RETRY_SLEEP_SECONDS" \
 printf 'PASS db_primary_product_smoke symbol=%s frontend_started_at=%s initial_loaded=%s feature_outputs=%s expected_feature_outputs_at_least=%s cursor=%s expected_cursor_at_least=%s\n' \
     "$DEMO_SYMBOL" "$frontend_started_at" "$frontend_initial_loaded" \
     "$feature_outputs_after" "$EXPECTED_FEATURE_OUTPUTS_MIN" "$cursor_after" "$expected_commit_seq"
+printf 'PASS db_primary_product_cursor cursor_before=%s cursor_after=%s expected_cursor_at_least=%s\n' \
+    "$cursor_before" "$cursor_after" "$expected_commit_seq"

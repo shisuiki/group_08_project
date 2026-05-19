@@ -64,6 +64,7 @@ DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="$(env_or_file DB_PRIMARY_PRODUCT_FRONTEND
 WSCLIENT_HEALTH_URL="${WSCLIENT_HEALTH_URL:-http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health}"
 STREAM_TAP_HEALTH_URL="${STREAM_TAP_HEALTH_URL:-http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health}"
 FEATUREPLANT_HEALTH_URL="${FEATUREPLANT_HEALTH_URL:-http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health}"
+FEATUREPLANT_METRICS_URL="${FEATUREPLANT_METRICS_URL:-http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/metrics}"
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}}"
 FRONTEND_HEALTH_URL="${FRONTEND_HEALTH_URL:-${FRONTEND_BASE_URL}/health}"
 
@@ -132,6 +133,60 @@ wait_plain_health() {
         fi
         if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
             printf 'health check failed: service=%s url=%s attempts=%s\n' "$service" "$url" "$attempt" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_featureplant_metrics() {
+    expected="$1"
+    output="$tmpdir/featureplant.metrics"
+    values="$tmpdir/featureplant.metrics.values"
+    attempt=1
+    while :; do
+        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FEATUREPLANT_METRICS_URL" -o "$output" \
+            && python3 - "$output" "$expected" > "$values" <<'PY'
+import re
+import sys
+
+metrics_path = sys.argv[1]
+expected = int(sys.argv[2])
+with open(metrics_path, "r", encoding="utf-8") as handle:
+    body = handle.read()
+
+def metric_value(key):
+    match = re.search(r"^" + re.escape(key) + r" (-?\d+)$", body, re.MULTILINE)
+    if match is None:
+        raise SystemExit(f"missing metric {key}")
+    return int(match.group(1))
+
+accepted = metric_value('featureplant_db_output_events_total{result="accepted",service="featureplant"}')
+written = metric_value('featureplant_db_output_events_total{result="written",service="featureplant"}')
+queue_depth = metric_value('featureplant_db_output_queue_depth{service="featureplant"}')
+if accepted < expected:
+    raise SystemExit(f"accepted {accepted} below expected {expected}")
+if written < expected:
+    raise SystemExit(f"written {written} below expected {expected}")
+if queue_depth < 0:
+    raise SystemExit(f"queue depth {queue_depth} is negative")
+print(accepted)
+print(written)
+print(queue_depth)
+PY
+        then
+            accepted="$(sed -n '1p' "$values")"
+            written="$(sed -n '2p' "$values")"
+            queue_depth="$(sed -n '3p' "$values")"
+            printf 'PASS featureplant_metrics url=%s accepted=%s written=%s queue_depth=%s expected_written_at_least=%s\n' \
+                "$FEATUREPLANT_METRICS_URL" "$accepted" "$written" "$queue_depth" "$expected"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'FeaturePlant metrics did not reach expected DB output counts at %s\n' \
+                "$FEATUREPLANT_METRICS_URL" >&2
             print_diagnostics
             return 1
         fi
@@ -559,6 +614,7 @@ feature_outputs_after="$(printf '%s\n' "$follow_result" | sed -n '1p')"
 cursor_after="$(printf '%s\n' "$follow_result" | sed -n '2p')"
 printf 'PASS featureplant_followed_seed prefix=%s feature_outputs=%s cursor_after=%s expected_cursor_at_least=%s\n' \
     "$seed_prefix" "$feature_outputs_after" "$cursor_after" "$target_commit_seq"
+wait_featureplant_metrics "$feature_outputs_after"
 
 frontend_after="$(wait_frontend_refresh_progress "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before")"
 frontend_started_at_after="$(printf '%s\n' "$frontend_after" | sed -n '1p')"

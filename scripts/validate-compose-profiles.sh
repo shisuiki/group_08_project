@@ -493,7 +493,13 @@ assert_live_product_manual_smoke_contract() {
         'WSCLIENT_HEALTH_URL' \
         'STREAM_TAP_HEALTH_URL' \
         'FEATUREPLANT_HEALTH_URL' \
+        'FEATUREPLANT_METRICS_URL' \
         'FRONTEND_HEALTH_URL' \
+        '/metrics' \
+        'wait_featureplant_metrics' \
+        'featureplant_db_output_events_total{result="accepted",service="featureplant"}' \
+        'featureplant_db_output_events_total{result="written",service="featureplant"}' \
+        'featureplant_db_output_queue_depth{service="featureplant"}' \
         'insert into canonical_events' \
         'featureplant_cursors' \
         'feature_outputs' \

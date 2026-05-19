@@ -79,7 +79,7 @@ public final class JdbcFeatureOutputStore implements FeatureOutputStore {
         }
     }
 
-    private static void bindOutput(PreparedStatement statement, FeatureOutputDbEvent output) throws SQLException {
+    static void bindOutput(PreparedStatement statement, FeatureOutputDbEvent output) throws SQLException {
         statement.setString(1, output.featureEventId());
         statement.setString(2, output.sourceEventId());
         statement.setString(3, output.featureName());

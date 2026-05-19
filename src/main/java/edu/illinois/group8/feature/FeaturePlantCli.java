@@ -6,6 +6,8 @@ import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
+import edu.illinois.group8.storage.db.JdbcConnectionFactory;
+import edu.illinois.group8.storage.db.JdbcFeatureOutputProjectionStore;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputStore;
 import edu.illinois.group8.storage.db.JdbcFeaturePlantCursorStore;
 
@@ -27,21 +29,40 @@ public final class FeaturePlantCli {
     public static void main(String[] args) {
         Config config = Config.fromEnvironment().withArgs(args);
         BackendMetrics metrics = new BackendMetrics();
-        try (
-             MetricsServerHandle ignored = config.metricsServer(metrics);
-             FeatureOutputSink sink = config.outputSink(metrics);
-             CanonicalEnvelopeSource source = config.source();
-             FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink, metrics)) {
-            if (config.runOnce()) {
-                long consumed = service.runUntilExhausted(config.batchSize());
-                System.err.println("FeaturePlant consumed " + consumed + " canonical events");
-                System.err.print(service.metricsText());
+        try (MetricsServerHandle ignored = config.metricsServer(metrics)) {
+            if (config.usesTransactionalDbProjector()) {
+                try (FeaturePlantDbProjector projector = config.dbProjector(metrics)) {
+                    if (config.runOnce()) {
+                        long consumed = projector.runUntilExhausted(config.batchSize());
+                        System.err.println("FeaturePlant projected " + consumed + " canonical DB events");
+                        System.err.print(metrics.prometheusText());
+                        return;
+                    }
+                    while (!Thread.currentThread().isInterrupted()) {
+                        int polled = projector.poll(config.batchSize());
+                        if (polled == 0) {
+                            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(config.idleSleepMillis()));
+                        }
+                    }
+                }
                 return;
             }
-            while (!Thread.currentThread().isInterrupted()) {
-                int polled = service.poll(config.batchSize());
-                if (polled == 0) {
-                    LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(config.idleSleepMillis()));
+
+            try (
+                 FeatureOutputSink sink = config.outputSink(metrics);
+                 CanonicalEnvelopeSource source = config.source();
+                 FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink, metrics)) {
+                if (config.runOnce()) {
+                    long consumed = service.runUntilExhausted(config.batchSize());
+                    System.err.println("FeaturePlant consumed " + consumed + " canonical events");
+                    System.err.print(service.metricsText());
+                    return;
+                }
+                while (!Thread.currentThread().isInterrupted()) {
+                    int polled = service.poll(config.batchSize());
+                    if (polled == 0) {
+                        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(config.idleSleepMillis()));
+                    }
                 }
             }
         }
@@ -270,6 +291,12 @@ public final class FeaturePlantCli {
         FeatureOutputSink outputSink(BackendMetrics metrics, DbOutputSinkFactory dbSinkFactory) {
             Objects.requireNonNull(metrics, "metrics");
             Objects.requireNonNull(dbSinkFactory, "dbSinkFactory");
+            if (dbOutputAsyncEnabled && durableDbCursorOutputEnabled()) {
+                throw new IllegalArgumentException(
+                    "FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED=true is unsafe with a durable DB cursor; "
+                        + "use the transactional DB projector or disable async output."
+                );
+            }
             List<FeatureOutputSink> sinks = new ArrayList<>();
             for (String mode : outputModes(outputMode)) {
                 switch (mode) {
@@ -283,6 +310,47 @@ public final class FeaturePlantCli {
                 return sinks.get(0);
             }
             return new CompositeFeatureOutputSink(sinks);
+        }
+
+        boolean usesTransactionalDbProjector() {
+            List<String> modes = outputModes(outputMode);
+            return isDbSourceMode()
+                && modes.size() == 1
+                && modes.contains("db")
+                && dbCursorName != null
+                && !dbCursorName.isBlank();
+        }
+
+        FeaturePlantDbProjector dbProjector(BackendMetrics metrics) {
+            return dbProjector(metrics, Config::defaultDbProjector);
+        }
+
+        FeaturePlantDbProjector dbProjector(BackendMetrics metrics, DbProjectorFactory dbProjectorFactory) {
+            Objects.requireNonNull(metrics, "metrics");
+            Objects.requireNonNull(dbProjectorFactory, "dbProjectorFactory");
+            if (!usesTransactionalDbProjector()) {
+                throw new IllegalArgumentException(
+                    "Transactional FeaturePlant DB projector requires FEATUREPLANT_SOURCE=db, FEATUREPLANT_OUTPUT=db, "
+                        + "and FEATUREPLANT_DB_CURSOR_NAME."
+                );
+            }
+            if (dbUrl == null || dbUrl.isBlank()) {
+                throw new IllegalArgumentException(
+                    "FEATUREPLANT_DB_URL or --db-url is required when FEATUREPLANT_SOURCE=db and FEATUREPLANT_OUTPUT=db"
+                );
+            }
+            return dbProjectorFactory.create(
+                dbUrl,
+                dbUser,
+                dbPassword,
+                streams,
+                modules,
+                maxEvents,
+                dbIncludeReplayEvents,
+                dbReplayId,
+                dbCursorName,
+                metrics
+            );
         }
 
         private FeatureOutputSink dbOutputSink(DbOutputSinkFactory dbSinkFactory, BackendMetrics metrics) {
@@ -320,6 +388,32 @@ public final class FeaturePlantCli {
             return new BoundedAsyncFeatureOutputSink(store, metrics, queueCapacity, batchSize, closeTimeoutMs);
         }
 
+        private static FeaturePlantDbProjector defaultDbProjector(
+            String dbUrl,
+            String dbUser,
+            String dbPassword,
+            List<StreamContract> streams,
+            List<FeatureModule> modules,
+            long maxEvents,
+            boolean includeReplayEvents,
+            String replayId,
+            String cursorName,
+            BackendMetrics metrics
+        ) {
+            JdbcConnectionFactory connectionFactory = JdbcConnectionFactories.fromDriverManager(dbUrl, dbUser, dbPassword);
+            return new FeaturePlantDbProjector(
+                new JdbcCanonicalEventReader(connectionFactory),
+                new JdbcFeatureOutputProjectionStore(connectionFactory),
+                streams,
+                modules,
+                maxEvents,
+                includeReplayEvents,
+                replayId,
+                cursorName,
+                metrics
+            );
+        }
+
         CanonicalEnvelopeSource source() {
             return switch (sourceMode.trim().toLowerCase(Locale.ROOT)) {
                 case "recording", "history", "storage" ->
@@ -349,12 +443,36 @@ public final class FeaturePlantCli {
             );
         }
 
+        private boolean durableDbCursorOutputEnabled() {
+            return isDbSourceMode()
+                && outputModes(outputMode).contains("db")
+                && dbCursorName != null
+                && !dbCursorName.isBlank();
+        }
+
+        private boolean isDbSourceMode() {
+            return switch (sourceMode.trim().toLowerCase(Locale.ROOT)) {
+                case "db", "postgres", "postgresql", "timescale", "timescaledb" -> true;
+                default -> false;
+            };
+        }
+
         private static List<String> outputModes(String raw) {
             List<String> modes = new ArrayList<>();
             for (String mode : csv(raw)) {
                 String normalized = mode.trim().toLowerCase(Locale.ROOT).replace('-', '_');
                 if ("both".equals(normalized)) {
                     modes.add("stdout");
+                    modes.add("db");
+                } else if ("stdout".equals(normalized) || "console".equals(normalized)) {
+                    modes.add("stdout");
+                } else if (
+                    "db".equals(normalized)
+                        || "postgres".equals(normalized)
+                        || "postgresql".equals(normalized)
+                        || "timescale".equals(normalized)
+                        || "timescaledb".equals(normalized)
+                ) {
                     modes.add("db");
                 } else {
                     modes.add(normalized);
@@ -506,6 +624,22 @@ public final class FeaturePlantCli {
             int queueCapacity,
             int batchSize,
             long closeTimeoutMs,
+            BackendMetrics metrics
+        );
+    }
+
+    @FunctionalInterface
+    interface DbProjectorFactory {
+        FeaturePlantDbProjector create(
+            String dbUrl,
+            String dbUser,
+            String dbPassword,
+            List<StreamContract> streams,
+            List<FeatureModule> modules,
+            long maxEvents,
+            boolean includeReplayEvents,
+            String replayId,
+            String cursorName,
             BackendMetrics metrics
         );
     }
