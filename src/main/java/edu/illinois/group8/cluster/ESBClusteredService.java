@@ -7,10 +7,10 @@ import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster.Role;
 import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
+import io.aeron.FragmentAssembler;
 import io.aeron.Image;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
@@ -19,7 +19,6 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import io.aeron.logbuffer.Header;
-import org.json.*;
 
 import edu.illinois.group8.esb.DataProcessor;
 import edu.illinois.group8.esb.Tickerplant;
@@ -69,29 +68,27 @@ public class ESBClusteredService implements ClusteredService {
     }
     
     private void loadSnapshot(final Cluster cluster, final Image snapshotImage) {
-
         if (snapshotImage == null) {
-            // No snapshot to load; initialize default state
-            // initializeDefaultState();
             return;
         }
-    
-        try {
-            // Poll the snapshot image for data
-            DirectBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(1024)); // Adjust size as needed
-            int length = snapshotImage.poll((buf, offset, bufLength, header) -> {
-                String snapshotData = buf.getStringUtf8(offset, bufLength);
-                JSONObject obj = new JSONObject(snapshotData);
-                // Since there's no state to restore, no action is needed
-            }, buffer.capacity());
-    
-            if (length == 0) {
-                // Empty snapshot received
-                // initializeDefaultState();
+
+        boolean[] restored = {false};
+        FragmentAssembler assembler = new FragmentAssembler((buf, offset, bufLength, header) -> {
+            byte[] payload = new byte[bufLength];
+            buf.getBytes(offset, payload);
+            restoreSnapshotPayload(payload);
+            restored[0] = true;
+        });
+        int fragmentsRead = 0;
+        while (!restored[0]) {
+            int fragments = snapshotImage.poll(assembler, 10);
+            if (fragments == 0) {
+                break;
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-            // initializeDefaultState();
+            fragmentsRead += fragments;
+        }
+        if (fragmentsRead > 0 && !restored[0]) {
+            throw new IllegalArgumentException("Incomplete ESB cluster snapshot payload.");
         }
     }
 
@@ -107,6 +104,8 @@ public class ESBClusteredService implements ClusteredService {
         BackendMetrics metrics = new BackendMetrics();
         initializeCanonicalDbSink(metrics);
         this.processor = new DataProcessor(communicationOrchestrator, metrics, canonicalDbSink);
+        loadSnapshot(cluster, snapshotImage);
+
         this.tickerplantThread = new Thread(new Tickerplant(communicationOrchestrator));
         this.tickerplantThread.start();
 
@@ -114,12 +113,6 @@ public class ESBClusteredService implements ClusteredService {
             this.clientThread = new Thread(new MarketGridDemo(communicationOrchestrator));
             this.clientThread.start();
         }
-
-        // TODO: write snapshot loader
-        // will write snapshot loader later, based on what we need for data analysis like orderbook etc
-        // if the cluster doesn't actually need to store anything locally we can just get away with no snapshots
-        // however if we want to do inmemory tables we will need a snapshot system
-        loadSnapshot(cluster, snapshotImage);
     }
 
     @Override
@@ -174,24 +167,20 @@ public class ESBClusteredService implements ClusteredService {
     @Override
     public void onTakeSnapshot(ExclusivePublication snapshotPublication) {
         // Save the current state to a snapshot
+        byte[] snapshotBytes = snapshotPayloadBytes();
+        if (idleStrategy == null) {
+            throw new IllegalStateException("Cluster idle strategy is not initialized.");
+        }
         idleStrategy.reset();
 
-        try {
-            JSONObject snapshot = new JSONObject();
-            String snapshotString = snapshot.toString();
-            byte[] snapshotBytes = snapshotString.getBytes(StandardCharsets.UTF_8);
+        UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(snapshotBytes.length));
+        buffer.putBytes(0, snapshotBytes);
 
-            UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(snapshotBytes.length));
-            buffer.putBytes(0, snapshotBytes);
-
-            while (snapshotPublication.offer(buffer, 0, snapshotBytes.length) < 0L) {
-                idleStrategy.idle();
-            }
-
-            System.out.println("created empty snapshot");
-        } catch (Exception e) {
-            return;
+        while (snapshotPublication.offer(buffer, 0, snapshotBytes.length) < 0L) {
+            idleStrategy.idle();
         }
+
+        System.out.println("created recovery snapshot");
     }
 
     @Override
@@ -226,5 +215,19 @@ public class ESBClusteredService implements ClusteredService {
         if (canonicalDbSink != null) {
             canonicalDbSink.close();
         }
+    }
+
+    byte[] snapshotPayloadBytes() {
+        if (processor == null) {
+            throw new IllegalStateException("DataProcessor is not initialized.");
+        }
+        return ESBClusterSnapshotCodec.encode(processor.recoveryState());
+    }
+
+    void restoreSnapshotPayload(byte[] payload) {
+        if (processor == null) {
+            throw new IllegalStateException("DataProcessor is not initialized.");
+        }
+        processor.restoreRecoveryState(ESBClusterSnapshotCodec.decode(payload));
     }
 }

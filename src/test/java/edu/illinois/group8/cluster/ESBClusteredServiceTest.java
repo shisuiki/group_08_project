@@ -1,9 +1,11 @@
 package edu.illinois.group8.cluster;
 
+import edu.illinois.group8.book.OrderBookRecoveryCheckpoint;
 import edu.illinois.group8.book.OrderBookStateManager;
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.MarketTrade;
 import edu.illinois.group8.esb.DataProcessor;
+import edu.illinois.group8.esb.DataProcessorRecoveryState;
 import edu.illinois.group8.ingress.KalshiIngressEnvelope;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.KalshiCanonicalParser;
@@ -15,7 +17,10 @@ import edu.illinois.group8.storage.db.DbWriterConfig;
 import edu.illinois.group8.storage.db.DbWriterStats;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.aeron.cluster.service.Cluster.Role;
@@ -25,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ESBClusteredServiceTest {
@@ -101,11 +107,65 @@ class ESBClusteredServiceTest {
         ));
     }
 
+    @Test
+    void snapshotPayloadRoundTripWithoutAeron() {
+        DataProcessorRecoveryState state = new DataProcessorRecoveryState(
+            Map.of(11L, 4L),
+            List.of(new OrderBookRecoveryCheckpoint("M", 2L))
+        );
+        DataProcessor sourceProcessor = testProcessor();
+        sourceProcessor.restoreRecoveryState(state);
+        ESBClusteredService sourceService = new ESBClusteredService("aeron-dir", "localhost", sourceProcessor);
+
+        byte[] payload = sourceService.snapshotPayloadBytes();
+
+        DataProcessor restoredProcessor = testProcessor();
+        ESBClusteredService restoredService = new ESBClusteredService(
+            "aeron-dir",
+            "localhost",
+            restoredProcessor
+        );
+        restoredService.restoreSnapshotPayload(payload);
+
+        assertEquals(state, restoredProcessor.recoveryState());
+    }
+
+    @Test
+    void restoreSnapshotPayloadRejectsMalformedPayload() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost", testProcessor());
+
+        assertThrows(IllegalArgumentException.class, () ->
+            service.restoreSnapshotPayload("not-json".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    void snapshotPayloadRequiresProcessor() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost");
+
+        assertThrows(IllegalStateException.class, service::snapshotPayloadBytes);
+    }
+
+    @Test
+    void restorePayloadRequiresProcessor() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost");
+
+        assertThrows(IllegalStateException.class, () -> service.restoreSnapshotPayload(new byte[] {'{', '}'}));
+    }
+
     private static String tradeMessage(String tradeId, String marketTicker) {
         return "{\"type\":\"trade\",\"sid\":11,\"msg\":{\"trade_id\":\"" + tradeId
             + "\",\"market_ticker\":\"" + marketTicker
             + "\",\"yes_price_dollars\":\"0.360\",\"no_price_dollars\":\"0.640\","
             + "\"count_fp\":\"1.00\",\"taker_side\":\"yes\",\"ts_ms\":1669149841000}}";
+    }
+
+    private static DataProcessor testProcessor() {
+        return new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            new CollectingEventPublisher(),
+            new BackendMetrics()
+        );
     }
 
     private static final class RecordingAsyncDbWriter implements AsyncDbWriter {
