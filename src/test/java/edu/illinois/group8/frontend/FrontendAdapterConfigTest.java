@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +15,8 @@ class FrontendAdapterConfigTest {
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of());
 
         assertEquals(FrontendAdapterConfig.SourceMode.DB, config.sourceMode());
+        assertEquals(FrontendAdapterConfig.FeatureSource.MODULES, config.featureSource());
+        assertEquals(10_000, config.featureOutputMaxRows());
     }
 
     @Test
@@ -34,6 +37,40 @@ class FrontendAdapterConfigTest {
         for (String alias : new String[] {"recording", "history", "storage"}) {
             assertEquals(FrontendAdapterConfig.SourceMode.RECORDING, FrontendAdapterConfig.SourceMode.parse(alias));
         }
+    }
+
+    @Test
+    void featureSourceAliasesParse() {
+        assertEquals(FrontendAdapterConfig.FeatureSource.MODULES, FrontendAdapterConfig.FeatureSource.parse(null));
+        assertEquals(FrontendAdapterConfig.FeatureSource.MODULES, FrontendAdapterConfig.FeatureSource.parse("modules"));
+        assertEquals(
+            FrontendAdapterConfig.FeatureSource.MODULES,
+            FrontendAdapterConfig.FeatureSource.parse("feature-modules")
+        );
+        assertEquals(
+            FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS,
+            FrontendAdapterConfig.FeatureSource.parse("feature_outputs")
+        );
+        assertEquals(
+            FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS,
+            FrontendAdapterConfig.FeatureSource.parse("db-features")
+        );
+        assertEquals(
+            FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS,
+            FrontendAdapterConfig.FeatureSource.parse("persisted")
+        );
+    }
+
+    @Test
+    void invalidFeatureSourceAndMaxRowsAreRejected() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_FEATURE_SOURCE", "kafka"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "0"))
+        );
     }
 
     @Test
@@ -69,5 +106,16 @@ class FrontendAdapterConfigTest {
         assertEquals("frontend-secret", config.dbPassword());
         assertTrue(config.dbIncludeReplayEvents());
         assertEquals("replay-1", config.dbReplayId());
+    }
+
+    @Test
+    void featureOutputModeParsesMaxRows() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "250"
+        ));
+
+        assertEquals(FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS, config.featureSource());
+        assertEquals(250, config.featureOutputMaxRows());
     }
 }

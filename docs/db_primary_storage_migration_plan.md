@@ -198,8 +198,12 @@ Indexes:
 - unique `(feature_name, feature_version, source_event_id, market_ticker)`
 
 Status: schema, JDBC store boundary, deterministic FeatureOutput mapper, and
-`FEATUREPLANT_OUTPUT=db` CLI wiring are landed. Output defaults to `stdout`.
-Feature output writes are synchronous; batching/async persistence is not landed.
+`FEATUREPLANT_OUTPUT=db` CLI wiring are landed. Frontend adapter can load a
+bounded `feature_outputs` startup snapshot with
+`FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs` and exposes `/features` for
+inspection. Output defaults to `stdout`; frontend defaults to module-driven
+feature generation. Feature output writes are synchronous; batching/async
+persistence and frontend refresh are not landed.
 
 ### `latest_market_state`
 

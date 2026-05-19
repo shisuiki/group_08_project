@@ -1,11 +1,13 @@
 # Frontend Adapter Runbook
 
-`FrontendAdapterMain` is a long-running HTTP service that converts a featureplant
-stream into the TradingView Lightweight Charts UDF datafeed protocol. It hosts
-a `FeaturePlantService` internally and consumes only `FeatureOutput` values via
-`FeatureOutputSink`; it does not subscribe to Aeron streams directly and does
-not parse canonical envelopes. See `docs/featureplant_runbook.md` for upstream
-feature semantics.
+`FrontendAdapterMain` is a long-running HTTP service that converts feature
+outputs into the TradingView Lightweight Charts UDF datafeed protocol. In the
+default `FRONTEND_ADAPTER_FEATURE_SOURCE=modules` mode, it hosts a
+`FeaturePlantService` internally and consumes only `FeatureOutput` values via
+`FeatureOutputSink`; it does not subscribe to Aeron streams directly. In
+`feature_outputs` mode, it loads a bounded startup snapshot from persisted DB
+feature rows and does not start the module feeder loop. See
+`docs/featureplant_runbook.md` for upstream feature semantics.
 
 The default source is canonical DB rows through `DbCanonicalEnvelopeSource`.
 Replay rows are excluded by default. Recording input remains an explicit
@@ -23,6 +25,8 @@ to that feature stream without breaking the external API.
 | `FRONTEND_ADAPTER_HOST` | `127.0.0.1` | HTTP bind host |
 | `FRONTEND_ADAPTER_PORT` | `8090` | HTTP port |
 | `FRONTEND_ADAPTER_SOURCE` | `db` | `db`, `recording`, or `aeron` |
+| `FRONTEND_ADAPTER_FEATURE_SOURCE` | `modules` | `modules` or `feature_outputs` |
+| `FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS` | `10000` | max rows loaded from `feature_outputs` at startup |
 | `FRONTEND_ADAPTER_DB_URL` | `DB_WRITER_DATABASE_URL` | canonical DB URL when `source=db` |
 | `FRONTEND_ADAPTER_DB_USER` | `DB_WRITER_DATABASE_USER` | canonical DB user |
 | `FRONTEND_ADAPTER_DB_PASSWORD` | `DB_WRITER_DATABASE_PASSWORD` | canonical DB password |
@@ -55,6 +59,7 @@ Companion REST:
 
 - `GET /symbols` — `{ symbols: [{ symbol, latest_event_ts_ms }] }`
 - `GET /quotes?symbols=<csv>` — latest `feature.bbo` per market
+- `GET /features?symbol=<ticker>&feature=<featureName>&limit=<n>` — inspect buffered feature outputs, limit capped at 500
 - `GET /health` — status + store size + feature-plant counters
 - `GET /metrics` — Prometheus text
 
@@ -92,6 +97,11 @@ It defaults to canonical DB rows and falls back from `FRONTEND_ADAPTER_DB_*` to
 Use `FRONTEND_ADAPTER_SOURCE=aeron` only when you want to drive it from a
 running tickerplant channel.
 
+For a persisted feature-output demo, set
+`FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs`. This mode requires the same
+DB URL fallback, loads at most `FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS` rows
+ordered by recent event time, and serves that startup snapshot without refresh.
+
 ## Curl Smoke Tests
 
 ```bash
@@ -104,6 +114,7 @@ curl -s "http://127.0.0.1:8090/datafeed/history?symbol=KXHIGHCHI-26MAY12-T70&res
 curl -s http://127.0.0.1:8090/datafeed/time
 curl -s 'http://127.0.0.1:8090/symbols' | jq
 curl -s 'http://127.0.0.1:8090/quotes?symbols=KXHIGHCHI-26MAY12-T70,KXHIGHCHI-26MAY12-T75' | jq
+curl -s 'http://127.0.0.1:8090/features?symbol=KXHIGHCHI-26MAY12-T70&feature=feature.bbo&limit=25' | jq
 ```
 
 ## Limits and Non-Goals
@@ -115,6 +126,8 @@ curl -s 'http://127.0.0.1:8090/quotes?symbols=KXHIGHCHI-26MAY12-T70,KXHIGHCHI-26
   `FRONTEND_ADAPTER_DB_REPLAY_ID` for replay-specific reads. There is no
   pause/seek API.
 - No authorization. Bind to `127.0.0.1` unless you've fronted the service.
+- No refresh loop in `FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs`; restart
+  the service to load a newer persisted feature snapshot.
 - No PTP-aware code paths. `eventTsMs` from `FeatureOutput` is authoritative.
 
 ## Related Docs

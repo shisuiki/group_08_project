@@ -257,8 +257,8 @@ Legend:
 | Persistent feature store | current-basic | `feature_outputs` schema/store plus explicit `FEATUREPLANT_OUTPUT=db` FeaturePlant sink exist; stdout remains default and async/batched feature writes are absent |
 | MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` schema/store plus historical REST metadata upsert wiring exists |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
-| Feature/query API | planned | `/features`, `/bars`, WS features absent |
-| Frontend adapter | current-demo | HTTP polling datafeed demo; canonical DB source is default, recording is explicit legacy/debug/demo |
+| Feature/query API | current-basic | `/features` inspection endpoint serves buffered feature outputs; `/bars` and WS features absent |
+| Frontend adapter | current-demo | HTTP polling datafeed demo; module-driven canonical DB source remains default, recording is explicit legacy/debug/demo; optional `feature_outputs` startup snapshot mode reads persisted feature rows |
 | Replay viewer controls | planned | pause/resume/seek/speed absent |
 | Research CSV export | current-basic | canonical DB source is default, recording is explicit legacy/export/debug/import |
 | Semantic parser/schema | planned | absent |

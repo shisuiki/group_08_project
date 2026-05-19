@@ -14,6 +14,7 @@ public record FrontendAdapterConfig(
     String host,
     int port,
     SourceMode sourceMode,
+    FeatureSource featureSource,
     String aeronChannel,
     Path recordingRoot,
     List<StreamContract> streams,
@@ -23,12 +24,15 @@ public record FrontendAdapterConfig(
     int fragmentLimit,
     int idleSleepMillis,
     long recordingMaxEvents,
+    int featureOutputMaxRows,
     String dbUrl,
     String dbUser,
     String dbPassword,
     boolean dbIncludeReplayEvents,
     String dbReplayId
 ) {
+    private static final int DEFAULT_FEATURE_OUTPUT_MAX_ROWS = 10_000;
+
     public enum SourceMode {
         AERON, RECORDING, DB;
 
@@ -45,6 +49,21 @@ public record FrontendAdapterConfig(
         }
     }
 
+    public enum FeatureSource {
+        MODULES, FEATURE_OUTPUTS;
+
+        public static FeatureSource parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return MODULES;
+            }
+            return switch (raw.trim().toLowerCase(Locale.ROOT).replace('-', '_')) {
+                case "modules", "feature_modules" -> MODULES;
+                case "feature_outputs", "db_features", "persisted" -> FEATURE_OUTPUTS;
+                default -> throw new IllegalArgumentException("Unknown FRONTEND_ADAPTER_FEATURE_SOURCE: " + raw);
+            };
+        }
+    }
+
     public FrontendAdapterConfig {
         host = host == null || host.isBlank() ? "127.0.0.1" : host;
         if (port < 0 || port > 65535) {
@@ -52,6 +71,9 @@ public record FrontendAdapterConfig(
         }
         if (sourceMode == null) {
             throw new IllegalArgumentException("sourceMode is required");
+        }
+        if (featureSource == null) {
+            throw new IllegalArgumentException("featureSource is required");
         }
         streams = List.copyOf(streams);
         moduleNames = List.copyOf(moduleNames);
@@ -67,10 +89,55 @@ public record FrontendAdapterConfig(
         if (idleSleepMillis < 0) {
             throw new IllegalArgumentException("idleSleepMillis must be non-negative");
         }
+        if (featureOutputMaxRows < 1) {
+            throw new IllegalArgumentException("featureOutputMaxRows must be positive");
+        }
         dbUrl = normalize(dbUrl);
         dbUser = normalize(dbUser);
         dbPassword = dbPassword == null ? "" : dbPassword;
         dbReplayId = normalize(dbReplayId);
+    }
+
+    public FrontendAdapterConfig(
+        String host,
+        int port,
+        SourceMode sourceMode,
+        String aeronChannel,
+        Path recordingRoot,
+        List<StreamContract> streams,
+        List<String> moduleNames,
+        int maxFeaturesPerMarket,
+        int maxSymbolsIndexed,
+        int fragmentLimit,
+        int idleSleepMillis,
+        long recordingMaxEvents,
+        String dbUrl,
+        String dbUser,
+        String dbPassword,
+        boolean dbIncludeReplayEvents,
+        String dbReplayId
+    ) {
+        this(
+            host,
+            port,
+            sourceMode,
+            FeatureSource.MODULES,
+            aeronChannel,
+            recordingRoot,
+            streams,
+            moduleNames,
+            maxFeaturesPerMarket,
+            maxSymbolsIndexed,
+            fragmentLimit,
+            idleSleepMillis,
+            recordingMaxEvents,
+            DEFAULT_FEATURE_OUTPUT_MAX_ROWS,
+            dbUrl,
+            dbUser,
+            dbPassword,
+            dbIncludeReplayEvents,
+            dbReplayId
+        );
     }
 
     public static FrontendAdapterConfig fromEnvironment() {
@@ -84,6 +151,7 @@ public record FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_HOST", "127.0.0.1"),
             intValue(env, "FRONTEND_ADAPTER_PORT", 8090),
             sourceMode,
+            FeatureSource.parse(value(env, "FRONTEND_ADAPTER_FEATURE_SOURCE", "modules")),
             value(env, "FRONTEND_ADAPTER_AERON_CHANNEL",
                 value(env, "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=224.0.1.1:40456")),
             Path.of(value(env, "FRONTEND_ADAPTER_RECORDING_ROOT", baseDir + "/recordings")),
@@ -95,6 +163,7 @@ public record FrontendAdapterConfig(
             intValue(env, "FRONTEND_ADAPTER_FRAGMENT_LIMIT", 64),
             intValue(env, "FRONTEND_ADAPTER_IDLE_SLEEP_MS", 1),
             longValue(env, "FRONTEND_ADAPTER_RECORDING_MAX_EVENTS", 0L),
+            intValue(env, "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", DEFAULT_FEATURE_OUTPUT_MAX_ROWS),
             value(env, "FRONTEND_ADAPTER_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
             value(env, "FRONTEND_ADAPTER_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
             value(env, "FRONTEND_ADAPTER_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),

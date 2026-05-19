@@ -6,19 +6,24 @@ import edu.illinois.group8.feature.BestBidOfferFeatureModule;
 import edu.illinois.group8.feature.CanonicalEnvelopeSource;
 import edu.illinois.group8.feature.DbCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.FeatureModule;
+import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.feature.FeatureOutputSink;
 import edu.illinois.group8.feature.FeaturePlantService;
 import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.TickerSnapshotFeatureModule;
 import edu.illinois.group8.feature.TradeTapeFeatureModule;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
+import edu.illinois.group8.storage.db.FeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
+import edu.illinois.group8.storage.db.JdbcFeatureOutputReader;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
@@ -33,6 +38,27 @@ public final class FrontendAdapterMain {
             config.maxFeaturesPerMarket(),
             config.maxSymbolsIndexed()
         );
+        if (config.featureSource() == FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS) {
+            int seeded = seedFeatureOutputs(config, store, buildFeatureOutputReader(config));
+            FrontendAdapterServer server = new FrontendAdapterServer(
+                config,
+                store,
+                () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+            );
+            server.start();
+            CountDownLatch stop = new CountDownLatch(1);
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                server.stop();
+                stop.countDown();
+            }, "frontend-adapter-shutdown"));
+            System.out.println("FrontendAdapter listening on " + config.host() + ":" + server.boundPort()
+                + " feature_source=" + config.featureSource().name().toLowerCase(Locale.ROOT)
+                + " seeded_feature_outputs=" + seeded
+                + " max_feature_output_rows=" + config.featureOutputMaxRows());
+            stop.await();
+            return;
+        }
+
         CanonicalEnvelopeSource source = buildSource(config);
         List<FeatureModule> modules = resolveModules(config.moduleNames());
         BackendMetrics metrics = new BackendMetrics();
@@ -60,11 +86,38 @@ public final class FrontendAdapterMain {
 
         System.out.println("FrontendAdapter listening on " + config.host() + ":" + server.boundPort()
             + " source_mode=" + config.sourceMode()
+            + " feature_source=" + config.featureSource().name().toLowerCase(Locale.ROOT)
             + " streams=" + config.streams().stream().map(StreamContract::streamName).toList()
             + " modules=" + config.moduleNames()
             + " max_features_per_market=" + config.maxFeaturesPerMarket()
             + " fragment_limit=" + config.fragmentLimit());
         feeder.join();
+    }
+
+    static int seedFeatureOutputs(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FeatureOutputReader reader
+    ) {
+        List<FeatureOutput> outputs = reader.read(featureOutputReadRequest(config));
+        for (int index = outputs.size() - 1; index >= 0; index--) {
+            store.accept(outputs.get(index));
+        }
+        return outputs.size();
+    }
+
+    static FeatureOutputReadRequest featureOutputReadRequest(FrontendAdapterConfig config) {
+        return FeatureOutputReadRequest.recent(resolveFeatureNames(config.moduleNames()), config.featureOutputMaxRows());
+    }
+
+    static FeatureOutputReader buildFeatureOutputReader(FrontendAdapterConfig config) {
+        if (config.dbUrl().isBlank()) {
+            throw new IllegalArgumentException(
+                "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when "
+                    + "FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"
+            );
+        }
+        return JdbcFeatureOutputReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
     }
 
     private static void feedLoop(FeaturePlantService service, FrontendAdapterConfig config, AtomicBoolean running) {
@@ -118,6 +171,22 @@ public final class FrontendAdapterMain {
                 case "bbo", "best_bid_offer" -> resolved.add(new BestBidOfferFeatureModule());
                 case "ticker", "ticker_snapshot" -> resolved.add(new TickerSnapshotFeatureModule());
                 case "trade", "trade_tape" -> resolved.add(new TradeTapeFeatureModule());
+                default -> throw new IllegalArgumentException("Unknown feature module: " + name);
+            }
+        }
+        if (resolved.isEmpty()) {
+            throw new IllegalArgumentException("FRONTEND_ADAPTER_MODULES must include at least one module.");
+        }
+        return List.copyOf(resolved);
+    }
+
+    static List<String> resolveFeatureNames(List<String> moduleNames) {
+        List<String> resolved = new ArrayList<>();
+        for (String name : moduleNames) {
+            switch (name.trim().toLowerCase(Locale.ROOT).replace('-', '_')) {
+                case "bbo", "best_bid_offer" -> resolved.add(BestBidOfferFeatureModule.FEATURE_NAME);
+                case "ticker", "ticker_snapshot" -> resolved.add(TickerSnapshotFeatureModule.FEATURE_NAME);
+                case "trade", "trade_tape" -> resolved.add(TradeTapeFeatureModule.FEATURE_NAME);
                 default -> throw new IllegalArgumentException("Unknown feature module: " + name);
             }
         }

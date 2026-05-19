@@ -28,6 +28,9 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
 
 public class FrontendAdapterServer {
+    private static final int DEFAULT_FEATURE_LIMIT = 100;
+    private static final int MAX_FEATURE_LIMIT = 500;
+
     public record FeaturePlantStats(long eventsIn, long eventsOut, long errors) {
         public static final FeaturePlantStats EMPTY = new FeaturePlantStats(0L, 0L, 0L);
     }
@@ -62,6 +65,7 @@ public class FrontendAdapterServer {
         bind("/datafeed/time", this::handleDatafeedTime);
         bind("/symbols", this::handleSymbols);
         bind("/quotes", this::handleQuotes);
+        bind("/features", this::handleFeatures);
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
         httpServer.setExecutor(Executors.newFixedThreadPool(4));
@@ -263,12 +267,44 @@ public class FrontendAdapterServer {
         writeJson(exchange, 200, Map.of("quotes", quotes));
     }
 
+    private void handleFeatures(HttpExchange exchange) throws IOException {
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        String symbol = params.getOrDefault("symbol", "").trim();
+        String feature = params.getOrDefault("feature", "").trim();
+        if (symbol.isBlank() || feature.isBlank()) {
+            writeError(exchange, 400, "symbol and feature are required");
+            return;
+        }
+        int limit;
+        try {
+            limit = parseLimit(params.get("limit"), DEFAULT_FEATURE_LIMIT, MAX_FEATURE_LIMIT);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+
+        List<FeatureOutput> snapshot = store.snapshot(symbol, feature);
+        int fromIndex = Math.max(0, snapshot.size() - limit);
+        List<Map<String, Object>> outputs = new ArrayList<>();
+        for (FeatureOutput output : snapshot.subList(fromIndex, snapshot.size())) {
+            outputs.add(featureOutputBody(output));
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("symbol", symbol);
+        body.put("feature", feature);
+        body.put("count", outputs.size());
+        body.put("outputs", outputs);
+        writeJson(exchange, 200, body);
+    }
+
     private void handleHealth(HttpExchange exchange) throws IOException {
         FeaturePlantStats stats = featurePlantStats.get();
         Map<String, Object> health = new LinkedHashMap<>();
         health.put("status", "ok");
         health.put("service", "frontend-adapter");
         health.put("source_mode", config.sourceMode().name().toLowerCase(Locale.ROOT));
+        health.put("feature_source", config.featureSource().name().toLowerCase(Locale.ROOT));
         health.put("started_at", java.time.Instant.ofEpochMilli(startedAtMs).toString());
         health.put("uptime_ms", System.currentTimeMillis() - startedAtMs);
         Map<String, Object> storeView = new LinkedHashMap<>();
@@ -310,6 +346,32 @@ public class FrontendAdapterServer {
                 .append('\n');
         });
         write(exchange, 200, "text/plain; charset=utf-8", body.toString());
+    }
+
+    private static Map<String, Object> featureOutputBody(FeatureOutput output) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("feature_name", output.featureName());
+        body.put("market_ticker", output.marketTicker());
+        body.put("event_ts_ms", output.eventTsMs());
+        body.put("source_event_id", output.sourceEventId());
+        body.put("values", output.values());
+        return body;
+    }
+
+    private static int parseLimit(String raw, int defaultLimit, int maxLimit) {
+        if (raw == null || raw.isBlank()) {
+            return defaultLimit;
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("limit must be an integer");
+        }
+        if (parsed < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        return Math.min(parsed, maxLimit);
     }
 
     private static long toMillis(long timestamp) {

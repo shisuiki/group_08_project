@@ -338,7 +338,7 @@ flowchart LR
     GROUPS["Basic metadata grouping<br/>contract_group, members,<br/>chain_snapshot"]:::planned
     FSTREAMS["Feature streams<br/>feature.*"]:::output
     FSTORE["Feature store + backfill<br/>module version, schema version,<br/>replay-compatible storage"]:::plannedStorage
-    FAPI["Feature/query API<br/>/features, /bars,<br/>latest BBO, WS features"]:::planned
+    FAPI["Feature/query API<br/>current /features inspection<br/>planned /bars + WS features"]:::planned
   end
 
   CANON -->|live tickerplant source| FSRC
@@ -361,7 +361,7 @@ flowchart LR
   FSTORE --> FAPI
 
   subgraph Frontend["Frontend / Research Placement"]
-    FE2["Frontend adapter HTTP service<br/>datafeed/search/history/quotes<br/>health + metrics"]:::current
+    FE2["Frontend adapter HTTP service<br/>datafeed/search/history/quotes/features<br/>health + metrics + persisted snapshot mode"]:::current
     FEPROD["Production frontend hardening<br/>durable query backing<br/>WS/SSE stream"]:::planned
     CHART2["TradingView or Lightweight Charts<br/>standard datafeed adapter"]:::external
     REPLAYCTRL["Replay viewer controls<br/>pause, resume, seek, speed"]:::planned

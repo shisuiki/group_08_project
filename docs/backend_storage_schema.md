@@ -142,6 +142,8 @@ can write it explicitly with `FEATUREPLANT_OUTPUT=db` or `--output=db`; stdout
 remains the default output. The DB sink maps values to sorted compact JSON and
 assigns deterministic `feature_event_id` values. Writes are synchronous through
 `JdbcFeatureOutputStore`; async/batched feature persistence is not implemented.
+`JdbcFeatureOutputReader` provides a bounded read path for the frontend adapter,
+ordered by `event_ts_ms desc nulls last, feature_event_id asc`.
 
 ```text
 feature_event_id text primary key

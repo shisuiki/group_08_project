@@ -143,10 +143,39 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void featuresEndpointReturnsSeededOutputsWithLimit() throws Exception {
+        JsonNode body = getJson("/features?symbol=MKT-1&feature=feature.bbo&limit=2");
+
+        assertEquals("MKT-1", body.path("symbol").asText());
+        assertEquals("feature.bbo", body.path("feature").asText());
+        assertEquals(2, body.path("count").asInt());
+        JsonNode outputs = body.path("outputs");
+        assertEquals(2, outputs.size());
+        assertEquals("feature.bbo", outputs.get(0).path("feature_name").asText());
+        assertEquals("MKT-1", outputs.get(0).path("market_ticker").asText());
+        assertEquals(4_500L, outputs.get(0).path("event_ts_ms").asLong());
+        assertEquals("evt-4500", outputs.get(0).path("source_event_id").asText());
+        assertEquals(504_500L, outputs.get(0).path("values").path("midpoint_micros").asLong());
+        assertEquals(5_000L, outputs.get(1).path("event_ts_ms").asLong());
+    }
+
+    @Test
+    void featuresEndpointRejectsMissingRequiredParamsAndBadLimit() throws Exception {
+        HttpResponse<String> missing = get("/features?symbol=MKT-1");
+        assertEquals(400, missing.statusCode());
+        assertTrue(missing.body().contains("symbol and feature are required"));
+
+        HttpResponse<String> badLimit = get("/features?symbol=MKT-1&feature=feature.bbo&limit=0");
+        assertEquals(400, badLimit.statusCode());
+        assertTrue(badLimit.body().contains("limit must be positive"));
+    }
+
+    @Test
     void healthHasFeaturePlantStats() throws Exception {
         JsonNode body = getJson("/health");
         assertEquals("ok", body.path("status").asText());
         assertEquals("frontend-adapter", body.path("service").asText());
+        assertEquals("modules", body.path("feature_source").asText());
         assertEquals(42L, body.path("feature_plant").path("events_in").asLong());
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
     }
