@@ -76,6 +76,7 @@ public class OrderBookState {
         TopOfBook current = currentTopOfBook();
         CanonicalEvent topOfBookUpdate = changedTopOfBookEvent(delta.eventId(), delta.metadata(), current);
         if (current.crossed()) {
+            pausedForRecovery = true;
             SequenceGapEvent gap = sequenceGap(
                 delta.eventId(),
                 delta.metadata(),
