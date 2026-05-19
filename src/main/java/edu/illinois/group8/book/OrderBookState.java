@@ -27,6 +27,13 @@ public class OrderBookState {
         this.marketTicker = marketTicker;
     }
 
+    public static OrderBookState restoredPaused(OrderBookRecoveryCheckpoint checkpoint) {
+        OrderBookState state = new OrderBookState(checkpoint.marketTicker());
+        state.pausedForRecovery = true;
+        state.lastSequence = checkpoint.lastSequence();
+        return state;
+    }
+
     public BookUpdateResult applySnapshot(OrderBookSnapshotEvent snapshot) {
         yesBids.clear();
         noBids.clear();
@@ -105,12 +112,20 @@ public class OrderBookState {
         return hasSnapshot;
     }
 
+    public boolean safeForDerivedTopOfBook() {
+        return hasSnapshot && !pausedForRecovery;
+    }
+
     public boolean pausedForRecovery() {
         return pausedForRecovery;
     }
 
     public Long lastSequence() {
         return lastSequence;
+    }
+
+    public OrderBookRecoveryCheckpoint recoveryCheckpoint() {
+        return new OrderBookRecoveryCheckpoint(marketTicker, lastSequence);
     }
 
     public void pauseForSnapshotRecovery() {

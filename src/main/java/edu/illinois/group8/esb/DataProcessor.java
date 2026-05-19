@@ -1,5 +1,6 @@
 package edu.illinois.group8.esb;
 
+import edu.illinois.group8.book.OrderBookRecoveryCheckpoint;
 import edu.illinois.group8.book.OrderBookStateManager;
 import edu.illinois.group8.book.SourceSequenceMonitor;
 import edu.illinois.group8.canonical.CanonicalEvent;
@@ -18,6 +19,8 @@ import edu.illinois.group8.publication.EventPublisher.PublicationResult;
 import edu.illinois.group8.storage.db.CanonicalDbSink;
 import edu.illinois.group8.storage.db.DbOfferResult;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -215,6 +218,14 @@ public class DataProcessor {
 
     public BackendMetrics metrics() {
         return metrics;
+    }
+
+    public List<OrderBookRecoveryCheckpoint> orderBookRecoveryCheckpoints() {
+        return orderBookStateManager.recoveryCheckpoints();
+    }
+
+    public void restoreOrderBooksPaused(Collection<OrderBookRecoveryCheckpoint> checkpoints) {
+        orderBookStateManager.restorePaused(checkpoints);
     }
 
     private void handleCanonicalEvent(CanonicalEvent event, boolean suppressOrderBookDerived) {

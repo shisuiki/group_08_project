@@ -1,5 +1,6 @@
 package edu.illinois.group8.esb;
 
+import edu.illinois.group8.book.OrderBookRecoveryCheckpoint;
 import edu.illinois.group8.book.OrderBookState;
 import edu.illinois.group8.book.OrderBookStateManager;
 import edu.illinois.group8.book.SourceSequenceMonitor;
@@ -357,6 +358,51 @@ class DataProcessorIngressEnvelopeTest {
         assertEquals("orderbook_delta", publisher.events().get(4).eventType());
         assertNull(orderBookStateManager.getState("M"));
         assertEquals(0L, countEvents(publisher.events(), "top_of_book_update"));
+    }
+
+    @Test
+    void restoredOrderBookPauseSuppressesDerivedUntilSnapshot() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            new OrderBookStateManager(),
+            publisher,
+            new BackendMetrics()
+        );
+
+        processor.restoreOrderBooksPaused(Arrays.asList(new OrderBookRecoveryCheckpoint("M", 4L)));
+
+        assertEquals(
+            Arrays.asList(new OrderBookRecoveryCheckpoint("M", 4L)),
+            processor.orderBookRecoveryCheckpoints()
+        );
+
+        processor.processMessage(envelope(ORDERBOOK_DELTA_SEQ5_MESSAGE));
+
+        assertEquals(3, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(0).eventType());
+        assertEquals("orderbook_delta", publisher.events().get(1).eventType());
+        SequenceGapEvent recoveryGap = assertInstanceOf(SequenceGapEvent.class, publisher.events().get(2));
+        assertEquals(Long.valueOf(5L), recoveryGap.expectedSequence());
+        assertEquals(Long.valueOf(5L), recoveryGap.actualSequence());
+        assertEquals("market_paused_for_snapshot_recovery", recoveryGap.reason());
+        assertEquals(0L, countEvents(publisher.events(), "top_of_book_update"));
+        assertEquals(
+            Arrays.asList(new OrderBookRecoveryCheckpoint("M", 4L)),
+            processor.orderBookRecoveryCheckpoints()
+        );
+
+        processor.processMessage(envelope(ORDERBOOK_RECOVERY_SNAPSHOT_SEQ6_MESSAGE));
+
+        assertEquals(6, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(3).eventType());
+        assertEquals("orderbook_snapshot", publisher.events().get(4).eventType());
+        assertEquals("top_of_book_update", publisher.events().get(5).eventType());
+        assertEquals(1L, countEvents(publisher.events(), "top_of_book_update"));
+        assertEquals(
+            Arrays.asList(new OrderBookRecoveryCheckpoint("M", 6L)),
+            processor.orderBookRecoveryCheckpoints()
+        );
     }
 
     @Test
