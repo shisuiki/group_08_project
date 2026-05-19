@@ -2,12 +2,10 @@ package edu.illinois.group8.backfill;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.parser.CanonicalParseResult;
 import edu.illinois.group8.parser.KalshiRestParser;
-import edu.illinois.group8.recorder.CanonicalRecordingWriter;
 import edu.illinois.group8.wrapper.RequestParameters;
 
 import java.io.IOException;
@@ -19,7 +17,7 @@ import java.util.List;
 public final class HistoricalBackfillService {
     private final HistoricalBackfillClient client;
     private final KalshiRestParser parser;
-    private final CanonicalRecordingWriter canonicalWriter;
+    private final CanonicalBackfillSink canonicalSink;
     private final RawRestResponseWriter rawWriter;
     private final BackendMetrics metrics;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -27,13 +25,13 @@ public final class HistoricalBackfillService {
     public HistoricalBackfillService(
         HistoricalBackfillClient client,
         KalshiRestParser parser,
-        CanonicalRecordingWriter canonicalWriter,
+        CanonicalBackfillSink canonicalSink,
         RawRestResponseWriter rawWriter,
         BackendMetrics metrics
     ) {
         this.client = client;
         this.parser = parser;
-        this.canonicalWriter = canonicalWriter;
+        this.canonicalSink = canonicalSink;
         this.rawWriter = rawWriter;
         this.metrics = metrics;
     }
@@ -193,12 +191,13 @@ public final class HistoricalBackfillService {
                 counters.rawResponsesRecorded++;
             }
             CanonicalParseResult result = parserCall.parse(rawPayload);
-            counters.canonicalEventsParsed += result.canonicalEvents().size();
-            for (CanonicalEvent event : result.canonicalEvents()) {
-                if (!config.dryRun()) {
-                    canonicalWriter.writeEvent(event, fetchTsNs);
-                    counters.canonicalEventsRecorded++;
-                }
+            var canonicalEvents = result.canonicalEvents();
+            counters.canonicalEventsParsed += canonicalEvents.size();
+            if (!config.dryRun() && !canonicalEvents.isEmpty()) {
+                canonicalSink.writeBatch(canonicalEvents, fetchTsNs);
+                counters.canonicalEventsRecorded += canonicalEvents.size();
+            }
+            for (var event : canonicalEvents) {
                 metrics.increment("historical_backfill_canonical_events_total",
                     BackendMetrics.labels("endpoint", endpoint, "stream", event.streamName()));
             }

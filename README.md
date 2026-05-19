@@ -61,8 +61,8 @@ The storage path is split by purpose. Live ingestion writes raw websocket
 payloads and canonical events to the DB first. `RawIngestRecorder` and
 `TickerplantStreamRecorder` remain explicit NDJSON capture tools for recorder
 soaks, archive/import, downstream-consumer validation, demos, and debug export.
-`HistoricalBackfillCli` records REST backfills and can preserve raw REST
-responses under `raw-rest`.
+`HistoricalBackfillCli` stores parsed REST canonical backfills in DB by default
+and can explicitly preserve raw REST responses under `raw-rest`.
 
 ### Real-Time Market Data Listener
 

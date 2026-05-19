@@ -15,6 +15,11 @@ public record HistoricalBackfillConfig(
     String kalshiKeyPath,
     Path outputRoot,
     String canonicalSubtree,
+    CanonicalTarget canonicalTarget,
+    String dbUrl,
+    String dbUser,
+    String dbPassword,
+    boolean rawRestEnabled,
     Path rawRestOutputRoot,
     List<String> tickers,
     String seriesTicker,
@@ -34,8 +39,26 @@ public record HistoricalBackfillConfig(
     TimestampSource timestampSource,
     StreamRecordingWriter.PartitionGranularity partitionGranularity
 ) {
+    public enum CanonicalTarget {
+        DB, RECORDING;
+
+        public static CanonicalTarget from(String value) {
+            if (value == null || value.isBlank()) {
+                return DB;
+            }
+            return switch (value.trim().toLowerCase(Locale.ROOT)) {
+                case "db", "postgres", "postgresql", "timescale", "timescaledb" -> DB;
+                case "recording", "history", "storage", "ndjson" -> RECORDING;
+                default -> throw new IllegalArgumentException("Unknown HISTORICAL_BACKFILL_CANONICAL_TARGET: " + value);
+            };
+        }
+    }
+
     public static HistoricalBackfillConfig fromEnvironment() {
-        Map<String, String> env = System.getenv();
+        return from(System.getenv());
+    }
+
+    static HistoricalBackfillConfig from(Map<String, String> env) {
         String baseDir = value(env, "BASE_DIR", "/app");
         return new HistoricalBackfillConfig(
             value(env, "KALSHI_BASE_URL", "https://api.elections.kalshi.com"),
@@ -43,7 +66,12 @@ public record HistoricalBackfillConfig(
             value(env, "KALSHI_KEY_PATH", ""),
             Path.of(value(env, "HISTORICAL_BACKFILL_OUTPUT_ROOT", baseDir + "/recordings")),
             value(env, "HISTORICAL_BACKFILL_CANONICAL_SUBTREE", "canonical"),
-            optionalPath(env, "HISTORICAL_BACKFILL_RAW_REST_ROOT", baseDir + "/recordings/raw-rest"),
+            CanonicalTarget.from(value(env, "HISTORICAL_BACKFILL_CANONICAL_TARGET", "db")),
+            value(env, "HISTORICAL_BACKFILL_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
+            value(env, "HISTORICAL_BACKFILL_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
+            value(env, "HISTORICAL_BACKFILL_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
+            booleanValue(env, "HISTORICAL_BACKFILL_RAW_REST_ENABLED", false),
+            Path.of(value(env, "HISTORICAL_BACKFILL_RAW_REST_ROOT", baseDir + "/recordings/raw-rest")),
             csv(value(env, "HISTORICAL_BACKFILL_TICKERS", value(env, "KALSHI_MARKET_TICKERS", ""))),
             value(env, "HISTORICAL_BACKFILL_SERIES_TICKER", value(env, "KALSHI_MARKET_SERIES_TICKER", "")),
             value(env, "HISTORICAL_BACKFILL_MARKET_STATUS", value(env, "KALSHI_MARKET_STATUS", "open")),
@@ -65,6 +93,15 @@ public record HistoricalBackfillConfig(
     }
 
     public HistoricalBackfillConfig validate() {
+        if (canonicalTarget == null) {
+            throw new IllegalArgumentException("HISTORICAL_BACKFILL_CANONICAL_TARGET is required.");
+        }
+        if (canonicalTarget == CanonicalTarget.DB && !dryRun && (dbUrl == null || dbUrl.isBlank())) {
+            throw new IllegalArgumentException(
+                "HISTORICAL_BACKFILL_DB_URL or DB_WRITER_DATABASE_URL is required when "
+                    + "HISTORICAL_BACKFILL_CANONICAL_TARGET=db."
+            );
+        }
         if (includeCandlesticks && (seriesTicker == null || seriesTicker.isBlank())) {
             throw new IllegalArgumentException("HISTORICAL_BACKFILL_SERIES_TICKER is required for candlestick backfill.");
         }
@@ -77,11 +114,6 @@ public record HistoricalBackfillConfig(
     private static String value(Map<String, String> env, String key, String defaultValue) {
         String value = env.get(key);
         return value == null || value.isBlank() ? defaultValue : value;
-    }
-
-    private static Path optionalPath(Map<String, String> env, String key, String defaultValue) {
-        String value = value(env, key, defaultValue);
-        return value == null || value.isBlank() ? null : Path.of(value);
     }
 
     private static Integer optionalInt(Map<String, String> env, String key) {

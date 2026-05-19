@@ -77,22 +77,22 @@ from websocket receipt to Aeron-client receipt.
 
 ## Raw REST Backfill
 
-`raw-rest` is written by `HistoricalBackfillCli` when REST historical backfill
-is run. It keeps the raw REST response alongside the canonical events parsed
-from it, so backfill remains auditable.
+`HistoricalBackfillCli` writes parsed REST canonical events to
+`canonical_events` by default. `raw-rest` NDJSON is disabled by default; set
+`HISTORICAL_BACKFILL_RAW_REST_ENABLED=true` when an explicit REST response
+archive/debug trail is required.
 
 ```text
 recordings/raw-rest/
-  endpoint=<rest_endpoint>/
+  endpoint=<rest_endpoint_with_dots_replaced_by_underscores>/
     date=yyyy-mm-dd/
       hour=hh/
-        minute=mm/
-          responses.ndjson
+        responses.ndjson
 ```
 
-`HistoricalBackfillCli` writes parsed REST canonical events into
-`recordings/canonical` by default, using the same stream/date/hour/minute
-layout as the downstream stream recorder.
+Set `HISTORICAL_BACKFILL_PARTITION_GRANULARITY=minute` to add `minute=mm`.
+Set `HISTORICAL_BACKFILL_CANONICAL_TARGET=recording` only for explicit
+legacy/debug/export canonical NDJSON under `recordings/canonical`.
 
 ## Replay
 

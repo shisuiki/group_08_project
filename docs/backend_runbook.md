@@ -136,12 +136,16 @@ docker compose --env-file .env --profile raw-replay run --rm raw-ingress-replay 
 
 Use `--dry-run` to validate selection/order without publishing into the cluster.
 
-Historical REST backfill writes raw REST responses and parsed canonical events
-into the same storage-backed layout:
+Historical REST backfill writes parsed canonical events to DB by default:
 
 ```bash
 docker compose --env-file .env --profile historical-backfill run --rm historical-backfill
 ```
+
+Set `HISTORICAL_BACKFILL_CANONICAL_TARGET=recording` only for explicit
+legacy/debug/export canonical NDJSON. Set
+`HISTORICAL_BACKFILL_RAW_REST_ENABLED=true` only when raw REST
+`responses.ndjson` should be archived under `recordings/raw-rest`.
 
 Set `HISTORICAL_BACKFILL_TICKERS` for explicit contracts, or let the service
 discover markets from `GET /markets` using `HISTORICAL_BACKFILL_MARKET_STATUS`,
