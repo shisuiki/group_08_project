@@ -5,6 +5,20 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy_profile:
+        description: Docker Compose deploy profile
+        required: false
+        default: cluster-live
+        type: choice
+        options:
+          - cluster-live
+          - live-product
+      run_live_product_smoke:
+        description: Run live-product DB/FeaturePlant/frontend smoke after deploy
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ec2-production-deploy
@@ -48,6 +62,8 @@ jobs:
           sh -n scripts/db-primary-demo-pipeline.sh
           bash -n scripts/db-primary-product-smoke.sh
           sh -n scripts/db-primary-product-smoke.sh
+          bash -n scripts/live-product-smoke.sh
+          sh -n scripts/live-product-smoke.sh
           bash -n scripts/db-primary-demo-smoke.sh
           sh -n scripts/db-primary-demo-smoke.sh
           bash -n scripts/ec2-compose-rollback-gate.sh
@@ -69,7 +85,8 @@ jobs:
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/group_08_project' }}
-      DEPLOY_PROFILE: ${{ vars.DEPLOY_PROFILE || 'cluster-live' }}
+      DEPLOY_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}
+      RUN_LIVE_PRODUCT_SMOKE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}
       COMPOSE_HOST_BIND_IP: ${{ vars.COMPOSE_HOST_BIND_IP || '127.0.0.1' }}
       KALSHI_BASE_URL: ${{ vars.KALSHI_BASE_URL || 'https://api.elections.kalshi.com' }}
       KALSHI_KEY_ID: ${{ secrets.KALSHI_KEY_ID }}
@@ -432,6 +449,13 @@ jobs:
           printf -v q_deploy_db_preflight_required '%q' "$DEPLOY_DB_PREFLIGHT_REQUIRED"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
             "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required sh scripts/ec2-compose-rollback-gate.sh"
+
+      - name: Run live-product smoke
+        if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'
+        run: |
+          printf -v q_deploy_path '%q' "$DEPLOY_PATH"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
+            "cd $q_deploy_path && sh scripts/live-product-smoke.sh"
 
       - name: Show service status
         if: always()

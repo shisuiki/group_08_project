@@ -97,6 +97,36 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void liveProductSmokeAssumesRunningStackAndChecksFeatureOutputsPath() throws Exception {
+        String script = read("scripts/live-product-smoke.sh");
+
+        assertTrue(script.contains("COMPOSE_PROFILE=\"${COMPOSE_PROFILE:-live-product}\""));
+        assertTrue(script.contains("WSCLIENT_HEALTH_URL"));
+        assertTrue(script.contains("STREAM_TAP_HEALTH_URL"));
+        assertTrue(script.contains("FEATUREPLANT_HEALTH_URL"));
+        assertTrue(script.contains("FRONTEND_HEALTH_URL"));
+        assertTrue(script.contains("insert into canonical_events"));
+        assertTrue(script.contains("on conflict do nothing"));
+        assertTrue(script.contains("featureplant_cursors"));
+        assertTrue(script.contains("feature_outputs"));
+        assertTrue(script.contains("source_event_id like"));
+        assertTrue(script.contains("/features?symbol=${encoded_market}&feature=${encoded_feature}&limit=20"));
+        assertTrue(script.contains("/quotes?symbols=${encoded_market}"));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"));
+        assertTrue(script.contains("PASS live_product_smoke"));
+        assertFalse(script.contains("db-primary-demo-seed.sh"));
+        assertFalse(script.contains("--force-recreate"));
+        assertFalse(script.contains("compose up"));
+        assertFalse(script.contains("compose stop"));
+        assertFalse(script.contains("compose rm"));
+        assertFalse(script.contains("compose run"));
+        assertFalse(script.contains("docker compose up"));
+        assertFalse(script.contains("docker compose stop"));
+        assertFalse(script.contains("docker compose rm"));
+        assertFalse(script.contains("docker compose run"));
+    }
+
+    @Test
     void rollbackGateTreatsDbPrimaryProductAsFirstClassProfile() throws Exception {
         String script = read("scripts/ec2-compose-rollback-gate.sh");
 
@@ -153,6 +183,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("DB_WRITER_DATABASE_URL=jdbc:postgresql://timescaledb:5432/kalshi_test"));
         assertTrue(script.contains("assert_published_ports_loopback \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_live_product_manual_smoke_contract"));
+        assertTrue(script.contains("scripts/live-product-smoke.sh"));
     }
 
     @Test
@@ -179,6 +211,23 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port"));
+    }
+
+    @Test
+    void deployWorkflowSupportsManualLiveProductSmoke() throws Exception {
+        String workflow = read(".github/workflows/deploy-ec2.yml");
+
+        assertTrue(workflow.contains("deploy_profile:"));
+        assertTrue(workflow.contains("default: cluster-live"));
+        assertTrue(workflow.contains("- live-product"));
+        assertTrue(workflow.contains("run_live_product_smoke:"));
+        assertTrue(workflow.contains("type: boolean"));
+        assertTrue(workflow.contains("DEPLOY_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}"));
+        assertTrue(workflow.contains("RUN_LIVE_PRODUCT_SMOKE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}"));
+        assertTrue(workflow.contains("bash -n scripts/live-product-smoke.sh"));
+        assertTrue(workflow.contains("sh -n scripts/live-product-smoke.sh"));
+        assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));
+        assertTrue(workflow.contains("sh scripts/live-product-smoke.sh"));
     }
 
     private static String read(String path) throws Exception {

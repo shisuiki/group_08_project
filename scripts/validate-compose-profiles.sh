@@ -457,6 +457,60 @@ assert_featureplant_cursor_config_propagated() {
     printf 'PASS featureplant_cursor_config_propagated\n'
 }
 
+assert_live_product_manual_smoke_contract() {
+    workflow=".github/workflows/deploy-ec2.yml"
+    smoke_script="scripts/live-product-smoke.sh"
+    for expected in \
+        "deploy_profile:" \
+        "run_live_product_smoke:" \
+        "DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
+        "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}" \
+        "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
+        "sh scripts/live-product-smoke.sh" \
+        "bash -n scripts/live-product-smoke.sh" \
+        "sh -n scripts/live-product-smoke.sh"; do
+        if ! grep -Fq "$expected" "$workflow"; then
+            printf 'deploy workflow missing manual live-product smoke contract: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        'WSCLIENT_HEALTH_URL' \
+        'STREAM_TAP_HEALTH_URL' \
+        'FEATUREPLANT_HEALTH_URL' \
+        'FRONTEND_HEALTH_URL' \
+        'insert into canonical_events' \
+        'featureplant_cursors' \
+        'feature_outputs' \
+        'source_event_id like' \
+        'FEATUREPLANT_DB_CURSOR_NAME' \
+        'LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA'; do
+        if ! grep -Fq "$expected" "$smoke_script"; then
+            printf 'live-product smoke script missing contract fragment: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for forbidden in \
+        'db-primary-demo-seed.sh' \
+        '--force-recreate' \
+        'compose up' \
+        'compose stop' \
+        'compose rm' \
+        'compose run' \
+        'docker compose up' \
+        'docker compose stop' \
+        'docker compose rm' \
+        'docker compose run'; do
+        if grep -Fq -- "$forbidden" "$smoke_script"; then
+            printf 'live-product smoke script must not mutate services: %s\n' "$forbidden" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS live_product_manual_smoke_contract\n'
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -501,3 +555,4 @@ assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned
 assert_featureplant_cursor_config_propagated
+assert_live_product_manual_smoke_contract
