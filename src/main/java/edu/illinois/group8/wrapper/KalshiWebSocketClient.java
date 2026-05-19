@@ -275,7 +275,10 @@ public class KalshiWebSocketClient extends WebSocketClient {
     }
 
     public boolean update(long subscriptionId, String action, String marketTicker) {
-        if (!action.equals("add_markets") && !action.equals("delete_markets")) return false;
+        if (!isSupportedUpdateAction(action)) return false;
+        if ("get_snapshot".equals(action)) {
+            return sendUpdateCommand(subscriptionId, action, new String[] {marketTicker}, getNonce());
+        }
         JSONObject params = new JSONObject();
         JSONArray sidsArray = new JSONArray();
         sidsArray.add(subscriptionId);
@@ -290,13 +293,13 @@ public class KalshiWebSocketClient extends WebSocketClient {
     }
 
     public boolean update(long subscriptionId, String action, String[] marketTickers) {
-        if (!action.equals("add_markets") && !action.equals("delete_markets")) return false;
+        if (!isSupportedUpdateAction(action)) return false;
         return sendUpdateCommand(subscriptionId, action, marketTickers, getNonce());
     }
 
     public void updateAndAwaitOk(long subscriptionId, String action, String[] marketTickers, int timeoutMs)
         throws InterruptedException {
-        if (!action.equals("add_markets") && !action.equals("delete_markets")) {
+        if (!isSupportedUpdateAction(action)) {
             throw new IllegalArgumentException("Unsupported update_subscription action: " + action);
         }
         long commandId = getNonce();
@@ -309,7 +312,20 @@ public class KalshiWebSocketClient extends WebSocketClient {
         awaitAck(commandId, future, "update_subscription", timeoutMs);
     }
 
+    public void requestSnapshotAndAwaitOk(long subscriptionId, String[] marketTickers, int timeoutMs)
+        throws InterruptedException {
+        updateAndAwaitOk(subscriptionId, "get_snapshot", marketTickers, timeoutMs);
+    }
+
     private boolean sendUpdateCommand(long subscriptionId, String action, String[] marketTickers, long commandId) {
+        JSONObject object = buildUpdateCommand(subscriptionId, action, marketTickers, commandId);
+        return sendMessage(object.toJSONString());
+    }
+
+    static JSONObject buildUpdateCommand(long subscriptionId, String action, String[] marketTickers, long commandId) {
+        if (!isSupportedUpdateAction(action)) {
+            throw new IllegalArgumentException("Unsupported update_subscription action: " + action);
+        }
         JSONObject params = new JSONObject();
         JSONArray sidsArray = new JSONArray();
         sidsArray.add(subscriptionId);
@@ -322,7 +338,13 @@ public class KalshiWebSocketClient extends WebSocketClient {
         object.put("id", commandId);
         object.put("cmd", "update_subscription");
         object.put("params", params);
-        return sendMessage(object.toJSONString());
+        return object;
+    }
+
+    static boolean isSupportedUpdateAction(String action) {
+        return "add_markets".equals(action)
+            || "delete_markets".equals(action)
+            || "get_snapshot".equals(action);
     }
 
     private synchronized long getNonce() {
