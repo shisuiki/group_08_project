@@ -31,6 +31,9 @@ jobs:
       - name: Build Maven package
         run: mvn -B -DskipTests package
 
+      - name: Validate Docker build context
+        run: scripts/validate-docker-build-context.sh
+
       - name: Build Docker image
         run: docker build --pull --build-arg MAVEN_PACKAGE_ARGS="-DskipTests package" -t kalshi-project:${{ github.sha }} .
 
@@ -43,6 +46,8 @@ jobs:
           sh -n scripts/db-primary-demo-smoke.sh
           bash -n scripts/ec2-compose-rollback-gate.sh
           sh -n scripts/ec2-compose-rollback-gate.sh
+          bash -n scripts/validate-docker-build-context.sh
+          sh -n scripts/validate-docker-build-context.sh
           bash -n scripts/validate-compose-profiles.sh
           sh -n scripts/validate-compose-profiles.sh
 
@@ -88,7 +93,9 @@ jobs:
       BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS: ${{ vars.BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS || '1' }}
       BACKEND_METRICS_PORT: ${{ vars.BACKEND_METRICS_PORT || '8091' }}
       WSCLIENT_METRICS_HOST_PORT: ${{ vars.WSCLIENT_METRICS_HOST_PORT || '8091' }}
+      WSCLIENT_CAPTURE_METRICS_HOST_PORT: ${{ vars.WSCLIENT_CAPTURE_METRICS_HOST_PORT || '8093' }}
       BACKEND_TIMESTAMP_SOURCE: ${{ vars.BACKEND_TIMESTAMP_SOURCE || 'system_nano' }}
+      DEPLOY_DB_PREFLIGHT_REQUIRED: ${{ vars.DEPLOY_DB_PREFLIGHT_REQUIRED || 'false' }}
       DB_WRITER_ENABLED: ${{ vars.DB_WRITER_ENABLED }}
       DB_WRITER_DATABASE_URL: ${{ vars.DB_WRITER_DATABASE_URL }}
       DB_WRITER_DATABASE_USER: ${{ vars.DB_WRITER_DATABASE_USER }}
@@ -290,7 +297,9 @@ jobs:
           BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS=$BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_IDLE_SLEEP_MS
           BACKEND_METRICS_PORT=$BACKEND_METRICS_PORT
           WSCLIENT_METRICS_HOST_PORT=$WSCLIENT_METRICS_HOST_PORT
+          WSCLIENT_CAPTURE_METRICS_HOST_PORT=$WSCLIENT_CAPTURE_METRICS_HOST_PORT
           BACKEND_TIMESTAMP_SOURCE=$BACKEND_TIMESTAMP_SOURCE
+          DEPLOY_DB_PREFLIGHT_REQUIRED=$DEPLOY_DB_PREFLIGHT_REQUIRED
           DB_WRITER_ENABLED=$DB_WRITER_ENABLED
           DB_WRITER_DATABASE_URL=$DB_WRITER_DATABASE_URL
           DB_WRITER_DATABASE_USER=$DB_WRITER_DATABASE_USER
@@ -384,10 +393,13 @@ jobs:
           printf -v q_deploy_path '%q' "$DEPLOY_PATH"
           printf -v q_deploy_profile '%q' "$DEPLOY_PROFILE"
           printf -v q_wsclient_metrics_host_port '%q' "$WSCLIENT_METRICS_HOST_PORT"
+          printf -v q_wsclient_capture_metrics_host_port '%q' "$WSCLIENT_CAPTURE_METRICS_HOST_PORT"
           printf -v q_stream_tap_host_port '%q' "$STREAM_TAP_HOST_PORT"
+          printf -v q_stream_recorder_host_port '%q' "$STREAM_RECORDER_HOST_PORT"
           printf -v q_wsclient_start_delay_seconds '%q' "$WSCLIENT_START_DELAY_SECONDS"
+          printf -v q_deploy_db_preflight_required '%q' "$DEPLOY_DB_PREFLIGHT_REQUIRED"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
-            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds sh scripts/ec2-compose-rollback-gate.sh"
+            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required sh scripts/ec2-compose-rollback-gate.sh"
 
       - name: Show service status
         if: always()

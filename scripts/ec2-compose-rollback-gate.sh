@@ -6,8 +6,11 @@ CANDIDATE_ENV_FILE="${CANDIDATE_ENV_FILE:-.env.next}"
 COMPOSE_ENV_FILE="${COMPOSE_ENV_FILE:-.env}"
 DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-.deploy-state}"
 WSCLIENT_METRICS_HOST_PORT="${WSCLIENT_METRICS_HOST_PORT:-8091}"
+WSCLIENT_CAPTURE_METRICS_HOST_PORT="${WSCLIENT_CAPTURE_METRICS_HOST_PORT:-8093}"
 STREAM_TAP_HOST_PORT="${STREAM_TAP_HOST_PORT:-8080}"
+STREAM_RECORDER_HOST_PORT="${STREAM_RECORDER_HOST_PORT:-8092}"
 WSCLIENT_START_DELAY_SECONDS="${WSCLIENT_START_DELAY_SECONDS:-20}"
+DEPLOY_DB_PREFLIGHT_REQUIRED="${DEPLOY_DB_PREFLIGHT_REQUIRED:-false}"
 
 down_all_profiles() {
     sudo docker compose --env-file "$1" \
@@ -37,6 +40,9 @@ diagnose_profile() {
     if [ "$DEPLOY_PROFILE" = "cluster-live" ]; then
         log "Recent wsclient/streamtap logs:"
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 wsclient streamtap >&2 || true
+    elif [ "$DEPLOY_PROFILE" = "recording-capture" ]; then
+        log "Recent wsclient-capture/stream-recorder logs:"
+        sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 wsclient-capture stream-recorder >&2 || true
     fi
 }
 
@@ -49,14 +55,68 @@ numeric_or_default() {
     esac
 }
 
-cluster_live_health_smoke() {
-    if [ "$DEPLOY_PROFILE" != "cluster-live" ]; then
-        log "Skipping cluster-live health smoke checks for DEPLOY_PROFILE=$DEPLOY_PROFILE."
+env_file_value() {
+    env_file="$1"
+    key="$2"
+    if [ ! -f "$env_file" ]; then
+        return 0
+    fi
+    sed -n "s/^${key}=//p" "$env_file" | tail -n 1
+}
+
+is_true() {
+    case "$1" in
+        true|TRUE|True|1|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+db_preflight_service() {
+    case "$DEPLOY_PROFILE" in
+        cluster-live) printf '%s\n' wsclient ;;
+        recording-capture) printf '%s\n' wsclient-capture ;;
+        *) printf '%s\n' "" ;;
+    esac
+}
+
+run_db_release_preflight() {
+    env_file="$1"
+    service="$(db_preflight_service)"
+    if [ -z "$service" ]; then
+        log "Skipping DB release preflight for DEPLOY_PROFILE=$DEPLOY_PROFILE."
         return 0
     fi
 
-    wsclient_url="http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health"
-    streamtap_url="http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"
+    required="$(env_file_value "$env_file" DEPLOY_DB_PREFLIGHT_REQUIRED)"
+    if [ -z "$required" ]; then
+        required="$DEPLOY_DB_PREFLIGHT_REQUIRED"
+    fi
+    db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
+
+    if [ -z "$db_url" ] && ! is_true "$required"; then
+        log "Skipping DB release preflight: DB_WRITER_DATABASE_URL is empty and DEPLOY_DB_PREFLIGHT_REQUIRED=$required."
+        return 0
+    fi
+    if [ -z "$db_url" ]; then
+        log "DB release preflight required but DB_WRITER_DATABASE_URL is empty."
+        return 1
+    fi
+
+    log "Running DB release preflight with candidate service $service before stopping current services."
+    if ! compose_profile "$env_file" run --rm --no-deps -T \
+        -e DEPLOY_DB_PREFLIGHT_REQUIRED="$required" \
+        "$service" java -cp /app/app.jar edu.illinois.group8.storage.db.DbReleasePreflightCli; then
+        log "DB release preflight failed."
+        return 1
+    fi
+    log "DB release preflight passed."
+}
+
+health_smoke_pair() {
+    first_name="$1"
+    first_url="$2"
+    second_name="$3"
+    second_url="$4"
     start_delay="$(numeric_or_default "$WSCLIENT_START_DELAY_SECONDS" 20)"
     if [ "$start_delay" -gt 120 ]; then
         start_delay=120
@@ -66,23 +126,23 @@ cluster_live_health_smoke() {
     timeout_seconds=$((start_delay + 120))
     attempts=$(((timeout_seconds + interval_seconds - 1) / interval_seconds))
     attempt=1
-    wsclient_ok=0
-    streamtap_ok=0
+    first_ok=0
+    second_ok=0
 
     while [ "$attempt" -le "$attempts" ]; do
-        if [ "$wsclient_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$wsclient_url" >/dev/null 2>&1; then
-            log "wsclient health check passed: $wsclient_url"
-            wsclient_ok=1
+        if [ "$first_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$first_url" >/dev/null 2>&1; then
+            log "$first_name health check passed: $first_url"
+            first_ok=1
         fi
-        if [ "$streamtap_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$streamtap_url" >/dev/null 2>&1; then
-            log "streamtap health check passed: $streamtap_url"
-            streamtap_ok=1
+        if [ "$second_ok" -eq 0 ] && curl -fsS --connect-timeout 1 --max-time 2 "$second_url" >/dev/null 2>&1; then
+            log "$second_name health check passed: $second_url"
+            second_ok=1
         fi
-        if [ "$wsclient_ok" -eq 1 ] && [ "$streamtap_ok" -eq 1 ]; then
+        if [ "$first_ok" -eq 1 ] && [ "$second_ok" -eq 1 ]; then
             return 0
         fi
 
-        log "Health checks pending ($attempt/$attempts): wsclient=$wsclient_ok streamtap=$streamtap_ok"
+        log "Health checks pending ($attempt/$attempts): $first_name=$first_ok $second_name=$second_ok"
         if [ "$attempt" -lt "$attempts" ]; then
             sleep "$interval_seconds"
         fi
@@ -91,6 +151,25 @@ cluster_live_health_smoke() {
 
     log "Health smoke check failed after ${timeout_seconds}s."
     return 1
+}
+
+profile_health_smoke() {
+    case "$DEPLOY_PROFILE" in
+        cluster-live)
+            health_smoke_pair \
+                wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health" \
+                streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"
+            ;;
+        recording-capture)
+            health_smoke_pair \
+                wsclient-capture "http://127.0.0.1:${WSCLIENT_CAPTURE_METRICS_HOST_PORT}/health" \
+                stream-recorder "http://127.0.0.1:${STREAM_RECORDER_HOST_PORT}/health"
+            ;;
+        *)
+            log "Skipping health smoke checks for DEPLOY_PROFILE=$DEPLOY_PROFILE."
+            return 0
+            ;;
+    esac
 }
 
 deploy_env() {
@@ -106,6 +185,10 @@ deploy_env() {
     log "Building Docker Compose services for DEPLOY_PROFILE=$DEPLOY_PROFILE before stopping current services."
     if ! compose_profile "$env_file" build; then
         log "Docker Compose build failed."
+        return 1
+    fi
+
+    if ! run_db_release_preflight "$env_file"; then
         return 1
     fi
 
@@ -128,7 +211,7 @@ deploy_env() {
         return 1
     fi
 
-    if ! cluster_live_health_smoke; then
+    if ! profile_health_smoke; then
         diagnose_profile "$env_file"
         return 1
     fi

@@ -189,6 +189,35 @@ assert_ws_reconnect_defaults_aligned() {
     printf 'PASS ws_reconnect_defaults enabled=true initial_ms=1000 max_ms=30000 max_attempts=0\n'
 }
 
+assert_release_gate_defaults_aligned() {
+    rendered="$(service_config_for wsclient-capture --profile recording-capture)"
+    if ! printf '%s\n' "$rendered" | grep -q 'published: "8093"'; then
+        printf 'recording-capture wsclient-capture default host metrics port is not 8093\n' >&2
+        exit 1
+    fi
+    for fallback in \
+        "DEPLOY_DB_PREFLIGHT_REQUIRED: \${{ vars.DEPLOY_DB_PREFLIGHT_REQUIRED || 'false' }}" \
+        "WSCLIENT_CAPTURE_METRICS_HOST_PORT: \${{ vars.WSCLIENT_CAPTURE_METRICS_HOST_PORT || '8093' }}"; do
+        if ! grep -Fq "$fallback" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing release-gate fallback: %s\n' "$fallback" >&2
+            exit 1
+        fi
+    done
+    for env_line in \
+        'DEPLOY_DB_PREFLIGHT_REQUIRED=$DEPLOY_DB_PREFLIGHT_REQUIRED' \
+        'WSCLIENT_CAPTURE_METRICS_HOST_PORT=$WSCLIENT_CAPTURE_METRICS_HOST_PORT'; do
+        if ! grep -Fq "$env_line" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing candidate env line: %s\n' "$env_line" >&2
+            exit 1
+        fi
+    done
+    if ! grep -Fq 'DEPLOY_DB_PREFLIGHT_REQUIRED="${DEPLOY_DB_PREFLIGHT_REQUIRED:-false}"' scripts/ec2-compose-rollback-gate.sh; then
+        printf 'rollback gate DEPLOY_DB_PREFLIGHT_REQUIRED default is not false\n' >&2
+        exit 1
+    fi
+    printf 'PASS release_gate_defaults db_preflight_required=false wsclient_capture_metrics_host_port=8093\n'
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -212,3 +241,4 @@ assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
+assert_release_gate_defaults_aligned
