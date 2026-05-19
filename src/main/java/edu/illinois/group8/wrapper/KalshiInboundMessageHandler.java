@@ -30,7 +30,7 @@ final class KalshiInboundMessageHandler {
     }
 
     void handleInbound(String rawPayload, long receiveTsNs, Instant receiveWallTs) {
-        String clusterPayload = KalshiIngressEnvelope.wrap(rawPayload, receiveTsNs, receiveWallTs, connectionId, null);
+        byte[] clusterPayload = KalshiIngressEnvelope.wrapBytes(rawPayload, receiveTsNs, receiveWallTs, connectionId, null);
         clusterWriter.write(clusterPayload);
         recordRaw(rawPayload, receiveTsNs, receiveWallTs);
         recordRawDb(rawPayload, receiveTsNs, receiveWallTs);
@@ -80,7 +80,7 @@ final class KalshiInboundMessageHandler {
 
     @FunctionalInterface
     interface ClusterWriter {
-        boolean write(String payload);
+        boolean write(byte[] payload);
     }
 
     @FunctionalInterface

@@ -9,12 +9,14 @@ import edu.illinois.group8.storage.db.DbWriterStats;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.storage.db.RawWsDbEventInput;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,7 +35,11 @@ class KalshiInboundMessageHandlerTest {
         handler.handleInbound(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS);
 
         assertEquals(List.of("cluster", "raw", "rawDb"), deps.order);
-        KalshiIngressEnvelope envelope = KalshiIngressEnvelope.parse(deps.clusterPayloads.get(0), -1L);
+        assertArrayEquals(
+            KalshiIngressEnvelope.wrapBytes(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS, CONNECTION_ID, null),
+            deps.clusterPayloads.get(0)
+        );
+        KalshiIngressEnvelope envelope = parseClusterPayload(deps.clusterPayloads.get(0));
         assertTrue(envelope.enveloped());
         assertEquals(rawPayload, envelope.rawPayload());
         assertEquals(RECEIVE_TS_NS, envelope.receiveTsNs());
@@ -58,7 +64,7 @@ class KalshiInboundMessageHandlerTest {
         handler.handleInbound(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS);
 
         assertEquals(List.of("cluster", "rawDb"), deps.order);
-        KalshiIngressEnvelope envelope = KalshiIngressEnvelope.parse(deps.clusterPayloads.get(0), -1L);
+        KalshiIngressEnvelope envelope = parseClusterPayload(deps.clusterPayloads.get(0));
         assertEquals(connectionId, envelope.connectionId());
         assertTrue(connectionId.startsWith("live-"));
     }
@@ -72,6 +78,12 @@ class KalshiInboundMessageHandlerTest {
 
         assertEquals(List.of("cluster", "raw", "rawDb"), deps.order);
         assertEquals(1, deps.clusterPayloads.size());
+        KalshiIngressEnvelope envelope = parseClusterPayload(deps.clusterPayloads.get(0));
+        assertTrue(envelope.enveloped());
+        assertEquals("{bad", envelope.rawPayload());
+        assertEquals(RECEIVE_TS_NS, envelope.receiveTsNs());
+        assertEquals(RECEIVE_WALL_TS.toString(), envelope.receiveWallTs());
+        assertEquals(CONNECTION_ID, envelope.connectionId());
         assertEquals(0, deps.subscribedCallbacks.size());
         assertEquals(0, deps.okCallbacks.size());
         assertEquals(0, deps.errorCallbacks.size());
@@ -175,7 +187,7 @@ class KalshiInboundMessageHandlerTest {
         handler.handleInbound(rawPayload, RECEIVE_TS_NS, RECEIVE_WALL_TS);
 
         assertEquals(List.of("cluster", "rawDb"), deps.order);
-        KalshiIngressEnvelope envelope = KalshiIngressEnvelope.parse(deps.clusterPayloads.get(0), -1L);
+        KalshiIngressEnvelope envelope = parseClusterPayload(deps.clusterPayloads.get(0));
         assertEquals(connection.connectionId(), envelope.connectionId());
         assertEquals(connection.connectionId(), writer.rawInputs.get(0).connectionId());
     }
@@ -238,9 +250,13 @@ class KalshiInboundMessageHandlerTest {
         assertTrue(order.indexOf(after) > order.indexOf(before), after + " should run after " + before);
     }
 
+    private static KalshiIngressEnvelope parseClusterPayload(byte[] payload) {
+        return KalshiIngressEnvelope.parse(new String(payload, StandardCharsets.UTF_8), -1L);
+    }
+
     private static final class RecordingDeps {
         private final List<String> order = new ArrayList<>();
-        private final List<String> clusterPayloads = new ArrayList<>();
+        private final List<byte[]> clusterPayloads = new ArrayList<>();
         private final List<SubscribedCallback> subscribedCallbacks = new ArrayList<>();
         private final List<Long> okCallbacks = new ArrayList<>();
         private final List<ErrorCallback> errorCallbacks = new ArrayList<>();

@@ -28,10 +28,13 @@ class ClientClusterOrchestratorTest {
             metrics,
             ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
         );
+        byte[] message = new byte[] {0, (byte) 0xff, 0x41};
 
-        assertTrue(orchestrator.writeToCluster("ok".getBytes(StandardCharsets.UTF_8)));
+        assertTrue(orchestrator.writeToCluster(message));
 
         assertEquals(1, ingressClient.offerCalls);
+        assertEquals(message.length, ingressClient.lastLength);
+        assertArrayEquals(message, ingressClient.lastPayload);
         assertEquals(0, ingressClient.pollEgressCalls);
         assertEquals(0, idleStrategy.idleCalls);
         assertEquals(0, idleStrategy.resetCalls);

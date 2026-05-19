@@ -42,6 +42,36 @@ public final class KalshiIngressEnvelope {
         String connectionId,
         String replayId
     ) {
+        ObjectNode node = envelopeNode(rawPayload, receiveTsNs, receiveWallTs, connectionId, replayId);
+        try {
+            return MAPPER.writeValueAsString(node);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to serialize Kalshi ingress envelope", e);
+        }
+    }
+
+    public static byte[] wrapBytes(
+        String rawPayload,
+        long receiveTsNs,
+        Instant receiveWallTs,
+        String connectionId,
+        String replayId
+    ) {
+        ObjectNode node = envelopeNode(rawPayload, receiveTsNs, receiveWallTs, connectionId, replayId);
+        try {
+            return MAPPER.writeValueAsBytes(node);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to serialize Kalshi ingress envelope", e);
+        }
+    }
+
+    private static ObjectNode envelopeNode(
+        String rawPayload,
+        long receiveTsNs,
+        Instant receiveWallTs,
+        String connectionId,
+        String replayId
+    ) {
         ObjectNode node = MAPPER.createObjectNode();
         node.put("schema_version", 1);
         node.put("ingress_type", INGRESS_TYPE);
@@ -56,11 +86,7 @@ public final class KalshiIngressEnvelope {
             node.put("replay_id", replayId);
         }
         node.put("raw_payload", rawPayload);
-        try {
-            return MAPPER.writeValueAsString(node);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to serialize Kalshi ingress envelope", e);
-        }
+        return node;
     }
 
     public static KalshiIngressEnvelope parse(String wirePayload, long fallbackReceiveTsNs) {
