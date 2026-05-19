@@ -104,6 +104,10 @@ ordered by recent event time, and serves that startup snapshot without refresh.
 
 ## Curl Smoke Tests
 
+For the persisted-feature demo path, `scripts/db-primary-demo-smoke.sh` wraps
+the `/health`, `/symbols`, `/features`, `/quotes`, and `/datafeed/config`
+checks without requiring `jq`.
+
 ```bash
 curl -s http://127.0.0.1:8090/health | jq
 curl -s http://127.0.0.1:8090/metrics | head

@@ -379,10 +379,13 @@ Recommended demo scope:
 1. Show current architecture and distinguish roadmap.
 2. Seed or reuse local Timescale/Postgres demo rows.
 3. Run `featureplant` from the DB default source.
-4. Run `frontend-adapter` from the DB default source.
-5. Open static chart demo.
+4. Run `frontend-adapter` from persisted `feature_outputs` startup snapshot mode.
+5. Open `frontend/tradingview-lightweight/index.html` against the DB-backed adapter.
 6. Show `/health` and `/metrics`.
 7. Optionally show raw replay dry-run.
+
+The canonical walkthrough is `docs/demo_db_primary_walkthrough.md`; the frontend
+HTTP smoke is `scripts/db-primary-demo-smoke.sh`.
 
 Do not demo as completed:
 
@@ -396,11 +399,11 @@ Do not demo as completed:
 ## Immediate Cleanup Plan
 
 1. Add a status table to README: current / skeleton / planned / removed.
-2. Add a stable sample recording for video demo.
+2. Add/verify stable DB-seeded demo rows.
 3. Fix README run commands for `single-node-local` and raw replay.
 4. Add Maven Wrapper.
 5. Add CI gates: `mvn test`, `mvn package`, Docker build, compose config.
-6. Add health smoke checks for frontend adapter, streamtap, recorder.
+6. Add streamtap/recorder health smoke checks for non-demo profiles.
 7. Default HTTP admin endpoints to localhost or add auth.
 8. Define remaining DB migration: DB query API and recording import/export
    boundaries.
