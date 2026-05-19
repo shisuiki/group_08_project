@@ -12,12 +12,16 @@ import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -174,6 +178,38 @@ class FrontendAdapterMainTest {
     }
 
     @Test
+    void featureOutputRefreshWakesStoreSequenceWaiters() throws Exception {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "10",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "3"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 10);
+        AtomicInteger calls = new AtomicInteger();
+        FeatureOutputRefreshService service = new FeatureOutputRefreshService(config, store, ignored -> {
+            return switch (calls.getAndIncrement()) {
+                case 0 -> List.of(row("feature-1", "2026-05-20T00:00:01Z", 1_000L, "seed"));
+                case 1 -> List.of(row("feature-2", "2026-05-20T00:00:02Z", 2_000L, "refresh"));
+                default -> List.of();
+            };
+        });
+        assertEquals(1, service.seedOnce());
+        long after = store.sequence();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Long> waiter = executor.submit(() -> store.waitForSequenceAfter(after, 1_000L));
+            Thread.sleep(25L);
+            assertFalse(waiter.isDone());
+
+            assertEquals(1, service.refreshOnce());
+
+            assertEquals(after + 1L, waiter.get(2, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void featureOutputRefreshCloseStopsBackgroundLoop() throws Exception {
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
             "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
@@ -260,6 +296,19 @@ class FrontendAdapterMainTest {
         assertEquals(FrontendMarketMetadataCatalog.LoadStatus.UNAVAILABLE, catalog.loadStatus());
         assertEquals("auto", catalog.source());
         assertTrue(catalog.error().contains("metadata unavailable"));
+    }
+
+    @Test
+    void lightweightFrontendUsesQuoteUpdatesWithStaleLoopGuard() throws Exception {
+        String app = Files.readString(Path.of("frontend/tradingview-lightweight/app.js"));
+
+        assertTrue(app.contains("/quotes/updates?symbols="));
+        assertTrue(app.contains("quotesLoopGeneration"));
+        assertTrue(app.contains("AbortController"));
+        assertTrue(app.contains("staleQuoteLoop"));
+        assertTrue(app.contains("startQuotesFallback"));
+        assertTrue(app.contains("QUOTES_UPDATE_ERROR_LIMIT"));
+        assertTrue(app.contains("/quotes?symbols="));
     }
 
     @Test

@@ -33,6 +33,8 @@ public class FrontendAdapterServer {
     private static final int MAX_FEATURE_LIMIT = 500;
     private static final int DEFAULT_MARKET_LIMIT = 100;
     private static final int MAX_MARKET_LIMIT = 500;
+    private static final long DEFAULT_QUOTE_UPDATE_TIMEOUT_MS = 15_000L;
+    private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
 
     public record FeaturePlantStats(long eventsIn, long eventsOut, long errors) {
         public static final FeaturePlantStats EMPTY = new FeaturePlantStats(0L, 0L, 0L);
@@ -48,6 +50,10 @@ public class FrontendAdapterServer {
     private final ConcurrentHashMap<String, LongAdder> requestCounters = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LongAdder> requestDurationCount = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, AtomicLong> requestDurationNanosSum = new ConcurrentHashMap<>();
+    private final LongAdder quoteUpdateRequests = new LongAdder();
+    private final LongAdder quoteUpdateChanged = new LongAdder();
+    private final LongAdder quoteUpdateTimeouts = new LongAdder();
+    private final LongAdder quoteUpdateClientDisconnects = new LongAdder();
     private final long startedAtMs = System.currentTimeMillis();
     private HttpServer httpServer;
 
@@ -94,6 +100,7 @@ public class FrontendAdapterServer {
         bind("/datafeed/history", this::handleDatafeedHistory);
         bind("/datafeed/time", this::handleDatafeedTime);
         bind("/symbols", this::handleSymbols);
+        bind("/quotes/updates", this::handleQuoteUpdates);
         bind("/quotes", this::handleQuotes);
         bind("/features", this::handleFeatures);
         bind("/markets", this::handleMarkets);
@@ -284,31 +291,89 @@ public class FrontendAdapterServer {
 
     private void handleQuotes(HttpExchange exchange) throws IOException {
         Map<String, String> params = parseQuery(exchange.getRequestURI());
-        String csv = params.getOrDefault("symbols", "");
-        List<Map<String, Object>> quotes = new ArrayList<>();
-        for (String symbol : csv.split(",")) {
-            String trimmed = symbol.trim();
-            if (trimmed.isEmpty()) {
-                continue;
+        List<String> symbols = parseSymbols(params.getOrDefault("symbols", ""));
+        writeJson(exchange, 200, quotesBody(symbols, store.sequence()));
+    }
+
+    private void handleQuoteUpdates(HttpExchange exchange) throws IOException {
+        quoteUpdateRequests.increment();
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        List<String> symbols = parseSymbols(params.getOrDefault("symbols", ""));
+        long timeoutMs;
+        long after;
+        boolean afterProvided = params.containsKey("after") && !params.getOrDefault("after", "").isBlank();
+        try {
+            timeoutMs = parseQuoteUpdateTimeoutMs(params.get("timeout_ms"));
+            after = afterProvided
+                ? parseNonNegativeLong(params.get("after"), "after")
+                : store.sequence();
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+
+        long startedNs = System.nanoTime();
+        long sequence = store.sequence();
+        boolean changed = sequence > after;
+        if (afterProvided && !changed) {
+            try {
+                sequence = store.waitForSequenceAfter(after, timeoutMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                writeError(exchange, 503, "interrupted while waiting for quote updates");
+                return;
             }
-            Optional<FeatureOutput> latest = store.latest(trimmed, FrontendFeatureStore.BBO_FEATURE);
+            changed = sequence > after;
+        }
+        if (changed) {
+            quoteUpdateChanged.increment();
+        } else if (afterProvided) {
+            quoteUpdateTimeouts.increment();
+        }
+
+        Map<String, Object> body = quotesBody(symbols, sequence);
+        body.put("changed", changed);
+        body.put("after", after);
+        body.put("timeout_ms", timeoutMs);
+        body.put("wait_ms", (System.nanoTime() - startedNs) / 1_000_000L);
+        body.put("server_ts_ms", System.currentTimeMillis());
+        try {
+            writeJson(exchange, 200, body);
+        } catch (IOException e) {
+            quoteUpdateClientDisconnects.increment();
+            throw e;
+        }
+    }
+
+    private Map<String, Object> quotesBody(List<String> symbols, long sequence) {
+        List<Map<String, Object>> quotes = new ArrayList<>();
+        for (String symbol : symbols) {
+            Optional<FeatureOutput> latest = store.latest(symbol, FrontendFeatureStore.BBO_FEATURE);
             Map<String, Object> quote = new LinkedHashMap<>();
-            quote.put("symbol", trimmed);
+            quote.put("symbol", symbol);
             if (latest.isPresent()) {
                 FeatureOutput out = latest.get();
                 quote.put("bid_micros", out.values().get("bid_price_micros"));
                 quote.put("ask_micros", out.values().get("ask_price_micros"));
                 quote.put("midpoint_micros", out.values().get("midpoint_micros"));
                 quote.put("event_ts_ms", out.eventTsMs());
+                quote.put("source_event_id", out.sourceEventId());
+                quote.put("feature_name", out.featureName());
             } else {
                 quote.put("bid_micros", null);
                 quote.put("ask_micros", null);
                 quote.put("midpoint_micros", null);
                 quote.put("event_ts_ms", null);
+                quote.put("source_event_id", null);
+                quote.put("feature_name", null);
             }
             quotes.add(quote);
         }
-        writeJson(exchange, 200, Map.of("quotes", quotes));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("sequence", sequence);
+        body.put("server_ts_ms", System.currentTimeMillis());
+        body.put("quotes", quotes);
+        return body;
     }
 
     private void handleFeatures(HttpExchange exchange) throws IOException {
@@ -374,7 +439,14 @@ public class FrontendAdapterServer {
         Map<String, Object> storeView = new LinkedHashMap<>();
         storeView.put("symbols", store.symbolCount());
         storeView.put("total_features", store.totalAccepted());
+        storeView.put("sequence", store.sequence());
         health.put("store", storeView);
+        Map<String, Object> quoteUpdatesView = new LinkedHashMap<>();
+        quoteUpdatesView.put("requests", quoteUpdateRequests.sum());
+        quoteUpdatesView.put("changed", quoteUpdateChanged.sum());
+        quoteUpdatesView.put("timeouts", quoteUpdateTimeouts.sum());
+        quoteUpdatesView.put("client_disconnects", quoteUpdateClientDisconnects.sum());
+        health.put("quote_updates", quoteUpdatesView);
         Map<String, Object> metadataView = new LinkedHashMap<>();
         metadataView.put("source", metadataCatalog.source());
         metadataView.put("status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT));
@@ -395,8 +467,21 @@ public class FrontendAdapterServer {
     private void handleMetrics(HttpExchange exchange) throws IOException {
         metrics.setGauge("frontend_adapter_symbols", store.symbolCount());
         metrics.setGauge("frontend_adapter_features_total", store.totalAccepted());
+        metrics.setGauge("frontend_adapter_store_sequence", store.sequence());
         StringBuilder body = new StringBuilder();
         body.append(metrics.prometheusText());
+        body.append("frontend_adapter_quote_update_requests_total ")
+            .append(quoteUpdateRequests.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_update_changed_total ")
+            .append(quoteUpdateChanged.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_update_timeouts_total ")
+            .append(quoteUpdateTimeouts.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_update_client_disconnects_total ")
+            .append(quoteUpdateClientDisconnects.sum())
+            .append('\n');
         requestCounters.forEach((path, counter) -> body
             .append("frontend_adapter_http_requests_total{path=\"")
             .append(escape(path))
@@ -506,6 +591,44 @@ public class FrontendAdapterServer {
             throw new IllegalArgumentException("limit must be positive");
         }
         return Math.min(parsed, maxLimit);
+    }
+
+    private static List<String> parseSymbols(String csv) {
+        List<String> symbols = new ArrayList<>();
+        for (String symbol : csv.split(",")) {
+            String trimmed = symbol.trim();
+            if (!trimmed.isEmpty()) {
+                symbols.add(trimmed);
+            }
+        }
+        return symbols;
+    }
+
+    private static long parseQuoteUpdateTimeoutMs(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_QUOTE_UPDATE_TIMEOUT_MS;
+        }
+        long parsed = parseNonNegativeLong(raw, "timeout_ms");
+        if (parsed < 1L) {
+            throw new IllegalArgumentException("timeout_ms must be positive");
+        }
+        return Math.min(parsed, MAX_QUOTE_UPDATE_TIMEOUT_MS);
+    }
+
+    private static long parseNonNegativeLong(String raw, String name) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        long parsed;
+        try {
+            parsed = Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(name + " must be an integer");
+        }
+        if (parsed < 0L) {
+            throw new IllegalArgumentException(name + " must be non-negative");
+        }
+        return parsed;
     }
 
     private static long toMillis(long timestamp) {

@@ -7,9 +7,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FrontendFeatureStoreTest {
@@ -77,6 +82,51 @@ class FrontendFeatureStoreTest {
         store.accept(bbo(null, 100L, 5_000_000L));
         assertTrue(store.symbols().isEmpty());
         assertEquals(0L, store.totalAccepted());
+        assertEquals(0L, store.sequence());
+    }
+
+    @Test
+    void sequenceAdvancesOnlyForAcceptedFeatures() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+
+        assertEquals(0L, store.sequence());
+        store.accept(null);
+        store.accept(bbo("", 100L, 5_000_000L));
+        assertEquals(0L, store.sequence());
+
+        store.accept(bbo("MKT-1", 100L, 5_000_000L));
+        store.accept(trade("MKT-1", 101L, "T-1"));
+
+        assertEquals(2L, store.sequence());
+        assertEquals(2L, store.totalAccepted());
+    }
+
+    @Test
+    void waitForSequenceAfterReturnsWhenAcceptAdvancesSequence() throws Exception {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Long> waiter = executor.submit(() -> store.waitForSequenceAfter(0L, 1_000L));
+            Thread.sleep(25L);
+            assertFalse(waiter.isDone());
+
+            store.accept(bbo("MKT-1", 100L, 5_000_000L));
+
+            assertEquals(1L, waiter.get(2, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void waitForSequenceAfterTimesOutWithoutAdvance() throws Exception {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        long startedNs = System.nanoTime();
+
+        long sequence = store.waitForSequenceAfter(0L, 25L);
+
+        assertEquals(0L, sequence);
+        assertNotEquals(0L, System.nanoTime() - startedNs);
     }
 
     static FeatureOutput bbo(String market, long ts, long midpoint) {

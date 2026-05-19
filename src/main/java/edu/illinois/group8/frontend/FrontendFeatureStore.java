@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class FrontendFeatureStore {
@@ -24,6 +25,7 @@ public class FrontendFeatureStore {
     private final Map<String, Deque<FeatureOutput>> byMarket = new LinkedHashMap<>();
     private final Map<String, Map<String, FeatureOutput>> latestByMarket = new HashMap<>();
     private final AtomicLong totalAccepted = new AtomicLong();
+    private long sequence;
 
     public FrontendFeatureStore(int maxFeaturesPerMarket, int maxSymbolsIndexed) {
         if (maxFeaturesPerMarket < 1) {
@@ -65,6 +67,8 @@ public class FrontendFeatureStore {
             .computeIfAbsent(market, ignored -> new HashMap<>())
             .put(out.featureName(), out);
         totalAccepted.incrementAndGet();
+        sequence++;
+        notifyAll();
     }
 
     public synchronized List<FeatureOutput> snapshot(String marketTicker, String featureName) {
@@ -101,6 +105,26 @@ public class FrontendFeatureStore {
 
     public long totalAccepted() {
         return totalAccepted.get();
+    }
+
+    public synchronized long sequence() {
+        return sequence;
+    }
+
+    public synchronized long waitForSequenceAfter(long after, long timeoutMs) throws InterruptedException {
+        if (timeoutMs < 0) {
+            throw new IllegalArgumentException("timeoutMs must be non-negative");
+        }
+        long deadlineNs = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (sequence <= after) {
+            long remainingNs = deadlineNs - System.nanoTime();
+            if (remainingNs <= 0L) {
+                break;
+            }
+            long waitMs = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNs));
+            wait(waitMs);
+        }
+        return sequence;
     }
 
     public List<Bar> bars(String marketTicker, long fromMs, long toMs, BarResolution resolution) {

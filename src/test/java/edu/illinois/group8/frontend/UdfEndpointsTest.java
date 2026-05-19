@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -184,9 +186,42 @@ class UdfEndpointsTest {
         assertTrue(symbols.path("symbols").isArray());
         assertTrue(symbols.path("symbols").size() >= 1);
         JsonNode quotes = getJson("/quotes?symbols=MKT-1,MKT-MISSING");
+        assertTrue(quotes.path("sequence").asLong() > 0L);
         assertEquals(2, quotes.path("quotes").size());
         assertEquals("MKT-1", quotes.path("quotes").get(0).path("symbol").asText());
         assertNotNull(quotes.path("quotes").get(0).path("midpoint_micros"));
+        assertEquals("evt-5000", quotes.path("quotes").get(0).path("source_event_id").asText());
+    }
+
+    @Test
+    void quoteUpdatesBootstrapAndStaleAfterReturnImmediately() throws Exception {
+        JsonNode bootstrap = getJson("/quotes/updates?symbols=MKT-1");
+
+        assertFalse(bootstrap.path("changed").asBoolean());
+        assertTrue(bootstrap.path("sequence").asLong() > 0L);
+        assertEquals(1, bootstrap.path("quotes").size());
+        assertEquals("MKT-1", bootstrap.path("quotes").get(0).path("symbol").asText());
+
+        JsonNode stale = getJson("/quotes/updates?symbols=MKT-1&after=0&timeout_ms=1000");
+
+        assertTrue(stale.path("changed").asBoolean());
+        assertEquals(bootstrap.path("sequence").asLong(), stale.path("sequence").asLong());
+        assertEquals(1, stale.path("quotes").size());
+    }
+
+    @Test
+    void quoteUpdatesTimesOutBoundedlyWhenNoRowsArrive() throws Exception {
+        long sequence = getJson("/quotes?symbols=MKT-1").path("sequence").asLong();
+        long startedNs = System.nanoTime();
+
+        JsonNode body = getJson("/quotes/updates?symbols=MKT-1&after=" + sequence + "&timeout_ms=25");
+
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNs);
+        assertFalse(body.path("changed").asBoolean());
+        assertEquals(sequence, body.path("sequence").asLong());
+        assertTrue(elapsedMs < 2_000L, "long-poll timeout was not bounded: " + elapsedMs);
+        JsonNode health = getJson("/health");
+        assertTrue(health.path("quote_updates").path("timeouts").asLong() >= 1L);
     }
 
     @Test
@@ -228,6 +263,8 @@ class UdfEndpointsTest {
         assertFalse(body.path("feature_output_refresh").path("enabled").asBoolean());
         assertEquals(42L, body.path("feature_plant").path("events_in").asLong());
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
+        assertTrue(body.path("store").path("sequence").asLong() > 0L);
+        assertEquals(0L, body.path("quote_updates").path("timeouts").asLong());
     }
 
     @Test
@@ -309,12 +346,65 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void quoteUpdatesWakeWhenFeatureOutputRefreshAcceptsRows() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "10"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        AtomicInteger reads = new AtomicInteger();
+        FeatureOutputRefreshService refresh = new FeatureOutputRefreshService(config, store, request -> {
+            return switch (reads.getAndIncrement()) {
+                case 0 -> List.of(row("feature-1", "2026-05-20T00:00:01Z", 1_000L, "seed", 500_000L));
+                case 1 -> List.of(row("feature-2", "2026-05-20T00:00:02Z", 2_000L, "refresh", 600_000L));
+                default -> List.of();
+            };
+        });
+        refresh.seedOnce();
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            refresh::status
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+        long sequence = getJson("/quotes?symbols=MKT-1").path("sequence").asLong();
+
+        CompletableFuture<HttpResponse<String>> pending = client.sendAsync(
+            HttpRequest.newBuilder(URI.create(baseUrl
+                + "/quotes/updates?symbols=MKT-1&after=" + sequence + "&timeout_ms=1000")).GET().build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+        Thread.sleep(25L);
+        assertFalse(pending.isDone());
+
+        refresh.refreshOnce();
+
+        HttpResponse<String> response = pending.get(2, TimeUnit.SECONDS);
+        assertEquals(200, response.statusCode());
+        JsonNode body = MAPPER.readTree(response.body());
+        assertTrue(body.path("changed").asBoolean());
+        assertTrue(body.path("sequence").asLong() > sequence);
+        JsonNode quote = body.path("quotes").get(0);
+        assertEquals(600_000L, quote.path("midpoint_micros").asLong());
+        assertEquals("refresh", quote.path("source_event_id").asText());
+    }
+
+    @Test
     void metricsExposesRequiredKeys() throws Exception {
         getJson("/symbols");
         HttpResponse<String> metrics = get("/metrics");
         String body = metrics.body();
         assertTrue(body.contains("frontend_adapter_symbols"));
         assertTrue(body.contains("frontend_adapter_features_total"));
+        assertTrue(body.contains("frontend_adapter_store_sequence"));
+        assertTrue(body.contains("frontend_adapter_quote_update_requests_total"));
+        assertTrue(body.contains("frontend_adapter_quote_update_timeouts_total"));
         assertTrue(body.contains("frontend_adapter_http_requests_total{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_sum{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_count{path=\"/symbols\"}"));

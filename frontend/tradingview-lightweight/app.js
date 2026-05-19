@@ -2,6 +2,9 @@
     'use strict';
 
     const QUOTES_POLL_MS = 2000;
+    const QUOTES_UPDATE_TIMEOUT_MS = 15000;
+    const QUOTES_UPDATE_ERROR_LIMIT = 3;
+    const QUOTES_UPDATE_RETRY_MS = 500;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
 
     const dom = {
@@ -65,6 +68,10 @@
     });
 
     let quotesTimer = null;
+    let quotesAbortController = null;
+    let quotesLoopGeneration = 0;
+    let quoteSequence = null;
+    let quoteUpdateErrors = 0;
 
     function setStatus(message, tone) {
         dom.statusLine.textContent = message;
@@ -78,13 +85,17 @@
         return dom.adapterUrl.value.trim().replace(/\/+$/, '');
     }
 
-    async function fetchJson(path) {
-        const url = adapterBase() + path;
-        const response = await fetch(url, { mode: 'cors' });
+    async function fetchJsonFromBase(base, path, options) {
+        const url = base + path;
+        const response = await fetch(url, Object.assign({ mode: 'cors' }, options || {}));
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} from ${path}`);
         }
         return response.json();
+    }
+
+    async function fetchJson(path, options) {
+        return fetchJsonFromBase(adapterBase(), path, options);
     }
 
     async function loadConfig() {
@@ -203,33 +214,61 @@
         }
     }
 
-    async function pollQuotes() {
-        const symbol = dom.symbolSelect.value;
-        if (!symbol) {
+    function renderMissingQuote(symbol) {
+        dom.live.symbol.textContent = symbol;
+        dom.live.bid.textContent = '—';
+        dom.live.ask.textContent = '—';
+        dom.live.midpoint.textContent = '—';
+        dom.live.ts.textContent = '—';
+        dom.live.updated.textContent = new Date().toLocaleTimeString();
+    }
+
+    function renderQuote(symbol, quote) {
+        if (!quote) {
+            renderMissingQuote(symbol);
             return;
         }
+        dom.live.symbol.textContent = quote.symbol;
+        dom.live.bid.textContent = formatMicros(quote.bid_micros);
+        dom.live.ask.textContent = formatMicros(quote.ask_micros);
+        dom.live.midpoint.textContent = formatMicros(quote.midpoint_micros);
+        dom.live.ts.textContent = quote.event_ts_ms == null
+            ? '—'
+            : new Date(quote.event_ts_ms).toISOString();
+        dom.live.updated.textContent = new Date().toLocaleTimeString();
+    }
+
+    function staleQuoteLoop(generation, symbol, base) {
+        return generation !== quotesLoopGeneration ||
+            symbol !== dom.symbolSelect.value ||
+            base !== adapterBase();
+    }
+
+    function applyQuoteResponse(data, symbol) {
+        if (typeof data.sequence === 'number') {
+            quoteSequence = data.sequence;
+        }
+        const quote = (data.quotes || []).find(q => q.symbol === symbol);
+        renderQuote(symbol, quote);
+    }
+
+    async function pollQuotes(generation, symbol, base) {
+        if (!symbol) {
+            return false;
+        }
         try {
-            const data = await fetchJson(`/quotes?symbols=${encodeURIComponent(symbol)}`);
-            const quote = (data.quotes || []).find(q => q.symbol === symbol);
-            if (!quote) {
-                dom.live.symbol.textContent = symbol;
-                dom.live.bid.textContent = '—';
-                dom.live.ask.textContent = '—';
-                dom.live.midpoint.textContent = '—';
-                dom.live.ts.textContent = '—';
-                dom.live.updated.textContent = new Date().toLocaleTimeString();
-                return;
+            const data = await fetchJsonFromBase(base, `/quotes?symbols=${encodeURIComponent(symbol)}`);
+            if (staleQuoteLoop(generation, symbol, base)) {
+                return false;
             }
-            dom.live.symbol.textContent = quote.symbol;
-            dom.live.bid.textContent = formatMicros(quote.bid_micros);
-            dom.live.ask.textContent = formatMicros(quote.ask_micros);
-            dom.live.midpoint.textContent = formatMicros(quote.midpoint_micros);
-            dom.live.ts.textContent = quote.event_ts_ms == null
-                ? '—'
-                : new Date(quote.event_ts_ms).toISOString();
-            dom.live.updated.textContent = new Date().toLocaleTimeString();
+            applyQuoteResponse(data, symbol);
+            return true;
         } catch (err) {
+            if (staleQuoteLoop(generation, symbol, base)) {
+                return false;
+            }
             dom.live.updated.textContent = `error: ${err.message}`;
+            return false;
         }
     }
 
@@ -241,12 +280,81 @@
         return dollars.toFixed(4);
     }
 
-    function restartQuotesPolling() {
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function stopQuotesLoop() {
         if (quotesTimer != null) {
             clearInterval(quotesTimer);
+            quotesTimer = null;
         }
-        pollQuotes();
-        quotesTimer = setInterval(pollQuotes, QUOTES_POLL_MS);
+        if (quotesAbortController != null) {
+            quotesAbortController.abort();
+            quotesAbortController = null;
+        }
+    }
+
+    function startQuotesFallback(generation, symbol, base) {
+        if (staleQuoteLoop(generation, symbol, base)) {
+            return;
+        }
+        stopQuotesLoop();
+        pollQuotes(generation, symbol, base);
+        quotesTimer = setInterval(() => pollQuotes(generation, symbol, base), QUOTES_POLL_MS);
+    }
+
+    async function runQuotesLongPoll(generation) {
+        const symbol = dom.symbolSelect.value;
+        const base = adapterBase();
+        if (!symbol) {
+            return;
+        }
+        await pollQuotes(generation, symbol, base);
+        while (!staleQuoteLoop(generation, symbol, base)) {
+            const after = Number.isFinite(quoteSequence) ? quoteSequence : 0;
+            const controller = new AbortController();
+            quotesAbortController = controller;
+            try {
+                const data = await fetchJsonFromBase(
+                    base,
+                    `/quotes/updates?symbols=${encodeURIComponent(symbol)}` +
+                        `&after=${encodeURIComponent(after)}` +
+                        `&timeout_ms=${QUOTES_UPDATE_TIMEOUT_MS}`,
+                    { signal: controller.signal }
+                );
+                if (quotesAbortController === controller) {
+                    quotesAbortController = null;
+                }
+                if (staleQuoteLoop(generation, symbol, base)) {
+                    return;
+                }
+                quoteUpdateErrors = 0;
+                applyQuoteResponse(data, symbol);
+            } catch (err) {
+                if (quotesAbortController === controller) {
+                    quotesAbortController = null;
+                }
+                if (err.name === 'AbortError' || staleQuoteLoop(generation, symbol, base)) {
+                    return;
+                }
+                quoteUpdateErrors += 1;
+                dom.live.updated.textContent = `error: ${err.message}`;
+                if (quoteUpdateErrors >= QUOTES_UPDATE_ERROR_LIMIT) {
+                    startQuotesFallback(generation, symbol, base);
+                    return;
+                }
+                await sleep(QUOTES_UPDATE_RETRY_MS);
+            }
+        }
+    }
+
+    function restartQuotesPolling() {
+        quotesLoopGeneration += 1;
+        stopQuotesLoop();
+        quoteSequence = null;
+        quoteUpdateErrors = 0;
+        runQuotesLongPoll(quotesLoopGeneration);
     }
 
     dom.refreshSymbols.addEventListener('click', () => {
@@ -259,6 +367,8 @@
         loadHistory();
     });
     dom.adapterUrl.addEventListener('change', () => {
+        quotesLoopGeneration += 1;
+        stopQuotesLoop();
         loadConfig();
         loadSymbols();
     });
