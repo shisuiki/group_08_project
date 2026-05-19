@@ -99,24 +99,6 @@ class ClientClusterOrchestratorTest {
     }
 
     @Test
-    void writeToClusterStringUsesUtf8ByteLength() {
-        BackendMetrics metrics = new BackendMetrics();
-        FakeIngressClient ingressClient = new FakeIngressClient(1L);
-        ClientClusterOrchestrator orchestrator = orchestrator(
-            ingressClient,
-            metrics,
-            ClientClusterOrchestrator.DEFAULT_MAX_OFFER_ATTEMPTS
-        );
-        String message = "é汉";
-        byte[] expected = message.getBytes(StandardCharsets.UTF_8);
-
-        assertTrue(orchestrator.writeToCluster(message));
-
-        assertEquals(expected.length, ingressClient.lastLength);
-        assertArrayEquals(expected, ingressClient.lastPayload);
-    }
-
-    @Test
     void interruptedCallerDropsAndPreservesInterruptFlag() {
         BackendMetrics metrics = new BackendMetrics();
         FakeIngressClient ingressClient = new FakeIngressClient(-1L);

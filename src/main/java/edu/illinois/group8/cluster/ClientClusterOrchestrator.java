@@ -1,7 +1,6 @@
 package edu.illinois.group8.cluster;
 
 import edu.illinois.group8.metrics.BackendMetrics;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -89,12 +88,6 @@ public class ClientClusterOrchestrator {
     public synchronized boolean writeToCluster(byte[] message) {
         buf.putBytes(0, message);
         return offerBounded(message.length);
-    }
-
-    public synchronized boolean writeToCluster(String message) {
-        byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
-        buf.putBytes(0, bytes);
-        return offerBounded(bytes.length);
     }
 
     private boolean offerBounded(int length) {
