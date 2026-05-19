@@ -21,12 +21,16 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.aeron.Publication;
 import io.aeron.cluster.service.Cluster.Role;
+import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -152,6 +156,77 @@ class ESBClusteredServiceTest {
         assertThrows(IllegalStateException.class, () -> service.restoreSnapshotPayload(new byte[] {'{', '}'}));
     }
 
+    @Test
+    void offerSnapshotPayloadRetriesBackpressureThenSucceeds() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost", testProcessor());
+        CountingIdleStrategy idleStrategy = new CountingIdleStrategy();
+        AtomicInteger offerCalls = new AtomicInteger();
+        byte[] payload = new byte[] {1, 2, 3, 4};
+
+        service.offerSnapshotPayload(payload, (buffer, offset, length) -> {
+            assertEquals(payload.length, length);
+            byte[] offeredPayload = new byte[length];
+            buffer.getBytes(offset, offeredPayload);
+            assertArrayEquals(payload, offeredPayload);
+            return offerCalls.incrementAndGet() == 1 ? Publication.BACK_PRESSURED : 7L;
+        }, idleStrategy);
+
+        assertEquals(2, offerCalls.get());
+        assertEquals(1, idleStrategy.resetCalls);
+        assertEquals(1, idleStrategy.idleCalls);
+    }
+
+    @Test
+    void offerSnapshotPayloadRejectsTerminalStatus() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost", testProcessor());
+        long[] terminalStatuses = {
+            Publication.CLOSED,
+            Publication.NOT_CONNECTED,
+            Publication.MAX_POSITION_EXCEEDED
+        };
+
+        for (long status : terminalStatuses) {
+            CountingIdleStrategy idleStrategy = new CountingIdleStrategy();
+            IllegalStateException exception = assertThrows(IllegalStateException.class, () ->
+                service.offerSnapshotPayload(new byte[] {1}, (buffer, offset, length) -> status, idleStrategy));
+
+            assertTrue(exception.getMessage().contains(Publication.errorString(status)));
+            assertEquals(1, idleStrategy.resetCalls);
+            assertEquals(0, idleStrategy.idleCalls);
+        }
+    }
+
+    @Test
+    void offerSnapshotPayloadRejectsSustainedBackpressure() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost", testProcessor());
+        CountingIdleStrategy idleStrategy = new CountingIdleStrategy();
+        AtomicInteger offerCalls = new AtomicInteger();
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () ->
+            service.offerSnapshotPayload(new byte[] {1}, (buffer, offset, length) -> {
+                offerCalls.incrementAndGet();
+                return Publication.BACK_PRESSURED;
+            }, idleStrategy));
+
+        assertTrue(exception.getMessage().contains(Publication.errorString(Publication.BACK_PRESSURED)));
+        assertEquals(ESBClusteredService.SNAPSHOT_OFFER_MAX_ATTEMPTS, offerCalls.get());
+        assertEquals(1, idleStrategy.resetCalls);
+        assertEquals(ESBClusteredService.SNAPSHOT_OFFER_MAX_ATTEMPTS - 1, idleStrategy.idleCalls);
+    }
+
+    @Test
+    void offerSnapshotPayloadRejectsInvalidArguments() {
+        ESBClusteredService service = new ESBClusteredService("aeron-dir", "localhost", testProcessor());
+        CountingIdleStrategy idleStrategy = new CountingIdleStrategy();
+
+        assertThrows(IllegalArgumentException.class, () ->
+            service.offerSnapshotPayload(null, (buffer, offset, length) -> 1L, idleStrategy));
+        assertThrows(IllegalArgumentException.class, () ->
+            service.offerSnapshotPayload(new byte[] {1}, null, idleStrategy));
+        assertThrows(IllegalStateException.class, () ->
+            service.offerSnapshotPayload(new byte[] {1}, (buffer, offset, length) -> 1L, null));
+    }
+
     private static String tradeMessage(String tradeId, String marketTicker) {
         return "{\"type\":\"trade\",\"sid\":11,\"msg\":{\"trade_id\":\"" + tradeId
             + "\",\"market_ticker\":\"" + marketTicker
@@ -166,6 +241,28 @@ class ESBClusteredServiceTest {
             new CollectingEventPublisher(),
             new BackendMetrics()
         );
+    }
+
+    private static final class CountingIdleStrategy implements IdleStrategy {
+        private int resetCalls;
+        private int idleCalls;
+
+        @Override
+        public void idle(int workCount) {
+            if (workCount <= 0) {
+                idle();
+            }
+        }
+
+        @Override
+        public void idle() {
+            idleCalls++;
+        }
+
+        @Override
+        public void reset() {
+            resetCalls++;
+        }
     }
 
     private static final class RecordingAsyncDbWriter implements AsyncDbWriter {

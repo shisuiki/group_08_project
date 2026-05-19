@@ -9,6 +9,7 @@ import io.aeron.Aeron;
 import io.aeron.ExclusivePublication;
 import io.aeron.FragmentAssembler;
 import io.aeron.Image;
+import io.aeron.Publication;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
@@ -31,6 +32,13 @@ import edu.illinois.group8.storage.db.CanonicalDbSink;
 import edu.illinois.group8.storage.db.DbWriterConfig;
 
 public class ESBClusteredService implements ClusteredService {
+    static final int SNAPSHOT_OFFER_MAX_ATTEMPTS = 1024;
+
+    @FunctionalInterface
+    interface SnapshotOffer {
+        long offer(DirectBuffer buffer, int offset, int length);
+    }
+
     private Cluster cluster;
     private IdleStrategy idleStrategy;
     private Role currentRole = Role.FOLLOWER;
@@ -167,20 +175,65 @@ public class ESBClusteredService implements ClusteredService {
     @Override
     public void onTakeSnapshot(ExclusivePublication snapshotPublication) {
         // Save the current state to a snapshot
-        byte[] snapshotBytes = snapshotPayloadBytes();
+        if (snapshotPublication == null) {
+            throw new IllegalArgumentException("Snapshot publication must not be null.");
+        }
+        offerSnapshotPayload(snapshotPayloadBytes(), snapshotPublication::offer, idleStrategy);
+        System.out.println("created recovery snapshot");
+    }
+
+    void offerSnapshotPayload(byte[] payload, SnapshotOffer offer, IdleStrategy idleStrategy) {
+        if (payload == null) {
+            throw new IllegalArgumentException("Snapshot payload must not be null.");
+        }
+        if (offer == null) {
+            throw new IllegalArgumentException("Snapshot offer must not be null.");
+        }
         if (idleStrategy == null) {
             throw new IllegalStateException("Cluster idle strategy is not initialized.");
         }
+
+        UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(payload.length));
+        buffer.putBytes(0, payload);
         idleStrategy.reset();
 
-        UnsafeBuffer buffer = new UnsafeBuffer(ByteBuffer.allocateDirect(snapshotBytes.length));
-        buffer.putBytes(0, snapshotBytes);
+        long lastResult = Publication.BACK_PRESSURED;
+        for (int attempt = 1; attempt <= SNAPSHOT_OFFER_MAX_ATTEMPTS; attempt++) {
+            long result = offer.offer(buffer, 0, payload.length);
+            if (result >= 0L) {
+                return;
+            }
+            if (isTerminalSnapshotOfferResult(result)) {
+                throw snapshotOfferFailed(result);
+            }
+            if (!isRetryableSnapshotOfferResult(result)) {
+                throw snapshotOfferFailed(result);
+            }
 
-        while (snapshotPublication.offer(buffer, 0, snapshotBytes.length) < 0L) {
-            idleStrategy.idle();
+            lastResult = result;
+            if (attempt < SNAPSHOT_OFFER_MAX_ATTEMPTS) {
+                idleStrategy.idle();
+            }
         }
 
-        System.out.println("created recovery snapshot");
+        throw new IllegalStateException(
+            "Failed to offer ESB cluster snapshot after " + SNAPSHOT_OFFER_MAX_ATTEMPTS
+                + " attempts: " + Publication.errorString(lastResult)
+        );
+    }
+
+    private static boolean isRetryableSnapshotOfferResult(long result) {
+        return result == Publication.BACK_PRESSURED || result == Publication.ADMIN_ACTION;
+    }
+
+    private static boolean isTerminalSnapshotOfferResult(long result) {
+        return result == Publication.CLOSED
+            || result == Publication.NOT_CONNECTED
+            || result == Publication.MAX_POSITION_EXCEEDED;
+    }
+
+    private static IllegalStateException snapshotOfferFailed(long result) {
+        return new IllegalStateException("Failed to offer ESB cluster snapshot: " + Publication.errorString(result));
     }
 
     @Override
