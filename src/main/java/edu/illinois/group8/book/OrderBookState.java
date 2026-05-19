@@ -53,7 +53,7 @@ public class OrderBookState {
                 delta.metadata(),
                 expectedNextSequence,
                 actualSequence,
-                !hasSnapshot ? "delta_before_snapshot" : "market_paused_for_snapshot_recovery"
+                pausedForRecovery ? "market_paused_for_snapshot_recovery" : "delta_before_snapshot"
             ));
         }
 
@@ -111,6 +111,10 @@ public class OrderBookState {
 
     public Long lastSequence() {
         return lastSequence;
+    }
+
+    public void pauseForSnapshotRecovery() {
+        pausedForRecovery = true;
     }
 
     private CanonicalEvent changedTopOfBookEvent(String sourceEventId, EventMetadata metadata, TopOfBook current) {

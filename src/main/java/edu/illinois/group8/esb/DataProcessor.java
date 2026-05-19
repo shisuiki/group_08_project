@@ -191,16 +191,24 @@ public class DataProcessor {
         publish(parseResult.rawSourceEvent(), "raw");
         rawEvents.increment();
 
+        boolean suppressFirstOrderBookDerived = false;
+        CanonicalEvent firstEvent = parseResult.canonicalEvents().isEmpty() ? null : parseResult.canonicalEvents().get(0);
         if (sourceSequenceMonitorEnabled) {
-            CanonicalEvent firstEvent = parseResult.canonicalEvents().isEmpty() ? null : parseResult.canonicalEvents().get(0);
+            boolean sourceSequenceAnomaly = false;
             for (CanonicalEvent generated : sourceSequenceMonitor.apply(firstEvent)) {
+                sourceSequenceAnomaly = true;
                 handleGeneratedEvent(generated);
             }
+            suppressFirstOrderBookDerived = orderBookDerivedEnabled
+                && sourceSequenceAnomaly
+                && orderBookStateManager.pauseForSnapshotRecovery(firstEvent);
         }
 
+        boolean firstCanonicalEvent = true;
         for (CanonicalEvent event : parseResult.canonicalEvents()) {
             observeEventMetrics(event);
-            handleCanonicalEvent(event);
+            handleCanonicalEvent(event, suppressFirstOrderBookDerived && firstCanonicalEvent);
+            firstCanonicalEvent = false;
         }
     }
 
@@ -208,11 +216,11 @@ public class DataProcessor {
         return metrics;
     }
 
-    private void handleCanonicalEvent(CanonicalEvent event) {
+    private void handleCanonicalEvent(CanonicalEvent event, boolean suppressOrderBookDerived) {
         publish(event, "canonical");
         canonicalEventCounter(event.eventType()).increment();
 
-        if (orderBookDerivedEnabled) {
+        if (orderBookDerivedEnabled && !suppressOrderBookDerived) {
             for (CanonicalEvent generated : orderBookStateManager.apply(event).generatedEvents()) {
                 handleGeneratedEvent(generated);
             }

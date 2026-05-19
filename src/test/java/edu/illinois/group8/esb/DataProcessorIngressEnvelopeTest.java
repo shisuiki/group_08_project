@@ -1,9 +1,12 @@
 package edu.illinois.group8.esb;
 
+import edu.illinois.group8.book.OrderBookState;
 import edu.illinois.group8.book.OrderBookStateManager;
+import edu.illinois.group8.book.SourceSequenceMonitor;
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.canonical.MarketTrade;
+import edu.illinois.group8.canonical.SequenceGapEvent;
 import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 import edu.illinois.group8.ingress.KalshiIngressEnvelope;
 import edu.illinois.group8.metrics.BackendMetrics;
@@ -32,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,6 +45,15 @@ class DataProcessorIngressEnvelopeTest {
         """;
     private static final String ORDERBOOK_SNAPSHOT_MESSAGE = """
         {"type":"orderbook_snapshot","sid":11,"seq":2,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4500","10.00"]],"no_dollars_fp":[["0.4000","7.00"]]}}
+        """;
+    private static final String ORDERBOOK_DELTA_SEQ4_MESSAGE = """
+        {"type":"orderbook_delta","sid":11,"seq":4,"msg":{"market_ticker":"M","price_dollars":"0.4600","delta_fp":"1.00","side":"yes","ts_ms":1}}
+        """;
+    private static final String ORDERBOOK_DELTA_SEQ5_MESSAGE = """
+        {"type":"orderbook_delta","sid":11,"seq":5,"msg":{"market_ticker":"M","price_dollars":"0.4700","delta_fp":"1.00","side":"yes","ts_ms":1}}
+        """;
+    private static final String ORDERBOOK_RECOVERY_SNAPSHOT_SEQ6_MESSAGE = """
+        {"type":"orderbook_snapshot","sid":11,"seq":6,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.4800","8.00"]],"no_dollars_fp":[["0.3900","4.00"]]}}
         """;
 
     @Test
@@ -245,6 +258,105 @@ class DataProcessorIngressEnvelopeTest {
     }
 
     @Test
+    void sourceSequenceGapPausesDerivedOrderBookWithoutSuppressingRawOrCanonical() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        OrderBookStateManager orderBookStateManager = new OrderBookStateManager();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            orderBookStateManager,
+            new SourceSequenceMonitor(),
+            true,
+            true,
+            publisher,
+            new BackendMetrics()
+        );
+
+        processor.processMessage(envelope(ORDERBOOK_SNAPSHOT_MESSAGE));
+
+        assertEquals(3, publisher.events().size());
+        OrderBookState state = orderBookStateManager.getState("M");
+        assertFalse(state.pausedForRecovery());
+        assertEquals(Long.valueOf(2L), state.lastSequence());
+        assertEquals(450_000L, state.currentTopOfBook().bidPriceMicros());
+
+        processor.processMessage(envelope(ORDERBOOK_DELTA_SEQ4_MESSAGE));
+
+        assertEquals(6, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(3).eventType());
+        SequenceGapEvent sourceGap = assertInstanceOf(SequenceGapEvent.class, publisher.events().get(4));
+        assertEquals(Long.valueOf(3L), sourceGap.expectedSequence());
+        assertEquals(Long.valueOf(4L), sourceGap.actualSequence());
+        assertEquals("source_sequence_gap", sourceGap.reason());
+        assertEquals("inspect_source_subscription_and_reconnect", sourceGap.recoveryAction());
+        assertEquals("orderbook_delta", publisher.events().get(5).eventType());
+        assertEquals("canonical.orderbook.delta", publisher.events().get(5).streamName());
+        assertTrue(state.pausedForRecovery());
+        assertEquals(Long.valueOf(2L), state.lastSequence());
+        assertEquals(450_000L, state.currentTopOfBook().bidPriceMicros());
+        assertEquals(1L, countEvents(publisher.events(), "top_of_book_update"));
+
+        processor.processMessage(envelope(ORDERBOOK_DELTA_SEQ5_MESSAGE));
+
+        assertEquals(9, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(6).eventType());
+        assertEquals("orderbook_delta", publisher.events().get(7).eventType());
+        SequenceGapEvent recoveryGap = assertInstanceOf(SequenceGapEvent.class, publisher.events().get(8));
+        assertEquals(Long.valueOf(3L), recoveryGap.expectedSequence());
+        assertEquals(Long.valueOf(5L), recoveryGap.actualSequence());
+        assertEquals("market_paused_for_snapshot_recovery", recoveryGap.reason());
+        assertEquals("pause_market_and_request_fresh_snapshot", recoveryGap.recoveryAction());
+        assertTrue(state.pausedForRecovery());
+        assertEquals(Long.valueOf(2L), state.lastSequence());
+        assertEquals(450_000L, state.currentTopOfBook().bidPriceMicros());
+        assertEquals(1L, countEvents(publisher.events(), "top_of_book_update"));
+
+        processor.processMessage(envelope(ORDERBOOK_RECOVERY_SNAPSHOT_SEQ6_MESSAGE));
+
+        assertEquals(12, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(9).eventType());
+        assertFalse(state.pausedForRecovery());
+        assertEquals(Long.valueOf(6L), state.lastSequence());
+        assertEquals(480_000L, state.currentTopOfBook().bidPriceMicros());
+        assertEquals(2L, countEvents(publisher.events(), "top_of_book_update"));
+    }
+
+    @Test
+    void sourceSequenceGapDoesNotCreateDerivedStateWhenOrderBookDerivedDisabled() {
+        CollectingEventPublisher publisher = new CollectingEventPublisher();
+        OrderBookStateManager orderBookStateManager = new OrderBookStateManager();
+        DataProcessor processor = new DataProcessor(
+            new KalshiCanonicalParser(),
+            orderBookStateManager,
+            new SourceSequenceMonitor(),
+            true,
+            false,
+            publisher,
+            new BackendMetrics()
+        );
+
+        processor.processMessage(envelope(ORDERBOOK_SNAPSHOT_MESSAGE));
+
+        assertEquals(2, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(0).eventType());
+        assertEquals("orderbook_snapshot", publisher.events().get(1).eventType());
+        assertNull(orderBookStateManager.getState("M"));
+        assertEquals(0L, countEvents(publisher.events(), "top_of_book_update"));
+
+        processor.processMessage(envelope(ORDERBOOK_DELTA_SEQ4_MESSAGE));
+
+        assertEquals(5, publisher.events().size());
+        assertEquals("raw_source_event", publisher.events().get(2).eventType());
+        SequenceGapEvent sourceGap = assertInstanceOf(SequenceGapEvent.class, publisher.events().get(3));
+        assertEquals(Long.valueOf(3L), sourceGap.expectedSequence());
+        assertEquals(Long.valueOf(4L), sourceGap.actualSequence());
+        assertEquals("source_sequence_gap", sourceGap.reason());
+        assertEquals("inspect_source_subscription_and_reconnect", sourceGap.recoveryAction());
+        assertEquals("orderbook_delta", publisher.events().get(4).eventType());
+        assertNull(orderBookStateManager.getState("M"));
+        assertEquals(0L, countEvents(publisher.events(), "top_of_book_update"));
+    }
+
+    @Test
     void canonicalDbSinkReceivesSerializedPayloadAfterPublisherReturns() {
         RecordingEventPublisher publisher = new RecordingEventPublisher(true, true);
         RecordingAsyncDbWriter writer = new RecordingAsyncDbWriter();
@@ -334,6 +446,22 @@ class DataProcessorIngressEnvelopeTest {
         assertEquals(publisher.events().size(), metrics.get("processor.publish_failure"));
         assertEquals(1L, dbOfferCount(metrics, "raw", DbOfferResult.DISABLED, "raw_source_event", "raw.kalshi.websocket"));
         assertEquals(1L, dbOfferCount(metrics, "canonical", DbOfferResult.DISABLED, "market_trade", "canonical.trade"));
+    }
+
+    private static String envelope(String rawPayload) {
+        return KalshiIngressEnvelope.wrap(
+            rawPayload,
+            123_456_789L,
+            Instant.parse("2026-05-08T00:00:00Z"),
+            "live-1",
+            null
+        );
+    }
+
+    private static long countEvents(List<CanonicalEvent> events, String eventType) {
+        return events.stream()
+            .filter(event -> eventType.equals(event.eventType()))
+            .count();
     }
 
     private static long dbOfferCount(

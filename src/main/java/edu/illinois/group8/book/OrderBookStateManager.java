@@ -20,6 +20,14 @@ public class OrderBookStateManager {
         return BookUpdateResult.empty();
     }
 
+    public boolean pauseForSnapshotRecovery(CanonicalEvent event) {
+        if (event instanceof OrderBookDeltaEvent delta) {
+            book(delta.metadata().marketTicker()).pauseForSnapshotRecovery();
+            return true;
+        }
+        return false;
+    }
+
     public OrderBookState getState(String marketTicker) {
         return booksByMarket.get(marketTicker);
     }
