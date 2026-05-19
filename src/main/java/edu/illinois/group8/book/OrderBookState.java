@@ -57,14 +57,14 @@ public class OrderBookState {
             ));
         }
 
-        if (actualSequence != null && expectedNextSequence != null && !actualSequence.equals(expectedNextSequence)) {
+        if (actualSequence != null && lastSequence != null && actualSequence <= lastSequence) {
             pausedForRecovery = true;
             return BookUpdateResult.single(sequenceGap(
                 delta.eventId(),
                 delta.metadata(),
                 expectedNextSequence,
                 actualSequence,
-                "orderbook_sequence_gap"
+                "non_monotonic_orderbook_sequence"
             ));
         }
 
