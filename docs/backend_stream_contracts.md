@@ -37,7 +37,10 @@ DB offers are best-effort and non-blocking. Drops or disabled DB writes are
 observable through `db_*` writer metrics and `processor_db_offers_total`; they
 do not block Aeron publication.
 
-The internal tickerplant bus uses stream ID 20 and routes canonical JSON by `stream_name`. No production route depends on a fixed JSON character offset.
+The internal tickerplant bus uses stream ID 20 and routes by the internal route
+header. Canonical JSON still carries `stream_name` for external consumers and
+storage. No production route depends on JSON payload inspection or a fixed JSON
+character offset.
 
 The deployed `cluster-live` profile also starts `streamtap`, a local HTTP endpoint bound to
 `127.0.0.1:8080` on the host. It subscribes to the Aeron external channel and exposes:

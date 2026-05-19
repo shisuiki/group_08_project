@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.publication.CanonicalRouteEnvelope;
 import io.aeron.Publication;
 import io.aeron.Subscription;
 
@@ -62,7 +63,8 @@ public class Tickerplant implements Runnable {
 
     boolean routePayload(byte[] data, int dataOffset, int dataLength, org.agrona.DirectBuffer buffer, int offset, int length) {
         try {
-            String streamName = extractTopLevelStreamName(data, dataOffset, dataLength);
+            RoutePayload route = resolveRoute(data, dataOffset, dataLength);
+            String streamName = route.streamName();
             if (streamName == null || streamName.isBlank()) {
                 missingStreamNameFailures.increment();
                 return false;
@@ -76,13 +78,40 @@ public class Tickerplant implements Runnable {
             boolean sampleDistributions = shouldSampleRouteDistribution();
             long offerStartTsNs = sampleDistributions ? System.nanoTime() : 0L;
             handles.offerTotal.increment();
-            long result = publication.offer(buffer, offset, length);
+            int publishOffset = offset;
+            int publishLength = length;
+            if (route.headerRouted()) {
+                publishOffset = offset + (route.payloadOffset() - dataOffset);
+                publishLength = route.payloadLength();
+            }
+            long result = publication.offer(buffer, publishOffset, publishLength);
             long elapsedNs = sampleDistributions ? Math.max(0L, System.nanoTime() - offerStartTsNs) : 0L;
             return recordRouteOutcome(handles, result, elapsedNs, sampleDistributions);
         } catch (Exception e) {
             parseFailures.increment();
             return false;
         }
+    }
+
+    static RoutePayload resolveRoute(byte[] data, int offset, int length) throws IOException {
+        CanonicalRouteEnvelope.ParseResult route = CanonicalRouteEnvelope.parse(data, offset, length);
+        if (route.malformed()) {
+            throw new IOException("Malformed canonical route envelope");
+        }
+        if (route.headerPresent()) {
+            return new RoutePayload(
+                route.streamName(),
+                route.payloadOffset(),
+                route.payloadLength(),
+                true
+            );
+        }
+        return new RoutePayload(
+            extractTopLevelStreamName(data, offset, length),
+            offset,
+            length,
+            false
+        );
     }
 
     static String extractTopLevelStreamName(String message) throws IOException {
@@ -189,6 +218,14 @@ public class Tickerplant implements Runnable {
         BackendMetrics.DistributionHandle backpressure,
         BackendMetrics.Counter routeOfferFailed,
         BackendMetrics.Counter routeSuccess
+    ) {
+    }
+
+    record RoutePayload(
+        String streamName,
+        int payloadOffset,
+        int payloadLength,
+        boolean headerRouted
     ) {
     }
 }

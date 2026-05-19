@@ -54,15 +54,16 @@ Kalshi WebSocket
   payload, and `KalshiCanonicalParser` still parses that raw payload string.
   Status: live ingress and raw replay now send `KalshiIngressEnvelope` as
   byte[]; the ESB leader reuses a scratch byte[] and parses byte[] slices
-  without allocating a full envelope string. `Tickerplant` full-tree routing
-  parse has been optimized, but routing still depends on payload-carried stream
-  metadata. FeaturePlant live Aeron input parses canonical envelopes from
-  byte[] via `CanonicalEnvelope.fromPayloadBytes` while retaining the
-  `payload()` string API; its live source fair-polls stream subscriptions across
-  calls so later streams still receive polling turns when earlier streams are
-  busy. DB and recording sources still read stored strings.
-  Fix: keep the lightweight routing path; long term, carry stream id/name in a
-  header so `Tickerplant` can route without JSON payload inspection.
+  without allocating a full envelope string. `Tickerplant` routes internal
+  canonical messages by a lightweight route header while external payloads
+  remain canonical JSON with `stream_name`. FeaturePlant live Aeron input
+  parses canonical envelopes from byte[] via
+  `CanonicalEnvelope.fromPayloadBytes` while retaining the `payload()` string
+  API; its live source fair-polls stream subscriptions across calls so later
+  streams still receive polling turns when earlier streams are busy. DB and
+  recording sources still read stored strings.
+  Fix: keep the lightweight routing path and continue removing raw
+  payload parse/copy overhead where possible.
 
 - [High] Some downstream storage paths are still file-backed.
   Impact: recording/export/debug/import paths still use files; live FeaturePlant,
@@ -241,8 +242,8 @@ Deliverables:
   coverage uses fake pollers, not a live Aeron integration test.
 - Landed: replaced the JSON ingress envelope with a length-prefixed binary
   outer envelope. Raw Kalshi payload parsing remains JSON.
-- Add stream id/name header so `Tickerplant` can eventually route from metadata
-  instead of payload inspection; full-tree parse optimization is handled.
+- Landed: internal canonical route header lets `Tickerplant` route without
+  inspecting canonical JSON; external streams still publish plain canonical JSON.
 - Avoid remaining `byte[] -> String -> byte[]` round trips where possible.
 - Landed: common hot decimal strings use fixed-point parsing with `BigDecimal`
   fallback for compatibility.
@@ -371,15 +372,14 @@ Verification:
 
 Ranked by expected impact:
 
-1. Header-based tickerplant routing.
-2. Precomputed metric keys and sampled latency metrics.
-3. Move raw event id SHA-256 off the mandatory processor path where possible.
-4. Primitive price-level order book.
-5. Binary canonical serialization for internal streams.
-6. Remove remaining raw payload parse/copy overhead.
-7. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
+1. Precomputed metric keys and sampled latency metrics.
+2. Move raw event id SHA-256 off the mandatory processor path where possible.
+3. Primitive price-level order book.
+4. Binary canonical serialization for internal streams.
+5. Remove remaining raw payload parse/copy overhead.
+6. Separate CPU-pinned threads for WebSocket, cluster ingress, processor,
    tickerplant, and DB writer.
-8. GC tuning only after allocation reductions are measured.
+7. GC tuning only after allocation reductions are measured.
 
 Do not start with GC flags, S3, or DB tuning. Current code-level allocation and
 blocking points are more obvious and cheaper to fix first.

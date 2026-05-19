@@ -109,7 +109,7 @@ Each formatted message is then published to our system’s internal Aeron channe
 
 ### Tickerplant
 
-The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and publishing them to configured external Aeron streams. It publishes on one configured external Aeron channel using stream IDs 10-19, routing by each message's `stream_name`. This design keeps stream selection explicit while still allowing many Aeron subscribers to receive the same data at the same time.
+The tickerplant ([esb/Tickerplant.java](https://gitlab.engr.illinois.edu/ie421_high_frequency_trading_fall_2024/ie421_hft_fall_2024_group_08/group_08_project/-/blob/main/src/main/java/edu/illinois/group8/esb/Tickerplant.java)) is responsible for receiving all of the formatted messages from the internal Aeron channel and publishing them to configured external Aeron streams. It publishes on one configured external Aeron channel using stream IDs 10-19, routing by the internal route header while external payloads remain canonical JSON with `stream_name`. This design keeps stream selection explicit while still allowing many Aeron subscribers to receive the same data at the same time.
 
 ### Real-Time Data Storage
 

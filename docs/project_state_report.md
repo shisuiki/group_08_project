@@ -96,7 +96,8 @@ Important classes:
   watermark with snapshot/restore support.
 - `OrderBookStateManager`: per-market snapshot/delta state and derived
   top-of-book recovery pauses with recovery checkpoints.
-- `Tickerplant`: routes internal canonical JSON by `stream_name`.
+- `Tickerplant`: routes internal canonical messages by route header and
+  publishes plain canonical JSON externally.
 - `AeronCanonicalEnvelopeSource`: live canonical consumer source for
   FeaturePlant-style modules; fair-polls stream subscriptions across calls.
 - `StreamRegistry`: external stream IDs and stream contracts.
@@ -247,7 +248,7 @@ Legend:
 | Kalshi REST parser | current | used by historical backfill |
 | Order book state/top-of-book | current | forward interleaved subscription sequences can apply; duplicate/backward per-market deltas pause before mutation; crossed books suppress invalid crossed `top_of_book_update`, emit `SequenceGapEvent(reason="crossed_book")`, and pause until a fresh snapshot; recovery checkpoints restore paused fail-closed state without depth; automated fresh snapshot reload remains planned |
 | Source sequence monitor | current-basic | optional monotonic subscription watermark; forward gaps advance, duplicate/older events do not rewind; watermarks can snapshot/restore |
-| Tickerplant routing | current | JSON `stream_name` routing |
+| Tickerplant routing | current | internal route-header routing; external payloads remain canonical JSON |
 | Raw websocket recording | current | DB-primary accepted-row path; `raw-ingest` files for recording/debug/offline/export |
 | Canonical stream recording | current | canonical DB sink wired in `DataProcessor`/cluster runtime; downstream Aeron recording remains capture/offline/debug/export |
 | Raw REST backfill storage | current | DB-primary `raw_rest_responses`; `raw-rest` files are explicit recording/export/debug |
@@ -379,7 +380,6 @@ Reliability risks:
 - weak REST retry/backoff behavior
 - no full websocket reconnect/subscription restore
 - raw recorder can drop on full queue by configuration
-- tickerplant parses JSON per message for routing
 
 Maintainability risks:
 

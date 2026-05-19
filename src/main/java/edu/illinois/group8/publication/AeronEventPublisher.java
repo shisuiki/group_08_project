@@ -7,6 +7,7 @@ import edu.illinois.group8.cluster.ESBClusterCommunicationOrchestrator;
 import edu.illinois.group8.metrics.BackendMetrics;
 import org.agrona.ExpandableArrayBuffer;
 
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class AeronEventPublisher implements EventPublisher {
@@ -65,7 +66,7 @@ public class AeronEventPublisher implements EventPublisher {
         boolean sampleDistributions
     ) {
         CanonicalEvent event = serializedEvent.event();
-        byte[] bytes = serializedEvent.utf8Json();
+        byte[] bytes = internalPayloadBytes(serializedEvent);
         buffer.putBytes(0, bytes);
         PublicationMetricHandles handles = metricHandles.computeIfAbsent(
             new PublicationMetricKey(event.streamName()),
@@ -75,6 +76,14 @@ public class AeronEventPublisher implements EventPublisher {
         long result = communicationOrchestrator.getInternalPublication().offer(buffer, 0, bytes.length);
         long elapsedNs = sampleDistributions ? Math.max(0L, System.nanoTime() - offerStartTsNs) : 0L;
         return recordPublicationOutcome(handles, result, bytes.length, elapsedNs, sampleDistributions);
+    }
+
+    static byte[] internalPayloadBytes(SerializedCanonicalEvent serializedEvent) {
+        Objects.requireNonNull(serializedEvent, "serializedEvent");
+        return CanonicalRouteEnvelope.wrap(
+            serializedEvent.event().streamName(),
+            serializedEvent.utf8Json()
+        );
     }
 
     static boolean shouldSampleHotPathDistribution(long cursor) {

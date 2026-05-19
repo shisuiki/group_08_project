@@ -1,13 +1,47 @@
 package edu.illinois.group8.publication;
 
+import edu.illinois.group8.canonical.EventMetadata;
+import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+import edu.illinois.group8.canonical.MarketTrade;
+import edu.illinois.group8.canonical.SerializedCanonicalEvent;
 import edu.illinois.group8.metrics.BackendMetrics;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AeronEventPublisherMetricsTest {
+    @Test
+    void internalPayloadBytesWrapCanonicalJsonWithRouteEnvelope() {
+        MarketTrade event = new MarketTrade(
+            "trade-1",
+            new EventMetadata("kalshi", "ticker", 11L, 4L, "M", null, 123L, 456L, null, "raw-1", null),
+            "t1",
+            1_000L,
+            999_000L,
+            2L,
+            "yes"
+        );
+        SerializedCanonicalEvent serializedEvent =
+            SerializedCanonicalEvent.from(event, new JsonCanonicalSerializer());
+
+        byte[] internalPayload = AeronEventPublisher.internalPayloadBytes(serializedEvent);
+        CanonicalRouteEnvelope.ParseResult route =
+            CanonicalRouteEnvelope.parse(internalPayload, 0, internalPayload.length);
+
+        assertTrue(route.headerPresent());
+        assertFalse(route.malformed());
+        assertEquals("canonical.trade", route.streamName());
+        assertArrayEquals(
+            serializedEvent.utf8Json(),
+            Arrays.copyOfRange(internalPayload, route.payloadOffset(), route.payloadOffset() + route.payloadLength())
+        );
+    }
+
     @Test
     void publicationMetricHandlesPreserveExistingMetricKeys() {
         BackendMetrics metrics = new BackendMetrics();

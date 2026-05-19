@@ -1,6 +1,7 @@
 package edu.illinois.group8.esb;
 
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.publication.CanonicalRouteEnvelope;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -114,6 +115,67 @@ class TickerplantMetricsTest {
         assertTrue(text.contains(
             "backend_publication_backpressure_ns_count{service=\"tickerplant\",stream=\"canonical.orderbook_delta\"} 2\n"
         ));
+    }
+
+    @Test
+    void resolveRouteUsesHeaderStreamAndCanonicalPayloadSlice() throws Exception {
+        byte[] payload = bytes("{\"event_id\":\"e1\",\"stream_name\":\"derived.top_of_book\"}");
+        byte[] envelope = CanonicalRouteEnvelope.wrap("canonical.trade", payload);
+
+        Tickerplant.RoutePayload route = Tickerplant.resolveRoute(envelope, 0, envelope.length);
+
+        assertTrue(route.headerRouted());
+        assertEquals("canonical.trade", route.streamName());
+        assertEquals(payload.length, route.payloadLength());
+        assertEquals(
+            new String(payload, StandardCharsets.UTF_8),
+            new String(envelope, route.payloadOffset(), route.payloadLength(), StandardCharsets.UTF_8)
+        );
+    }
+
+    @Test
+    void resolveRouteSupportsHeaderWithNonZeroOffsetSlice() throws Exception {
+        byte[] payload = bytes("{\"event_id\":\"e1\"}");
+        byte[] envelope = CanonicalRouteEnvelope.wrap("system.sequence_gaps", payload);
+        byte[] data = new byte[envelope.length + 4];
+        data[0] = 'x';
+        data[1] = 'x';
+        System.arraycopy(envelope, 0, data, 2, envelope.length);
+        data[data.length - 2] = 'y';
+        data[data.length - 1] = 'y';
+
+        Tickerplant.RoutePayload route = Tickerplant.resolveRoute(data, 2, envelope.length);
+
+        assertTrue(route.headerRouted());
+        assertEquals("system.sequence_gaps", route.streamName());
+        assertEquals(payload.length, route.payloadLength());
+        assertEquals(
+            new String(payload, StandardCharsets.UTF_8),
+            new String(data, route.payloadOffset(), route.payloadLength(), StandardCharsets.UTF_8)
+        );
+    }
+
+    @Test
+    void resolveRouteFallsBackToLegacyJsonStreamNameWhenNoHeaderMagic() throws Exception {
+        byte[] payload = bytes("{\"event_id\":\"e1\",\"stream_name\":\"canonical.trade\"}");
+
+        Tickerplant.RoutePayload route = Tickerplant.resolveRoute(payload, 0, payload.length);
+
+        assertFalse(route.headerRouted());
+        assertEquals("canonical.trade", route.streamName());
+        assertEquals(0, route.payloadOffset());
+        assertEquals(payload.length, route.payloadLength());
+    }
+
+    @Test
+    void resolveRouteRejectsMalformedRouteHeaderWithoutJsonFallback() {
+        byte[] payload = bytes("{\"event_id\":\"e1\",\"stream_name\":\"canonical.trade\"}");
+        byte[] envelope = CanonicalRouteEnvelope.wrap("canonical.trade", payload);
+
+        assertThrows(
+            IOException.class,
+            () -> Tickerplant.resolveRoute(envelope, 0, envelope.length - 1)
+        );
     }
 
     @Test

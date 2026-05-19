@@ -18,8 +18,8 @@ The current codebase has expanded that simple path:
 - `Enterprise Service Bus` now maps to Aeron Cluster nodes running
   `ESBClusteredService`, `DataProcessor`, `KalshiCanonicalParser`,
   `OrderBookStateManager`, and the internal canonical bus.
-- `Tickerplant` still exists, but it now routes by `stream_name` through
-  `StreamRegistry` instead of hardcoded message offsets.
+- `Tickerplant` still exists, but it now routes by the internal route header
+  through `StreamRegistry` instead of inspecting canonical JSON payloads.
 - `External Aeron Channels` now mean Aeron stream IDs 10-19 on the configured
   external channel. They are protocol stream IDs, not Kalshi contract IDs.
 - `Data Warehousing Service -> Redshift` has been removed from the current
@@ -190,7 +190,7 @@ flowchart LR
     PUB["AeronEventPublisher<br/>serializes canonical JSON"]:::bus
     CDB["canonical_events<br/>Postgres/Timescale canonical DB"]:::storage
     INTERNAL["Internal event bus<br/>StreamRegistry ID 20"]:::bus
-    TP["Tickerplant<br/>routes by stream_name"]:::current
+    TP["Tickerplant<br/>routes by route header"]:::current
   end
 
   CCO --> ECS
