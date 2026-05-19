@@ -3,6 +3,7 @@ package edu.illinois.group8.wrapper;
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.canonical.SequenceGapEvent;
+import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController.RequestStatus;
 import edu.illinois.group8.wrapper.OrderBookRecoveryGapHandler.Status;
 
@@ -33,6 +34,7 @@ class OrderBookRecoveryGapHandlerTest {
         assertEquals(RequestStatus.REQUEST_SCHEDULED, result.requestStatus());
         assertEquals(1, fixture.executor.pendingCount());
         assertTrue(fixture.requester.calls.isEmpty());
+        fixture.assertPayloadStatus(Status.HANDLED, 1L);
 
         fixture.executor.runAll();
 
@@ -55,6 +57,7 @@ class OrderBookRecoveryGapHandlerTest {
         assertEquals(Status.SKIPPED_NON_GAP_STREAM, result.status());
         assertEquals(null, result.requestStatus());
         assertEquals(0, fixture.executor.pendingCount());
+        fixture.assertPayloadStatus(Status.SKIPPED_NON_GAP_STREAM, 1L);
     }
 
     @Test
@@ -69,6 +72,7 @@ class OrderBookRecoveryGapHandlerTest {
         assertEquals(Status.SKIPPED_NON_GAP_EVENT, result.status());
         assertEquals(null, result.requestStatus());
         assertEquals(0, fixture.executor.pendingCount());
+        fixture.assertPayloadStatus(Status.SKIPPED_NON_GAP_EVENT, 1L);
     }
 
     @Test
@@ -79,6 +83,7 @@ class OrderBookRecoveryGapHandlerTest {
         assertEquals(Status.SKIPPED_MALFORMED_PAYLOAD, fixture.handler.handlePayload(GAP_STREAM, "").status());
         assertEquals(Status.SKIPPED_MALFORMED_PAYLOAD, fixture.handler.handlePayload(GAP_STREAM, null).status());
         assertEquals(0, fixture.executor.pendingCount());
+        fixture.assertPayloadStatus(Status.SKIPPED_MALFORMED_PAYLOAD, 3L);
     }
 
     @Test
@@ -93,6 +98,7 @@ class OrderBookRecoveryGapHandlerTest {
         assertEquals(Status.HANDLED, result.status());
         assertEquals(RequestStatus.SKIPPED_UNSUPPORTED_REASON, result.requestStatus());
         assertEquals(0, fixture.executor.pendingCount());
+        fixture.assertPayloadStatus(Status.HANDLED, 1L);
     }
 
     private static String payload(String reason, String marketTicker) {
@@ -121,11 +127,20 @@ class OrderBookRecoveryGapHandlerTest {
     private static final class Fixture {
         private final FakeExecutor executor = new FakeExecutor();
         private final RecordingSnapshotRequester requester = new RecordingSnapshotRequester();
-        private final OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 500);
-        private final OrderBookRecoveryGapHandler handler = new OrderBookRecoveryGapHandler(controller);
+        private final BackendMetrics backendMetrics = new BackendMetrics();
+        private final OrderBookRecoveryMetrics metrics = new OrderBookRecoveryMetrics(backendMetrics);
+        private final OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 500, metrics);
+        private final OrderBookRecoveryGapHandler handler = new OrderBookRecoveryGapHandler(controller, metrics);
 
         private Fixture() {
             controller.registerMarket("M", 42L, requester);
+        }
+
+        private void assertPayloadStatus(Status status, long expected) {
+            assertEquals(expected, backendMetrics.get(
+                "orderbook_recovery_gap_payloads_total",
+                BackendMetrics.labels("service", "wsclient", "status", status.name().toLowerCase())
+            ));
         }
     }
 

@@ -2,6 +2,7 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.SequenceGapEvent;
+import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController.RequestStatus;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrderBookRecoveryControllerTest {
@@ -137,8 +139,102 @@ class OrderBookRecoveryControllerTest {
         assertEquals(reasons.size(), requester.calls.size());
     }
 
+    @Test
+    void metricsRecordDecisionsGaugesAndSuccessfulRequests() {
+        BackendMetrics backendMetrics = new BackendMetrics();
+        OrderBookRecoveryMetrics metrics = new OrderBookRecoveryMetrics(backendMetrics);
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = controller(executor, metrics);
+        controller.registerMarket("M", 11L, new RecordingRequester());
+
+        assertPrometheusLine(backendMetrics, "orderbook_recovery_registered_markets{service=\"wsclient\"} 1");
+        assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(gap("source_sequence_gap", "M")));
+        assertEquals(RequestStatus.SKIPPED_IN_FLIGHT, controller.handleGap(gap("crossed_book", "M")));
+        assertPrometheusLine(backendMetrics, "orderbook_recovery_inflight_markets{service=\"wsclient\"} 1");
+        executor.runNext();
+
+        assertEquals(RequestStatus.SKIPPED_UNKNOWN_MARKET, controller.handleGap(gap("crossed_book", "UNKNOWN")));
+        assertEquals(RequestStatus.SKIPPED_UNSUPPORTED_REASON, controller.handleGap(gap("manual_pause", "M")));
+        assertEquals(RequestStatus.SKIPPED_MISSING_METADATA, controller.handleGap(gap("crossed_book", null)));
+
+        assertCounter(backendMetrics, "orderbook_recovery_snapshot_request_decisions_total", "status", "request_scheduled", 1L);
+        assertCounter(backendMetrics, "orderbook_recovery_snapshot_request_decisions_total", "status", "skipped_in_flight", 1L);
+        assertCounter(backendMetrics, "orderbook_recovery_snapshot_request_decisions_total", "status", "skipped_unknown_market", 1L);
+        assertCounter(backendMetrics, "orderbook_recovery_snapshot_request_decisions_total", "status", "skipped_unsupported_reason", 1L);
+        assertCounter(backendMetrics, "orderbook_recovery_snapshot_request_decisions_total", "status", "skipped_missing_metadata", 1L);
+        assertCounter(backendMetrics, "orderbook_recovery_snapshot_requests_total", "result", "success", 1L);
+        assertPrometheusLine(backendMetrics, "orderbook_recovery_inflight_markets{service=\"wsclient\"} 0");
+    }
+
+    @Test
+    void metricsRecordRuntimeAndInterruptedRequestResults() {
+        BackendMetrics backendMetrics = new BackendMetrics();
+        OrderBookRecoveryMetrics metrics = new OrderBookRecoveryMetrics(backendMetrics);
+        FakeExecutor executor = new FakeExecutor();
+        OrderBookRecoveryController controller = controller(executor, metrics);
+        controller.registerMarket("RUNTIME", 11L, new ThrowingRequester(new IllegalStateException("ws failed")));
+        controller.registerMarket("INTERRUPTED", 12L, new ThrowingRequester(new InterruptedException("interrupted")));
+
+        Thread.interrupted();
+        try {
+            assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(gap("crossed_book", "RUNTIME")));
+            executor.runNext();
+            assertEquals(RequestStatus.REQUEST_SCHEDULED, controller.handleGap(gap("crossed_book", "INTERRUPTED")));
+            executor.runNext();
+
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertCounter(backendMetrics, "orderbook_recovery_snapshot_requests_total", "result", "runtime_exception", 1L);
+            assertCounter(backendMetrics, "orderbook_recovery_snapshot_requests_total", "result", "interrupted", 1L);
+            assertPrometheusLine(backendMetrics, "orderbook_recovery_inflight_markets{service=\"wsclient\"} 0");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void executorRejectionRepairsInflightGauge() {
+        BackendMetrics backendMetrics = new BackendMetrics();
+        OrderBookRecoveryMetrics metrics = new OrderBookRecoveryMetrics(backendMetrics);
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(
+            command -> {
+                throw new IllegalStateException("executor rejected");
+            },
+            250,
+            metrics
+        );
+        controller.registerMarket("M", 11L, new RecordingRequester());
+
+        assertThrows(IllegalStateException.class, () -> controller.handleGap(gap("crossed_book", "M")));
+
+        assertPrometheusLine(backendMetrics, "orderbook_recovery_inflight_markets{service=\"wsclient\"} 0");
+    }
+
     private static OrderBookRecoveryController controller(FakeExecutor executor) {
         return new OrderBookRecoveryController(executor, 250);
+    }
+
+    private static OrderBookRecoveryController controller(
+        FakeExecutor executor,
+        OrderBookRecoveryMetrics metrics
+    ) {
+        return new OrderBookRecoveryController(executor, 250, metrics);
+    }
+
+    private static void assertCounter(
+        BackendMetrics metrics,
+        String name,
+        String labelName,
+        String labelValue,
+        long expected
+    ) {
+        assertEquals(expected, metrics.get(name, BackendMetrics.labels(
+            "service", "wsclient",
+            labelName, labelValue
+        )));
+    }
+
+    private static void assertPrometheusLine(BackendMetrics metrics, String line) {
+        assertTrue(metrics.prometheusText().contains(line + "\n"), metrics.prometheusText());
     }
 
     private static SequenceGapEvent gap(String reason, String marketTicker) {

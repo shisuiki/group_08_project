@@ -2,6 +2,7 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.SequenceGapEvent;
+import edu.illinois.group8.metrics.BackendMetrics;
 
 import java.util.Objects;
 import java.util.Set;
@@ -23,13 +24,21 @@ public final class OrderBookRecoveryController {
     private final Set<String> inFlightMarkets = ConcurrentHashMap.newKeySet();
     private final Executor executor;
     private final int timeoutMs;
+    private final OrderBookRecoveryMetrics metrics;
 
     public OrderBookRecoveryController(Executor executor, int timeoutMs) {
+        this(executor, timeoutMs, new OrderBookRecoveryMetrics(new BackendMetrics()));
+    }
+
+    public OrderBookRecoveryController(Executor executor, int timeoutMs, OrderBookRecoveryMetrics metrics) {
         this.executor = Objects.requireNonNull(executor, "executor");
         if (timeoutMs <= 0) {
             throw new IllegalArgumentException("timeoutMs must be positive.");
         }
         this.timeoutMs = timeoutMs;
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.metrics.setRegisteredMarkets(registrations.size());
+        this.metrics.setInflightMarkets(inFlightMarkets.size());
     }
 
     public void registerMarket(String marketTicker, long sid, SnapshotRequester requester) {
@@ -41,6 +50,7 @@ public final class OrderBookRecoveryController {
             throw new IllegalArgumentException("sid must not be negative.");
         }
         registrations.put(normalizedTicker, new Registration(sid, Objects.requireNonNull(requester, "requester")));
+        metrics.setRegisteredMarkets(registrations.size());
     }
 
     public void unregisterMarket(String marketTicker) {
@@ -50,35 +60,39 @@ public final class OrderBookRecoveryController {
         }
         registrations.remove(normalizedTicker);
         inFlightMarkets.remove(normalizedTicker);
+        metrics.setRegisteredMarkets(registrations.size());
+        metrics.setInflightMarkets(inFlightMarkets.size());
     }
 
     public RequestStatus handleGap(SequenceGapEvent gap) {
         if (gap == null || !SNAPSHOT_REASONS.contains(gap.reason())) {
-            return RequestStatus.SKIPPED_UNSUPPORTED_REASON;
+            return decision(RequestStatus.SKIPPED_UNSUPPORTED_REASON);
         }
         EventMetadata metadata = gap.metadata();
         if (metadata == null) {
-            return RequestStatus.SKIPPED_MISSING_METADATA;
+            return decision(RequestStatus.SKIPPED_MISSING_METADATA);
         }
         String marketTicker = normalizedMarketTicker(metadata.marketTicker());
         if (marketTicker == null) {
-            return RequestStatus.SKIPPED_MISSING_METADATA;
+            return decision(RequestStatus.SKIPPED_MISSING_METADATA);
         }
         Registration registration = registrations.get(marketTicker);
         if (registration == null) {
-            return RequestStatus.SKIPPED_UNKNOWN_MARKET;
+            return decision(RequestStatus.SKIPPED_UNKNOWN_MARKET);
         }
         if (!inFlightMarkets.add(marketTicker)) {
-            return RequestStatus.SKIPPED_IN_FLIGHT;
+            return decision(RequestStatus.SKIPPED_IN_FLIGHT);
         }
+        metrics.setInflightMarkets(inFlightMarkets.size());
 
         try {
             executor.execute(() -> requestSnapshot(marketTicker, registration));
         } catch (RuntimeException exc) {
             inFlightMarkets.remove(marketTicker);
+            metrics.setInflightMarkets(inFlightMarkets.size());
             throw exc;
         }
-        return RequestStatus.REQUEST_SCHEDULED;
+        return decision(RequestStatus.REQUEST_SCHEDULED);
     }
 
     private void requestSnapshot(String marketTicker, Registration registration) {
@@ -88,13 +102,22 @@ public final class OrderBookRecoveryController {
                 new String[] {marketTicker},
                 timeoutMs
             );
+            metrics.recordSnapshotRequestSuccess();
         } catch (InterruptedException exc) {
             Thread.currentThread().interrupt();
+            metrics.recordSnapshotRequestInterrupted();
         } catch (RuntimeException exc) {
             // Recovery requests are best-effort; a failed request must not poison future gaps.
+            metrics.recordSnapshotRequestRuntimeException();
         } finally {
             inFlightMarkets.remove(marketTicker);
+            metrics.setInflightMarkets(inFlightMarkets.size());
         }
+    }
+
+    private RequestStatus decision(RequestStatus status) {
+        metrics.recordSnapshotRequestDecision(status);
+        return status;
     }
 
     private static String normalizedMarketTicker(String marketTicker) {

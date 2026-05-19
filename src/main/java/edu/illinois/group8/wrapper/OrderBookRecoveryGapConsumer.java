@@ -2,6 +2,7 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.feature.CanonicalEnvelope;
 import edu.illinois.group8.feature.CanonicalEnvelopeSource;
+import edu.illinois.group8.metrics.BackendMetrics;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +14,7 @@ public final class OrderBookRecoveryGapConsumer implements AutoCloseable {
     private final int fragmentLimit;
     private final long idleSleepMs;
     private final Sleeper sleeper;
+    private final OrderBookRecoveryMetrics metrics;
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -22,7 +24,17 @@ public final class OrderBookRecoveryGapConsumer implements AutoCloseable {
         int fragmentLimit,
         long idleSleepMs
     ) {
-        this(source, handler, fragmentLimit, idleSleepMs, Thread::sleep);
+        this(source, handler, fragmentLimit, idleSleepMs, new OrderBookRecoveryMetrics(new BackendMetrics()));
+    }
+
+    public OrderBookRecoveryGapConsumer(
+        CanonicalEnvelopeSource source,
+        OrderBookRecoveryGapHandler handler,
+        int fragmentLimit,
+        long idleSleepMs,
+        OrderBookRecoveryMetrics metrics
+    ) {
+        this(source, handler, fragmentLimit, idleSleepMs, Thread::sleep, metrics);
     }
 
     OrderBookRecoveryGapConsumer(
@@ -31,6 +43,17 @@ public final class OrderBookRecoveryGapConsumer implements AutoCloseable {
         int fragmentLimit,
         long idleSleepMs,
         Sleeper sleeper
+    ) {
+        this(source, handler, fragmentLimit, idleSleepMs, sleeper, new OrderBookRecoveryMetrics(new BackendMetrics()));
+    }
+
+    OrderBookRecoveryGapConsumer(
+        CanonicalEnvelopeSource source,
+        OrderBookRecoveryGapHandler handler,
+        int fragmentLimit,
+        long idleSleepMs,
+        Sleeper sleeper,
+        OrderBookRecoveryMetrics metrics
     ) {
         if (fragmentLimit < 1) {
             throw new IllegalArgumentException("fragmentLimit must be at least 1.");
@@ -41,12 +64,20 @@ public final class OrderBookRecoveryGapConsumer implements AutoCloseable {
         this.source = Objects.requireNonNull(source, "source");
         this.handler = Objects.requireNonNull(handler, "handler");
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.fragmentLimit = fragmentLimit;
         this.idleSleepMs = idleSleepMs;
     }
 
     public int pollOnce() {
-        return source.poll(this::handleEnvelope, fragmentLimit);
+        try {
+            int fragments = source.poll(this::handleEnvelope, fragmentLimit);
+            metrics.recordConsumerPoll(fragments);
+            return fragments;
+        } catch (RuntimeException exc) {
+            metrics.recordConsumerPollError();
+            throw exc;
+        }
     }
 
     public void runUntilStopped() {

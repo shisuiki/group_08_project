@@ -3,9 +3,11 @@ package edu.illinois.group8;
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.canonical.EventMetadata;
 import edu.illinois.group8.canonical.EventType;
+import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.canonical.SequenceGapEvent;
 import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.feature.CanonicalEnvelope;
 import edu.illinois.group8.feature.CanonicalEnvelopeHandler;
 import edu.illinois.group8.feature.CanonicalEnvelopeSource;
 import edu.illinois.group8.metrics.BackendMetrics;
@@ -19,6 +21,7 @@ import edu.illinois.group8.storage.db.RawWsDbEventInput;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController;
 import edu.illinois.group8.wrapper.OrderBookRecoveryController.RequestStatus;
 import edu.illinois.group8.wrapper.OrderBookRecoveryGapConsumer;
+import edu.illinois.group8.wrapper.OrderBookRecoveryMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -242,14 +245,23 @@ class KalshiSystemTest {
             "AERON_EXTERNAL_CHANNEL", "aeron:udp?endpoint=external:40456"
         ));
         FakeExecutor executor = new FakeExecutor();
-        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750);
-        RecordingCanonicalEnvelopeSource source = new RecordingCanonicalEnvelopeSource();
+        BackendMetrics backendMetrics = new BackendMetrics();
+        OrderBookRecoveryMetrics metrics = new OrderBookRecoveryMetrics(backendMetrics);
+        OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 750, metrics);
+        RecordingCanonicalEnvelopeSource source = new RecordingCanonicalEnvelopeSource(
+            CanonicalEnvelope.fromPayload(
+                EventType.SEQUENCE_GAP.streamName(),
+                new JsonCanonicalSerializer().toJson(sequenceGap("UNKNOWN")),
+                new JsonCanonicalSerializer().mapper()
+            )
+        );
         AtomicReference<List<StreamContract>> capturedStreams = new AtomicReference<>();
         AtomicReference<String> capturedChannel = new AtomicReference<>();
 
         OrderBookRecoveryGapConsumer consumer = KalshiSystem.createOrderBookRecoveryGapConsumer(
             config,
             controller,
+            metrics,
             (channel, streams) -> {
                 capturedChannel.set(channel);
                 capturedStreams.set(streams);
@@ -262,9 +274,17 @@ class KalshiSystemTest {
         assertEquals(1, capturedStreams.get().size());
         assertEquals(EventType.SEQUENCE_GAP.streamName(), capturedStreams.get().get(0).streamName());
 
-        assertEquals(0, consumer.pollOnce());
+        assertEquals(1, consumer.pollOnce());
 
         assertEquals(7, source.lastFragmentLimit);
+        assertEquals(1L, backendMetrics.get(
+            "orderbook_recovery_consumer_polls_total",
+            BackendMetrics.labels("service", "wsclient", "result", "non_empty")
+        ));
+        assertEquals(1L, backendMetrics.get(
+            "orderbook_recovery_snapshot_request_decisions_total",
+            BackendMetrics.labels("service", "wsclient", "status", "skipped_unknown_market")
+        ));
         consumer.close();
     }
 
@@ -370,12 +390,22 @@ class KalshiSystemTest {
     }
 
     private static final class RecordingCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
+        private final ArrayDeque<CanonicalEnvelope> envelopes = new ArrayDeque<>();
         private int lastFragmentLimit;
+
+        private RecordingCanonicalEnvelopeSource(CanonicalEnvelope... envelopes) {
+            this.envelopes.addAll(List.of(envelopes));
+        }
 
         @Override
         public int poll(CanonicalEnvelopeHandler handler, int fragmentLimit) {
             lastFragmentLimit = fragmentLimit;
-            return 0;
+            int fragments = 0;
+            while (fragments < fragmentLimit && !envelopes.isEmpty()) {
+                handler.onEvent(envelopes.removeFirst());
+                fragments++;
+            }
+            return fragments;
         }
     }
 

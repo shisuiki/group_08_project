@@ -6,6 +6,7 @@ import edu.illinois.group8.canonical.SequenceGapEvent;
 import edu.illinois.group8.feature.CanonicalEnvelope;
 import edu.illinois.group8.feature.CanonicalEnvelopeHandler;
 import edu.illinois.group8.feature.CanonicalEnvelopeSource;
+import edu.illinois.group8.metrics.BackendMetrics;
 
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +17,7 @@ import java.util.Queue;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,6 +32,8 @@ class OrderBookRecoveryGapConsumerTest {
         assertEquals(1, fixture.source.pollCalls);
         assertEquals(1, fixture.executor.pendingCount());
         assertTrue(fixture.requester.calls.isEmpty());
+        fixture.assertPollResult("non_empty", 1L);
+        fixture.assertFragments(1L);
 
         fixture.executor.runAll();
 
@@ -49,6 +53,8 @@ class OrderBookRecoveryGapConsumerTest {
 
         assertEquals(1, fixture.consumer.pollOnce());
 
+        fixture.assertPollResult("non_empty", 1L);
+        fixture.assertFragments(1L);
         assertEquals(0, fixture.executor.pendingCount());
         assertTrue(fixture.requester.calls.isEmpty());
     }
@@ -64,6 +70,7 @@ class OrderBookRecoveryGapConsumerTest {
 
         assertEquals(1, source.pollCalls);
         assertEquals(List.of(25L), sleeper.sleeps);
+        fixture.assertNoEmptyPollMetric();
     }
 
     @Test
@@ -80,6 +87,7 @@ class OrderBookRecoveryGapConsumerTest {
             assertTrue(Thread.currentThread().isInterrupted());
             assertEquals(1, source.pollCalls);
             assertEquals(List.of(25L), sleeper.sleeps);
+            fixture.assertNoEmptyPollMetric();
         } finally {
             Thread.interrupted();
         }
@@ -94,6 +102,7 @@ class OrderBookRecoveryGapConsumerTest {
         RuntimeException thrown = assertThrows(RuntimeException.class, fixture.consumer::pollOnce);
 
         assertEquals(failure, thrown);
+        fixture.assertPollResult("error", 1L);
     }
 
     @Test
@@ -146,8 +155,10 @@ class OrderBookRecoveryGapConsumerTest {
     private static final class Fixture {
         private final FakeExecutor executor = new FakeExecutor();
         private final RecordingSnapshotRequester requester = new RecordingSnapshotRequester();
-        private final OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 500);
-        private final OrderBookRecoveryGapHandler handler = new OrderBookRecoveryGapHandler(controller);
+        private final BackendMetrics backendMetrics = new BackendMetrics();
+        private final OrderBookRecoveryMetrics metrics = new OrderBookRecoveryMetrics(backendMetrics);
+        private final OrderBookRecoveryController controller = new OrderBookRecoveryController(executor, 500, metrics);
+        private final OrderBookRecoveryGapHandler handler = new OrderBookRecoveryGapHandler(controller, metrics);
         private final FakeSource source;
         private final OrderBookRecoveryGapConsumer consumer;
 
@@ -158,7 +169,29 @@ class OrderBookRecoveryGapConsumerTest {
         private Fixture(FakeSource source, TestSleeper sleeper) {
             this.source = source;
             controller.registerMarket("M", 42L, requester);
-            this.consumer = new OrderBookRecoveryGapConsumer(source, handler, 2, 25L, sleeper);
+            this.consumer = new OrderBookRecoveryGapConsumer(source, handler, 2, 25L, sleeper, metrics);
+        }
+
+        private void assertPollResult(String result, long expected) {
+            assertEquals(expected, backendMetrics.get(
+                "orderbook_recovery_consumer_polls_total",
+                BackendMetrics.labels("service", "wsclient", "result", result)
+            ));
+        }
+
+        private void assertFragments(long expected) {
+            assertEquals(expected, backendMetrics.get(
+                "orderbook_recovery_consumer_fragments_total",
+                BackendMetrics.labels("service", "wsclient")
+            ));
+        }
+
+        private void assertNoEmptyPollMetric() {
+            assertEquals(0L, backendMetrics.get(
+                "orderbook_recovery_consumer_polls_total",
+                BackendMetrics.labels("service", "wsclient", "result", "empty")
+            ));
+            assertFalse(backendMetrics.prometheusText().contains("result=\"empty\""));
         }
     }
 
