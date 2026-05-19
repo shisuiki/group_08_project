@@ -23,10 +23,10 @@ To get market data, we connect to the Kalshi API with a custom WebSocket client.
 As stated before, our service running the WebSocket client sends data messages through the ESB orchestrator to the data processor, which processes them. Processing updates our internal copies of the order books, which lets the processor know if our custom “top of book” message type should be sent. Once the processor decides what should be published, the messages are sent to the tickerplant. The tickerplant then publishes each message to the appropriate data feed, where interested clients are able to connect and read from.
 
 Durable live storage is DB-primary: raw websocket input and canonical events are
-written to Postgres/Timescale through the async DB writer path. FeaturePlant
-and the frontend adapter default to the DB canonical reader. Canonical NDJSON
-remains an explicit legacy/capture/export path for recording, demo, import, and
-debug workflows.
+written to Postgres/Timescale through the async DB writer path. FeaturePlant,
+the frontend adapter, and research export default to the DB canonical reader.
+Canonical NDJSON remains an explicit legacy/capture/export path for recording,
+demo, import, and debug workflows.
 
 ## Terminology
 
@@ -110,6 +110,7 @@ https://drive.google.com/file/d/1o5qYAFJFuklDwqu1LvT3_zN3f_tN2OL_/view?usp=shari
 5. Observability is available with `docker compose --profile observability up --build`.
 6. Featureplant templates default to canonical DB rows with `FEATUREPLANT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FEATUREPLANT_SOURCE=recording` for explicit legacy/demo recording runs.
 7. Frontend adapter defaults to canonical DB rows with `FRONTEND_ADAPTER_DB_URL` or `DB_WRITER_DATABASE_URL`; set `FRONTEND_ADAPTER_SOURCE=recording` only for explicit legacy/demo/debug recording runs.
+8. Research export defaults to canonical DB rows with `RESEARCH_EXPORT_DB_URL` or `DB_WRITER_DATABASE_URL`; set `--source=recording` only for explicit legacy/export/debug recording runs.
 
 Backend stream contracts, schema mappings, replay behavior, featureplant behavior, and operations notes are documented under `docs/`.
 

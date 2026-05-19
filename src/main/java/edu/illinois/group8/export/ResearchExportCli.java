@@ -6,11 +6,15 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.canonical.StreamContract;
 import edu.illinois.group8.canonical.StreamRegistry;
 import edu.illinois.group8.feature.BestBidOfferFeatureModule;
+import edu.illinois.group8.feature.CanonicalEnvelopeSource;
+import edu.illinois.group8.feature.DbCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.FeatureModule;
 import edu.illinois.group8.feature.FeaturePlantService;
 import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.feature.TickerSnapshotFeatureModule;
 import edu.illinois.group8.feature.TradeTapeFeatureModule;
+import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
+import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -33,19 +37,21 @@ public final class ResearchExportCli {
 
     public static void main(String[] args) {
         Config config = Config.parse(args);
-        RecordingCanonicalEnvelopeSource source = RecordingCanonicalEnvelopeSource.fromRoot(
-            config.recordingRoot, config.streams, config.maxEvents
-        );
+        run(config);
+    }
+
+    static void run(Config config) {
+        CanonicalEnvelopeSource source = config.source();
         long totalEnvelopes;
         Map<String, Long> rowCounts;
         try (CsvFeatureExportSink sink = new CsvFeatureExportSink(
-                config.outputDirectory,
-                config.markets,
-                config.fromTsMs,
-                config.toTsMs,
+                config.outputDirectory(),
+                config.markets(),
+                config.fromTsMs(),
+                config.toTsMs(),
                 msg -> System.err.println("research-export: " + msg));
-             FeaturePlantService service = new FeaturePlantService(source, config.modules, sink)) {
-            totalEnvelopes = service.runUntilExhausted(config.batchSize);
+             FeaturePlantService service = new FeaturePlantService(source, config.modules(), sink)) {
+            totalEnvelopes = service.runUntilExhausted(config.batchSize());
             rowCounts = sink.rowCounts();
         }
         writeMetadata(config, totalEnvelopes, rowCounts);
@@ -54,22 +60,31 @@ public final class ResearchExportCli {
         );
     }
 
-    private static void writeMetadata(Config config, long totalEnvelopes, Map<String, Long> rowCounts) {
+    static void writeMetadata(Config config, long totalEnvelopes, Map<String, Long> rowCounts) {
         ObjectMapper mapper = new JsonCanonicalSerializer().mapper().copy()
             .enable(SerializationFeature.INDENT_OUTPUT);
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("run_ts_iso", Instant.now().toString());
-        metadata.put("source_mode", config.sourceMode);
-        metadata.put("source_root", config.recordingRoot.toString());
-        metadata.put("streams", config.streams.stream().map(StreamContract::streamName).toList());
-        metadata.put("modules", config.modules.stream().map(FeatureModule::name).toList());
-        metadata.put("markets", config.markets.isEmpty() ? null : List.copyOf(config.markets));
-        metadata.put("from_ts_ms", config.fromTsMs);
-        metadata.put("to_ts_ms", config.toTsMs);
-        metadata.put("max_events", config.maxEvents);
+        metadata.put("source_mode", config.sourceMode().metadataName());
+        metadata.put(
+            "source_root",
+            config.sourceMode() == SourceMode.RECORDING ? config.recordingRoot().toString() : null
+        );
+        if (config.sourceMode() == SourceMode.DB) {
+            metadata.put("source_db_url_configured", !config.dbUrl().isBlank());
+            metadata.put("source_db_user_configured", !config.dbUser().isBlank());
+            metadata.put("db_include_replay_events", config.dbIncludeReplayEvents());
+            metadata.put("db_replay_id", config.dbReplayId().isBlank() ? null : config.dbReplayId());
+        }
+        metadata.put("streams", config.streams().stream().map(StreamContract::streamName).toList());
+        metadata.put("modules", config.modules().stream().map(FeatureModule::name).toList());
+        metadata.put("markets", config.markets().isEmpty() ? null : List.copyOf(config.markets()));
+        metadata.put("from_ts_ms", config.fromTsMs());
+        metadata.put("to_ts_ms", config.toTsMs());
+        metadata.put("max_events", config.maxEvents());
         metadata.put("total_envelopes", totalEnvelopes);
         metadata.put("output_rows", rowCounts);
-        Path target = config.outputDirectory.resolve("metadata.json");
+        Path target = config.outputDirectory().resolve("metadata.json");
         try {
             Files.writeString(target, mapper.writeValueAsString(metadata));
         } catch (IOException e) {
@@ -77,8 +92,33 @@ public final class ResearchExportCli {
         }
     }
 
+    enum SourceMode {
+        DB("db"), RECORDING("recording");
+
+        private final String metadataName;
+
+        SourceMode(String metadataName) {
+            this.metadataName = metadataName;
+        }
+
+        static SourceMode parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return DB;
+            }
+            return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+                case "db", "postgres", "postgresql", "timescale", "timescaledb" -> DB;
+                case "recording", "history", "storage" -> RECORDING;
+                default -> throw new IllegalArgumentException("Unknown research-export source: " + raw);
+            };
+        }
+
+        String metadataName() {
+            return metadataName;
+        }
+    }
+
     record Config(
-        String sourceMode,
+        SourceMode sourceMode,
         Path recordingRoot,
         List<StreamContract> streams,
         List<FeatureModule> modules,
@@ -87,11 +127,39 @@ public final class ResearchExportCli {
         int batchSize,
         Long fromTsMs,
         Long toTsMs,
-        Set<String> markets
+        Set<String> markets,
+        String dbUrl,
+        String dbUser,
+        String dbPassword,
+        boolean dbIncludeReplayEvents,
+        String dbReplayId
     ) {
+        Config {
+            if (sourceMode == null) {
+                throw new IllegalArgumentException("sourceMode is required");
+            }
+            recordingRoot = recordingRoot == null ? Path.of("recordings") : recordingRoot;
+            streams = List.copyOf(streams);
+            modules = List.copyOf(modules);
+            if (outputDirectory == null) {
+                throw new IllegalArgumentException("--output=<dir> is required");
+            }
+            batchSize = Math.max(1, batchSize);
+            maxEvents = Math.max(0L, maxEvents);
+            markets = java.util.Collections.unmodifiableSet(new LinkedHashSet<>(markets));
+            dbUrl = normalize(dbUrl);
+            dbUser = normalize(dbUser);
+            dbPassword = dbPassword == null ? "" : dbPassword;
+            dbReplayId = normalize(dbReplayId);
+        }
+
         static Config parse(String[] args) {
-            String sourceMode = "recording";
-            Path recordingRoot = Path.of("recordings");
+            return parse(args, System.getenv());
+        }
+
+        static Config parse(String[] args, Map<String, String> env) {
+            SourceMode sourceMode = SourceMode.parse(value(env, "RESEARCH_EXPORT_SOURCE", "db"));
+            Path recordingRoot = Path.of(value(env, "RESEARCH_EXPORT_RECORDING_ROOT", "recordings"));
             List<StreamContract> streams = List.of();
             List<FeatureModule> modules = List.of();
             Path outputDirectory = null;
@@ -100,12 +168,21 @@ public final class ResearchExportCli {
             Long fromTsMs = null;
             Long toTsMs = null;
             Set<String> markets = Set.of();
+            String dbUrl = value(env, "RESEARCH_EXPORT_DB_URL", value(env, "DB_WRITER_DATABASE_URL", ""));
+            String dbUser = value(env, "RESEARCH_EXPORT_DB_USER", value(env, "DB_WRITER_DATABASE_USER", ""));
+            String dbPassword = value(
+                env, "RESEARCH_EXPORT_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")
+            );
+            boolean dbIncludeReplayEvents = Boolean.parseBoolean(
+                value(env, "RESEARCH_EXPORT_DB_INCLUDE_REPLAY", "false")
+            );
+            String dbReplayId = value(env, "RESEARCH_EXPORT_DB_REPLAY_ID", "");
 
             for (String arg : args) {
                 if ("--help".equals(arg) || "-h".equals(arg)) {
                     printUsageAndExit();
                 } else if (arg.startsWith("--source=")) {
-                    sourceMode = arg.substring("--source=".length());
+                    sourceMode = SourceMode.parse(arg.substring("--source=".length()));
                 } else if (arg.startsWith("--root=")) {
                     recordingRoot = Path.of(arg.substring("--root=".length()));
                 } else if (arg.startsWith("--streams=")) {
@@ -124,14 +201,19 @@ public final class ResearchExportCli {
                     toTsMs = Long.parseLong(arg.substring("--to-ts-ms=".length()));
                 } else if (arg.startsWith("--markets=")) {
                     markets = resolveMarkets(arg.substring("--markets=".length()));
+                } else if (arg.startsWith("--db-url=")) {
+                    dbUrl = arg.substring("--db-url=".length());
+                } else if (arg.startsWith("--db-user=")) {
+                    dbUser = arg.substring("--db-user=".length());
+                } else if (arg.startsWith("--db-password=")) {
+                    dbPassword = arg.substring("--db-password=".length());
+                } else if ("--include-replay".equals(arg)) {
+                    dbIncludeReplayEvents = true;
+                } else if (arg.startsWith("--replay-id=")) {
+                    dbReplayId = arg.substring("--replay-id=".length());
                 } else {
                     throw new IllegalArgumentException("Unknown research-export argument: " + arg);
                 }
-            }
-            if (!isRecording(sourceMode)) {
-                throw new IllegalArgumentException(
-                    "Only --source=recording is supported by research-export (got: " + sourceMode + ")"
-                );
             }
             if (streams.isEmpty()) {
                 throw new IllegalArgumentException("--streams must include at least one canonical stream");
@@ -152,15 +234,35 @@ public final class ResearchExportCli {
                 Math.max(1, batchSize),
                 fromTsMs,
                 toTsMs,
-                markets
+                markets,
+                dbUrl,
+                dbUser,
+                dbPassword,
+                dbIncludeReplayEvents,
+                dbReplayId
             );
         }
 
-        private static boolean isRecording(String mode) {
-            return switch (mode.trim().toLowerCase(Locale.ROOT)) {
-                case "recording", "history", "storage" -> true;
-                default -> false;
+        CanonicalEnvelopeSource source() {
+            return switch (sourceMode) {
+                case DB -> dbSource();
+                case RECORDING -> RecordingCanonicalEnvelopeSource.fromRoot(recordingRoot, streams, maxEvents);
             };
+        }
+
+        private CanonicalEnvelopeSource dbSource() {
+            if (dbUrl.isBlank()) {
+                throw new IllegalArgumentException(
+                    "RESEARCH_EXPORT_DB_URL, DB_WRITER_DATABASE_URL, or --db-url is required when --source=db"
+                );
+            }
+            return new DbCanonicalEnvelopeSource(
+                new JdbcCanonicalEventReader(JdbcConnectionFactories.fromDriverManager(dbUrl, dbUser, dbPassword)),
+                streams,
+                maxEvents,
+                dbIncludeReplayEvents,
+                dbReplayId
+            );
         }
 
         private static List<StreamContract> resolveStreams(String raw) {
@@ -202,6 +304,15 @@ public final class ResearchExportCli {
                 .distinct()
                 .toList();
         }
+
+        private static String value(Map<String, String> env, String key, String defaultValue) {
+            String value = env.get(key);
+            return value == null || value.isBlank() ? defaultValue : value;
+        }
+
+        private static String normalize(String value) {
+            return value == null ? "" : value.trim();
+        }
     }
 
     private static void printUsageAndExit() {
@@ -209,8 +320,13 @@ public final class ResearchExportCli {
             Usage: ResearchExportCli [options]
 
             Options:
-              --source=recording
+              --source=db|recording
               --root=/path/to/recordings
+              --db-url=jdbc:postgresql://host:5432/kalshi
+              --db-user=kalshi
+              --db-password=...
+              --include-replay
+              --replay-id=<id>
               --streams=canonical.trade,canonical.ticker,derived.top_of_book
               --modules=bbo,ticker_snapshot,trade_tape
               --output=/path/to/output-dir

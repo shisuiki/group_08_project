@@ -1,21 +1,27 @@
 # Research Export Runbook
 
-`ResearchExportCli` is a batch exporter that turns historical canonical
-recordings into per-feature CSV files for research and backtesting consumption.
+`ResearchExportCli` is a batch exporter that turns historical canonical rows
+into per-feature CSV files for research and backtesting consumption.
 It is downstream of `FeaturePlantService` and consumes `FeatureOutput` through
 a `FeatureOutputSink` (`CsvFeatureExportSink`). It does not subscribe to live
 tickerplant streams and does not introduce any new feature modules; see
 `docs/featureplant_runbook.md` for upstream feature semantics.
 
-The source is always `RecordingCanonicalEnvelopeSource`, which reads
-`recordings/canonical` (stream-recorder canonical capture and/or REST
-backfill output). Live `--source=aeron` is intentionally not supported here.
+The default source is canonical DB rows through `DbCanonicalEnvelopeSource`.
+Replay rows are excluded by default. Recording input remains an explicit
+legacy/export/debug/import path for `recordings/canonical` trees. Live
+`--source=aeron` is intentionally not supported here.
 
 ## Arguments
 
 ```text
---source=recording                       # only mode currently supported
---root=<recordings dir>                  # parent of canonical/
+--source=db|recording                    # default db
+--db-url=<jdbc url>                      # fallback RESEARCH_EXPORT_DB_URL, then DB_WRITER_DATABASE_URL
+--db-user=<user>                         # fallback RESEARCH_EXPORT_DB_USER, then DB_WRITER_DATABASE_USER
+--db-password=<password>                 # fallback RESEARCH_EXPORT_DB_PASSWORD, then DB_WRITER_DATABASE_PASSWORD
+--include-replay                         # include replay rows in DB source
+--replay-id=<id>                         # restrict DB source to one replay id
+--root=<recordings dir>                  # parent of canonical/ when source=recording
 --streams=<csv canonical stream names>   # same names as FeaturePlantCli
 --modules=<csv feature module names>     # bbo|ticker_snapshot|trade_tape
 --output=<output dir>                    # CSV destination (auto-created)
@@ -38,13 +44,15 @@ mvn -q -DskipTests package
 
 java -cp target/kalshi-project-1.0-SNAPSHOT.jar \
   edu.illinois.group8.export.ResearchExportCli \
-  --source=recording \
-  --root=recordings \
+  --db-url=jdbc:postgresql://127.0.0.1:5432/kalshi \
   --streams=canonical.trade,canonical.ticker,derived.top_of_book \
   --modules=bbo,ticker_snapshot,trade_tape \
   --output=exports/$(date -u +%Y%m%dT%H%M%SZ) \
   --max-events=100000
 ```
+
+For an explicit legacy/export/debug recording run, add
+`--source=recording --root=recordings`.
 
 ## Docker Run
 
@@ -60,16 +68,17 @@ docker compose --profile featureplant run --rm \
   --entrypoint sh \
   featureplant \
   -c "java -cp /app/app.jar edu.illinois.group8.export.ResearchExportCli \
-        --source=recording \
-        --root=/app/recordings \
+        --db-url=\$FEATUREPLANT_DB_URL \
         --streams=canonical.trade,canonical.ticker,derived.top_of_book \
         --modules=bbo,ticker_snapshot,trade_tape \
         --output=/app/exports/run"
 ```
 
-The `recordings` volume on the `featureplant` service is mounted read-only,
-which is fine because `ResearchExportCli` only reads recordings; output is
-written to the separately-mounted `exports` volume.
+The `featureplant` image already includes the DB reader dependencies, and its
+`FEATUREPLANT_DB_URL` environment falls back to `DB_WRITER_DATABASE_URL`. The
+`recordings` volume remains mounted read-only only for explicit
+`--source=recording` export/debug/import runs; output is written to the
+separately-mounted `exports` volume.
 
 ## Output Shape
 
@@ -99,8 +108,12 @@ Alongside the CSVs, `ResearchExportCli` writes `<output>/metadata.json`:
 ```json
 {
   "run_ts_iso": "2026-05-12T17:03:21.412Z",
-  "source_mode": "recording",
-  "source_root": "recordings",
+  "source_mode": "db",
+  "source_root": null,
+  "source_db_url_configured": true,
+  "source_db_user_configured": true,
+  "db_include_replay_events": false,
+  "db_replay_id": null,
   "streams": ["canonical.trade", "canonical.ticker", "derived.top_of_book"],
   "modules": ["feature.bbo", "feature.ticker_snapshot", "feature.trade_tape"],
   "markets": null,

@@ -56,14 +56,13 @@ Kalshi WebSocket
   header; remove `Tickerplant` JSON routing parse.
 
 - [High] Some downstream storage paths are still file-backed.
-  Impact: research export still depends on recording files; FeaturePlant and
-  frontend adapter have moved to DB by default.
+  Impact: recording/export/debug/import paths still use files; live FeaturePlant,
+  frontend adapter, and research export have moved to DB by default.
   Evidence: `RawIngestRecorder`, `TickerplantStreamRecorder`,
-  `RecordingCanonicalEnvelopeSource`, `RawRecordingReader`, and
-  `ResearchExportCli` are file/NDJSON based.
-  Fix: keep FeaturePlant and frontend adapter on the canonical DB reader by
-  default, move remaining export readers to DB, and keep runtime NDJSON as
-  explicit capture/debug/import/export only.
+  `RecordingCanonicalEnvelopeSource`, and `RawRecordingReader` are retained for
+  explicit file/NDJSON workflows.
+  Fix: keep default readers on DB and keep runtime NDJSON as explicit
+  capture/debug/import/export only.
 
 - [High] Best-effort DB conflicts with "complete audit" language.
   Impact: if DB queue drops, DB history is permanently incomplete.
@@ -182,8 +181,8 @@ Verification:
 Deliverables:
 
 - DB migrations:
-  - `raw_ws_events`
-  - `canonical_events`
+  - `raw_ws_events` (landed)
+  - `canonical_events` (landed)
   - `latest_market_state`
   - `feature_outputs`
 - `AsyncDbWriter` with bounded queues and JDBC batch insert.
@@ -241,8 +240,8 @@ Verification:
 
 Deliverables:
 
-- `DbRawReplaySource` becomes default.
-- `DbCanonicalEnvelopeSource` for featureplant/research.
+- `DbRawReplaySource` becomes default. (landed)
+- `DbCanonicalEnvelopeSource` for featureplant/research. (landed)
 - `FrontendQueryStore` for `/symbols`, `/quotes`, `/datafeed/history`.
 - File readers moved to legacy import/test fixture mode.
 
@@ -254,9 +253,9 @@ Rules:
 
 Verification:
 
-- frontend demo works with DB only.
-- featureplant can run from DB source.
-- research export can run from DB source.
+- frontend demo works with DB only. (landed)
+- featureplant can run from DB source. (landed)
+- research export can run from DB source. (landed)
 
 ### Batch 8: Observability And Demo
 
@@ -351,7 +350,7 @@ Smallest useful slice:
 2. Add perf baseline script for `HotPathProfileCli`.
 3. Land default single-offer/drop-first ingress with drop metrics.
 4. Add `AsyncDbWriter` skeleton with bounded queue and drop metrics.
-5. Add DB migrations for `raw_ws_events` and `canonical_events`.
+5. DB migrations for `raw_ws_events` and `canonical_events` are landed.
 6. Add tests for duplicate insert and queue overflow.
 
 This slice proves the latency-first contract without rewriting the full system.

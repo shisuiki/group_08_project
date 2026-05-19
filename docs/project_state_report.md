@@ -53,9 +53,8 @@ Current code differs from the diagram:
   `DataProcessor` / cluster runtime.
 - NDJSON/S3 remains for recording-capture, offline replay, debug, import, and
   export workflows, not the live source of truth.
-- FeaturePlant and frontend adapter default to canonical DB rows. Recording
-  remains an explicit legacy/debug/demo/import source, and research DB defaults
-  remain migration work.
+- FeaturePlant, frontend adapter, and research export default to canonical DB
+  rows. Recording remains an explicit legacy/debug/demo/import/export source.
 - Current code adds raw replay, REST backfill, stream recorder, featureplant,
   frontend adapter, stream tap, Prometheus/Grafana, and profiling.
 
@@ -130,10 +129,9 @@ Current database status:
   wiring, and raw replay reader support.
 - DB schema/runtime wiring exists for raw/canonical paths. A canonical DB cursor
   reader primitive exists for the current single-writer path and backs the
-  default FeaturePlant DB source. Its cursor is global over
+  default FeaturePlant, frontend adapter, and research export DB sources. Its cursor is global over
   `canonical_commit_seq`; replay rows are excluded unless a replay id or
-  include-replay option is supplied. Frontend/research defaults are still
-  migration work.
+  include-replay option is supplied.
 - No persistent feature store schema is present.
 - No S3-to-Timescale loader is implemented in this repo.
 
@@ -141,9 +139,8 @@ Remaining database migration work:
 
 - Keep S3/file recordings as recording-capture/offline/debug/import/export
   artifacts.
-- Finish DB reader/query migration for raw/canonical data already written to
-  Timescale/Postgres, with import/export paths for recordings and frontend /
-  research defaults still on their existing sources.
+- Finish DB query/API migration for raw/canonical data already written to
+  Timescale/Postgres, while keeping recording import/export boundaries explicit.
 - Add versioned feature storage behind FeaturePlant.
 - Add query APIs over feature/canonical storage.
 
@@ -202,7 +199,7 @@ Legend:
 | Feature/query API | planned | `/features`, `/bars`, WS features absent |
 | Frontend adapter | current-demo | HTTP polling datafeed demo; canonical DB source is default, recording is explicit legacy/debug/demo |
 | Replay viewer controls | planned | pause/resume/seek/speed absent |
-| Research CSV export | current-basic | recording/export path; DB-backed readers remain migration work |
+| Research CSV export | current-basic | canonical DB source is default, recording is explicit legacy/export/debug/import |
 | Semantic parser/schema | planned | absent |
 | Ontology/chain builder | planned | absent |
 | Constraint engine | planned | absent |
@@ -342,7 +339,7 @@ Do not demo as completed:
 5. Add CI gates: `mvn test`, `mvn package`, Docker build, compose config.
 6. Add health smoke checks for frontend adapter, streamtap, recorder.
 7. Default HTTP admin endpoints to localhost or add auth.
-8. Define remaining DB migration: DB query API, research DB defaults, and
-   recording import/export boundaries.
+8. Define remaining DB migration: DB query API and recording import/export
+   boundaries.
 9. Decide whether to split Maven modules or at least enforce package boundaries.
 10. Mark semantic/pricing/arb modules as future work only.

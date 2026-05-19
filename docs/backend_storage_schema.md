@@ -51,8 +51,8 @@ receive timestamp, market ticker, or raw event id.
 
 `canonical_events` is the normalized DB table for readers that need durable
 canonical market data. `DataProcessor` enqueues canonical copies on the live
-cluster path, and FeaturePlant reads this table by default through the canonical
-DB cursor reader.
+cluster path, and FeaturePlant, the frontend adapter, and research export read
+this table by default through the canonical DB cursor reader.
 
 `recordings/canonical` is written by `TickerplantStreamRecorder`, which
 subscribes to the tickerplant exactly as a downstream Aeron client would. This
