@@ -723,6 +723,8 @@ assert_kalshi_app_image_contract() {
         'IMAGE_DIR="\$APP_DIR/.deploy-state/images"' \
         "ls -1t kalshi-project-*.tar.gz 2>/dev/null | awk 'NR>6 {print}'" \
         'sudo docker builder prune -af >/dev/null || true' \
+        'sudo docker image prune -af >/dev/null || true' \
+        'sudo docker system prune -af >/dev/null || true' \
         'gzip -t "\$IMAGE_TAR"' \
         'sudo docker load' \
         'sudo docker image inspect "$KALSHI_APP_IMAGE"' \

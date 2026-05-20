@@ -798,6 +798,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("mkdir -p \"\\$IMAGE_DIR\""));
         assertTrue(workflow.contains("ls -1t kalshi-project-*.tar.gz 2>/dev/null | awk 'NR>6 {print}'"));
         assertTrue(workflow.contains("sudo docker builder prune -af >/dev/null || true"));
+        assertTrue(workflow.contains("sudo docker image prune -af >/dev/null || true"));
+        assertTrue(workflow.contains("sudo docker system prune -af >/dev/null || true"));
         assertTrue(workflow.contains("scp -i ~/.ssh/ec2_key \"$image_tar\" \"$EC2_USER@$EC2_HOST:$DEPLOY_PATH/$KALSHI_APP_IMAGE_TAR\""));
         assertTrue(workflow.contains("IMAGE_TAR=\"\\$APP_DIR/$KALSHI_APP_IMAGE_TAR\""));
         assertTrue(workflow.contains("LAST_SUCCESS_ENV=\"\\$STATE_DIR/last_success.env\""));

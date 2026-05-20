@@ -431,6 +431,7 @@ jobs:
           fi
           sudo docker builder prune -af >/dev/null || true
           sudo docker image prune -af >/dev/null || true
+          sudo docker system prune -af >/dev/null || true
           df -h "\$APP_DIR" || true
 
           if [ -d "\$APP_DIR/.git" ]; then
@@ -480,6 +481,9 @@ jobs:
             rm -f -- "\$old_tar" "\$old_tar.sha256"
           done
           sudo docker builder prune -af >/dev/null || true
+          sudo docker image prune -af >/dev/null || true
+          sudo docker system prune -af >/dev/null || true
+          df -h "\$APP_DIR" || true
           REMOTE
           scp -i ~/.ssh/ec2_key "$image_tar" "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/$KALSHI_APP_IMAGE_TAR"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "bash -s" <<REMOTE
