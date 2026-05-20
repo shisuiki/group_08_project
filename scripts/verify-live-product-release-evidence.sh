@@ -1,12 +1,24 @@
 #!/bin/sh
 set -eu
 
-if [ $# -ne 1 ]; then
-    printf 'Usage: %s <release-evidence.json>\n' "$0" >&2
-    exit 1
-fi
-
-evidence_file="$1"
+summary_mode="false"
+case "$#" in
+    1)
+        evidence_file="$1"
+        ;;
+    2)
+        if [ "$1" != "--summary-md" ]; then
+            printf 'Usage: %s [--summary-md] <release-evidence.json>\n' "$0" >&2
+            exit 1
+        fi
+        summary_mode="true"
+        evidence_file="$2"
+        ;;
+    *)
+        printf 'Usage: %s [--summary-md] <release-evidence.json>\n' "$0" >&2
+        exit 1
+        ;;
+esac
 if [ ! -s "$evidence_file" ]; then
     printf 'release evidence file is missing or empty: %s\n' "$evidence_file" >&2
     exit 1
@@ -15,11 +27,13 @@ fi
 python3 - "$evidence_file" \
     "${EXPECTED_KALSHI_RELEASE_SHA:-}" \
     "${EXPECTED_KALSHI_GITHUB_RUN_ID:-}" \
-    "${EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT:-}" <<'PY'
+    "${EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT:-}" \
+    "$summary_mode" \
+    "${LIVE_PRODUCT_RELEASE_EVIDENCE_ARTIFACT_NAME:-}" <<'PY'
 import json
 import sys
 
-path, expected_sha, expected_run_id, expected_run_attempt = sys.argv[1:5]
+path, expected_sha, expected_run_id, expected_run_attempt, summary_mode, artifact_name = sys.argv[1:7]
 
 with open(path, "r", encoding="utf-8") as handle:
     evidence = json.load(handle)
@@ -113,6 +127,33 @@ if errors:
     for error in errors:
         print(f"FAIL live_product_release_evidence {error}", file=sys.stderr)
     raise SystemExit(1)
+
+def md(value):
+    if value is None:
+        return ""
+    text = str(value)
+    return text.replace("|", "\\|").replace("\n", " ")
+
+if summary_mode == "true":
+    print("### Live Product Release Evidence")
+    print()
+    print("| Field | Value |")
+    print("| --- | --- |")
+    rows = (
+        ("release_sha", at(evidence, "release_sha")),
+        ("github_run_id", at(evidence, "github_run_id")),
+        ("github_run_attempt", at(evidence, "github_run_attempt")),
+        ("deploy_profile", at(evidence, "deploy_profile")),
+        ("outcome", at(evidence, "outcome")),
+        ("pipeline_status", at(pipeline, "status") if isinstance(pipeline, dict) else ""),
+        ("final_product_readiness", at(final, "product_readiness_status") if isinstance(final, dict) else ""),
+        ("frontend_release_sha", at(frontend_health, "release_sha") if isinstance(frontend_health, dict) else ""),
+        ("frontend_release_profile", at(frontend_health, "release_profile") if isinstance(frontend_health, dict) else ""),
+        ("evidence_artifact", artifact_name),
+    )
+    for key, value in rows:
+        print(f"| {key} | {md(value)} |")
+    raise SystemExit(0)
 
 print(
     "PASS live_product_release_evidence "

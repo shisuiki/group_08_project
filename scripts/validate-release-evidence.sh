@@ -74,6 +74,13 @@ require_contains "$workflow" 'bash -n scripts/verify-live-product-release-eviden
 require_contains "$workflow" 'sh -n scripts/verify-live-product-release-evidence.sh'
 require_contains "$workflow" 'scripts/validate-release-evidence.sh'
 require_contains "$workflow" 'scripts/verify-live-product-release-evidence.sh'
+require_contains "$workflow" 'LIVE_PRODUCT_RELEASE_EVIDENCE_ARTIFACT_NAME: live-product-release-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}'
+require_contains "$workflow" "printf -v q_remote_evidence_path '%q' \"\$DEPLOY_PATH/\$evidence_file\""
+require_contains "$workflow" 'scp -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST:$q_remote_evidence_path" "$local_evidence"'
+require_contains "$workflow" 'scripts/verify-live-product-release-evidence.sh --summary-md "$local_evidence" >> "$GITHUB_STEP_SUMMARY"'
+require_contains "$workflow" 'Upload live-product release evidence'
+require_contains "$workflow" 'uses: actions/upload-artifact@v6'
+require_contains "$workflow" 'path: release-evidence/*.json'
 require_contains "$workflow" 'KALSHI_RELEASE_SHA=$q_kalshi_release_sha'
 require_contains "$workflow" 'KALSHI_GITHUB_RUN_ID=$q_kalshi_github_run_id'
 require_contains "$workflow" 'KALSHI_GITHUB_RUN_ATTEMPT=$q_kalshi_github_run_attempt'
@@ -138,6 +145,29 @@ EXPECTED_KALSHI_RELEASE_SHA=release-sha \
 EXPECTED_KALSHI_GITHUB_RUN_ID=123 \
 EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=2 \
     scripts/verify-live-product-release-evidence.sh "$evidence_file" >/dev/null
+summary_file="$tmpdir/summary.md"
+LIVE_PRODUCT_RELEASE_EVIDENCE_ARTIFACT_NAME=live-product-release-evidence-release-sha-123-2 \
+EXPECTED_KALSHI_RELEASE_SHA=release-sha \
+EXPECTED_KALSHI_GITHUB_RUN_ID=123 \
+EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=2 \
+    scripts/verify-live-product-release-evidence.sh --summary-md "$evidence_file" > "$summary_file"
+for expected_summary in \
+    '### Live Product Release Evidence' \
+    '| release_sha | release-sha |' \
+    '| github_run_id | 123 |' \
+    '| github_run_attempt | 2 |' \
+    '| deploy_profile | live-product |' \
+    '| outcome | success |' \
+    '| pipeline_status | ok |' \
+    '| final_product_readiness | ok |' \
+    '| frontend_release_sha | release-sha |' \
+    '| frontend_release_profile | live-product |' \
+    '| evidence_artifact | live-product-release-evidence-release-sha-123-2 |'; do
+    if ! grep -Fq "$expected_summary" "$summary_file"; then
+        printf 'release evidence summary missing expected field: %s\n' "$expected_summary" >&2
+        exit 1
+    fi
+done
 degraded_evidence_file="$tmpdir/degraded-release-evidence.json"
 python3 - "$evidence_file" "$degraded_evidence_file" <<'PY'
 import json
@@ -169,6 +199,10 @@ for forbidden_value in \
     secret-key-path; do
     if grep -Fq "$forbidden_value" "$evidence_file"; then
         printf 'release evidence JSON leaked forbidden value %s\n' "$forbidden_value" >&2
+        exit 1
+    fi
+    if grep -Fq "$forbidden_value" "$summary_file"; then
+        printf 'release evidence summary leaked forbidden value %s\n' "$forbidden_value" >&2
         exit 1
     fi
 done

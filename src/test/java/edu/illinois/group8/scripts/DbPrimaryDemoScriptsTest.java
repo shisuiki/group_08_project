@@ -361,6 +361,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("scripts/verify-live-product-release-evidence.sh \"$evidence_file\""));
         assertTrue(validator.contains("degraded-release-evidence.json"));
         assertTrue(validator.contains("verifier accepted degraded product readiness"));
+        assertTrue(validator.contains("release evidence summary missing expected field"));
+        assertTrue(validator.contains("release evidence summary leaked forbidden value"));
+        assertTrue(validator.contains("| evidence_artifact | live-product-release-evidence-release-sha-123-2 |"));
         assertTrue(validator.contains("python3 -m json.tool \"$evidence_file\""));
         assertTrue(validator.contains("secret-db-password"));
         String verifier = read("scripts/verify-live-product-release-evidence.sh");
@@ -493,6 +496,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("KALSHI_DEPLOY_PROFILE=$KALSHI_DEPLOY_PROFILE"));
         assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ID=$KALSHI_GITHUB_RUN_ID"));
         assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ATTEMPT=$KALSHI_GITHUB_RUN_ATTEMPT"));
+        assertTrue(workflow.contains("LIVE_PRODUCT_RELEASE_EVIDENCE_ARTIFACT_NAME: live-product-release-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"));
         assertTrue(workflow.contains("LOCAL_DB_NAME=$LOCAL_DB_NAME"));
         assertTrue(workflow.contains("LOCAL_DB_USER=$LOCAL_DB_USER"));
         assertTrue(workflow.contains("LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD"));
@@ -526,6 +530,13 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("Verify live-product release evidence"));
         assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product'"));
         assertTrue(workflow.contains("scripts/verify-live-product-release-evidence.sh $q_evidence_file"));
+        assertTrue(workflow.contains("printf -v q_remote_evidence_path '%q' \"$DEPLOY_PATH/$evidence_file\""));
+        assertTrue(workflow.contains("scp -i ~/.ssh/ec2_key \"$EC2_USER@$EC2_HOST:$q_remote_evidence_path\" \"$local_evidence\""));
+        assertTrue(workflow.contains("scripts/verify-live-product-release-evidence.sh --summary-md \"$local_evidence\" >> \"$GITHUB_STEP_SUMMARY\""));
+        assertTrue(workflow.contains("Upload live-product release evidence"));
+        assertTrue(workflow.contains("name: ${{ env.LIVE_PRODUCT_RELEASE_EVIDENCE_ARTIFACT_NAME }}"));
+        assertTrue(workflow.contains("path: release-evidence/*.json"));
+        assertTrue(workflow.contains("retention-days: 30"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_GITHUB_RUN_ID=$q_kalshi_github_run_id"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=$q_kalshi_github_run_attempt"));
     }
