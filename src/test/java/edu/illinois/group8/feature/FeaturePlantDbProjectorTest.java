@@ -9,6 +9,7 @@ import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
 import edu.illinois.group8.storage.db.FeatureOutputDbEvent;
 import edu.illinois.group8.storage.db.FeatureOutputProjectionStore;
 import edu.illinois.group8.storage.db.FeaturePlantProjectorLease;
+import edu.illinois.group8.storage.db.LatestMarketState;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
@@ -36,6 +37,16 @@ class FeaturePlantDbProjectorTest {
 
         assertEquals(5L, reader.requests.get(0).cursor().lastCommitSeq());
         assertEquals(List.of("commit outputs=1 cursor=6"), store.actions);
+        assertEquals(1, store.latestStates.size());
+        LatestMarketState state = store.latestStates.get(0);
+        assertEquals("MARKET-1", state.marketTicker());
+        assertEquals(1700000000006L, state.lastEventTsMs());
+        assertEquals("bbo-6", state.lastCanonicalEventId());
+        assertEquals(6L, state.lastCanonicalCommitSeq());
+        assertEquals(440000L, state.bestBidMicros());
+        assertEquals(470000L, state.bestAskMicros());
+        assertEquals(455000L, state.midpointMicros());
+        assertTrue(state.payload().contains("\"bid_price_micros\":440000"));
         assertEquals(6L, store.cursor.orElseThrow().lastCommitSeq());
         assertEquals(6L, projector.cursor().lastCommitSeq());
         assertEquals(1L, metrics.get(
@@ -76,6 +87,29 @@ class FeaturePlantDbProjectorTest {
         assertEquals(5L, reader.requests.get(1).cursor().lastCommitSeq());
         assertEquals(6L, projector.cursor().lastCommitSeq());
         assertEquals(6L, store.cursor.orElseThrow().lastCommitSeq());
+    }
+
+    @Test
+    void latestMarketStateFailureDoesNotAdvanceCursorAndEventCanBeReprocessed() {
+        FakeReader reader = new FakeReader(
+            List.of(bboEvent(6L, "bbo-6")),
+            List.of(bboEvent(6L, "bbo-6"))
+        );
+        FakeProjectionStore store = new FakeProjectionStore(new CanonicalDbCursor(5L));
+        store.failNextLatestState = true;
+        FeaturePlantDbProjector projector = newProjector(reader, store, new BackendMetrics());
+
+        assertThrows(IllegalStateException.class, () -> projector.poll(10));
+
+        assertEquals(5L, projector.cursor().lastCommitSeq());
+        assertEquals(5L, store.cursor.orElseThrow().lastCommitSeq());
+
+        assertEquals(1, projector.poll(10));
+
+        assertEquals(6L, projector.cursor().lastCommitSeq());
+        assertEquals(6L, store.cursor.orElseThrow().lastCommitSeq());
+        assertEquals(1, store.latestStates.size());
+        assertEquals(6L, store.latestStates.get(0).lastCanonicalCommitSeq());
     }
 
     @Test
@@ -285,9 +319,11 @@ class FeaturePlantDbProjectorTest {
     private static final class FakeProjectionStore implements FeatureOutputProjectionStore {
         private Optional<CanonicalDbCursor> cursor;
         private boolean failNextCommit;
+        private boolean failNextLatestState;
         private boolean crashAfterWritingBeforeCursor;
         private final List<String> actions = new ArrayList<>();
         private final Set<String> uniqueFeatureEventIds = new LinkedHashSet<>();
+        private final List<LatestMarketState> latestStates = new ArrayList<>();
 
         private FakeProjectionStore(CanonicalDbCursor cursor) {
             this.cursor = Optional.ofNullable(cursor);
@@ -299,7 +335,12 @@ class FeaturePlantDbProjectorTest {
         }
 
         @Override
-        public void commitProjection(String cursorName, CanonicalDbCursor cursor, List<FeatureOutputDbEvent> outputs) {
+        public void commitProjection(
+            String cursorName,
+            CanonicalDbCursor cursor,
+            List<FeatureOutputDbEvent> outputs,
+            List<LatestMarketState> latestStates
+        ) {
             if (failNextCommit) {
                 failNextCommit = false;
                 throw new IllegalStateException("db unavailable");
@@ -307,6 +348,11 @@ class FeaturePlantDbProjectorTest {
             for (FeatureOutputDbEvent output : outputs) {
                 uniqueFeatureEventIds.add(output.featureEventId());
             }
+            if (failNextLatestState) {
+                failNextLatestState = false;
+                throw new IllegalStateException("latest state unavailable");
+            }
+            this.latestStates.addAll(latestStates);
             if (crashAfterWritingBeforeCursor) {
                 crashAfterWritingBeforeCursor = false;
                 throw new IllegalStateException("crash before cursor commit");

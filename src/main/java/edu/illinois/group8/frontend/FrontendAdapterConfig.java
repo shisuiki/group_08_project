@@ -39,6 +39,7 @@ public record FrontendAdapterConfig(
 ) {
     private static final int DEFAULT_FEATURE_OUTPUT_MAX_ROWS = 10_000;
     private static final int DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS = 1_000;
+    private static final int DEFAULT_LATEST_MARKET_STATE_REFRESH_INTERVAL_MS = 250;
     private static final int DEFAULT_METADATA_MAX_ROWS = 1_000;
 
     public enum SourceMode {
@@ -58,7 +59,7 @@ public record FrontendAdapterConfig(
     }
 
     public enum FeatureSource {
-        MODULES, FEATURE_OUTPUTS;
+        MODULES, FEATURE_OUTPUTS, LATEST_MARKET_STATE;
 
         public static FeatureSource parse(String raw) {
             if (raw == null || raw.isBlank()) {
@@ -67,8 +68,13 @@ public record FrontendAdapterConfig(
             return switch (raw.trim().toLowerCase(Locale.ROOT).replace('-', '_')) {
                 case "modules", "feature_modules" -> MODULES;
                 case "feature_outputs", "db_features", "persisted" -> FEATURE_OUTPUTS;
+                case "latest_state", "latest_market_state" -> LATEST_MARKET_STATE;
                 default -> throw new IllegalArgumentException("Unknown FRONTEND_ADAPTER_FEATURE_SOURCE: " + raw);
             };
+        }
+
+        public boolean dbBacked() {
+            return this == FEATURE_OUTPUTS || this == LATEST_MARKET_STATE;
         }
     }
 
@@ -218,12 +224,14 @@ public record FrontendAdapterConfig(
             booleanValue(
                 env,
                 "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED",
-                featureSource == FeatureSource.FEATURE_OUTPUTS
+                featureSource.dbBacked()
             ),
             intValue(
                 env,
                 "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS",
-                DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS
+                featureSource == FeatureSource.LATEST_MARKET_STATE
+                    ? DEFAULT_LATEST_MARKET_STATE_REFRESH_INTERVAL_MS
+                    : DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS
             ),
             intValue(
                 env,

@@ -651,10 +651,13 @@ validate_live_product_frontend_feature_source() {
     if [ -z "$feature_source" ]; then
         feature_source="feature_outputs"
     fi
-    if [ "$feature_source" != "feature_outputs" ]; then
-        log "live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs, got $feature_source."
-        return 1
-    fi
+    case "$feature_source" in
+        feature_outputs|latest_market_state|latest_state|latest-state) return 0 ;;
+        *)
+            log "live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state, got $feature_source."
+            return 1
+            ;;
+    esac
 }
 
 run_db_release_preflight() {

@@ -401,10 +401,13 @@ jobs:
 
           case "$DEPLOY_PROFILE" in
             live-product|db-primary-product)
-              if [ "$FRONTEND_ADAPTER_FEATURE_SOURCE" != "feature_outputs" ]; then
-                echo "$DEPLOY_PROFILE requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs" >&2
-                exit 1
-              fi
+              case "$FRONTEND_ADAPTER_FEATURE_SOURCE" in
+                feature_outputs|latest_market_state|latest_state|latest-state) ;;
+                *)
+                  echo "$DEPLOY_PROFILE requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" >&2
+                  exit 1
+                  ;;
+              esac
               ;;
           esac
 

@@ -10,6 +10,7 @@ LOCAL_DB_PASSWORD="${LOCAL_DB_PASSWORD:-kalshi}"
 FRONTEND_ADAPTER_DB_URL="${FRONTEND_ADAPTER_DB_URL:-jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME}}"
 FRONTEND_ADAPTER_DB_USER="${FRONTEND_ADAPTER_DB_USER:-$LOCAL_DB_USER}"
 FRONTEND_ADAPTER_DB_PASSWORD="${FRONTEND_ADAPTER_DB_PASSWORD:-$LOCAL_DB_PASSWORD}"
+FRONTEND_ADAPTER_FEATURE_SOURCE="${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}"
 FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS="${FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS:-500}"
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:${FRONTEND_ADAPTER_HOST_PORT:-8090}}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
@@ -25,14 +26,17 @@ wait_frontend_started() {
     attempt=1
     while :; do
         if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/health" -o "$tmpfile" \
-            && python3 - "$tmpfile" <<'PY'
+            && python3 - "$tmpfile" "$FRONTEND_ADAPTER_FEATURE_SOURCE" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     body = json.load(handle)
 if body.get("service") != "frontend-adapter":
     raise SystemExit("service mismatch")
-if body.get("feature_source") != "feature_outputs":
+expected_feature_source = sys.argv[2].strip().replace("-", "_")
+if expected_feature_source == "latest_state":
+    expected_feature_source = "latest_market_state"
+if body.get("feature_source") != expected_feature_source:
     raise SystemExit("feature source mismatch")
 refresh = body.get("feature_output_refresh")
 if not isinstance(refresh, dict) or refresh.get("enabled") is not True or refresh.get("running") is not True:
@@ -66,7 +70,7 @@ PY
 FRONTEND_ADAPTER_DB_URL="$FRONTEND_ADAPTER_DB_URL" \
 FRONTEND_ADAPTER_DB_USER="$FRONTEND_ADAPTER_DB_USER" \
 FRONTEND_ADAPTER_DB_PASSWORD="$FRONTEND_ADAPTER_DB_PASSWORD" \
-FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs \
+FRONTEND_ADAPTER_FEATURE_SOURCE="$FRONTEND_ADAPTER_FEATURE_SOURCE" \
 FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED=true \
 FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS="$FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS" \
 FRONTEND_ADAPTER_METADATA_SOURCE=auto \
@@ -78,6 +82,7 @@ EXPECTED_FEATURE_OUTPUTS_BEFORE=0 "$SCRIPT_DIR/db-primary-demo-run-featureplant.
 
 EXPECTED_FRONTEND_STARTED_AT="$frontend_started_at" \
 EXPECTED_REFRESH_TOTAL_LOADED_MIN=1 \
+EXPECTED_FEATURE_SOURCE="$FRONTEND_ADAPTER_FEATURE_SOURCE" \
 DEMO_SYMBOL="$DEMO_SYMBOL" \
 SMOKE_HTTP_ATTEMPTS="$SMOKE_HTTP_ATTEMPTS" \
 SMOKE_HTTP_RETRY_SLEEP_SECONDS="$SMOKE_HTTP_RETRY_SLEEP_SECONDS" \

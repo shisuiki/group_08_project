@@ -11,6 +11,7 @@ import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
 import edu.illinois.group8.storage.db.FeaturePlantProjectorLease;
 import edu.illinois.group8.storage.db.FeatureOutputDbEvent;
 import edu.illinois.group8.storage.db.FeatureOutputProjectionStore;
+import edu.illinois.group8.storage.db.LatestMarketState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -177,6 +178,7 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
         }
 
         List<FeatureOutputDbEvent> outputs = new ArrayList<>();
+        List<LatestMarketState> latestStates = new ArrayList<>();
         CanonicalDbCursor nextCursor = cursor;
         int projectedEvents = 0;
         long lastReadCommitSeq = cursor.lastCommitSeq();
@@ -191,7 +193,9 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
                 lastReadCommitSeq = event.canonicalCommitSeq();
                 CanonicalEnvelope envelope = CanonicalEnvelope.fromPayload(event.streamName(), event.payload(), mapper);
                 for (FeatureOutput output : collectOutputs(envelope)) {
-                    outputs.add(outputMapper.toDbEvent(output));
+                    FeatureOutputDbEvent dbEvent = outputMapper.toDbEvent(output);
+                    outputs.add(dbEvent);
+                    latestStateFor(output, dbEvent, event.canonicalCommitSeq()).ifPresent(latestStates::add);
                 }
                 nextCursor = event.nextCursor();
                 projectedEvents++;
@@ -206,7 +210,7 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
                 dbOutputAccepted.add(outputs.size());
             }
             lease.ensureHeld();
-            commitProjection(nextCursor, outputs);
+            commitProjection(nextCursor, outputs, latestStates);
             cursor = nextCursor;
             consumedEvents += projectedEvents;
             projectorEventsProjected.add(projectedEvents);
@@ -279,9 +283,48 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
         return outputs;
     }
 
-    private void commitProjection(CanonicalDbCursor nextCursor, List<FeatureOutputDbEvent> outputs) {
+    private java.util.Optional<LatestMarketState> latestStateFor(
+        FeatureOutput output,
+        FeatureOutputDbEvent dbEvent,
+        long canonicalCommitSeq
+    ) {
+        if (!BestBidOfferFeatureModule.FEATURE_NAME.equals(output.featureName())) {
+            return java.util.Optional.empty();
+        }
+        String marketTicker = dbEvent.marketTicker();
+        if (marketTicker == null || marketTicker.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new LatestMarketState(
+            marketTicker,
+            dbEvent.eventTsMs(),
+            dbEvent.sourceEventId(),
+            canonicalCommitSeq,
+            longValue(output.values().get("bid_price_micros")),
+            longValue(output.values().get("ask_price_micros")),
+            longValue(output.values().get("midpoint_micros")),
+            longValue(output.values().get("open_interest")),
+            dbEvent.values()
+        ));
+    }
+
+    private static Long longValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.parseLong(String.valueOf(value));
+    }
+
+    private void commitProjection(
+        CanonicalDbCursor nextCursor,
+        List<FeatureOutputDbEvent> outputs,
+        List<LatestMarketState> latestStates
+    ) {
         try {
-            projectionStore.commitProjection(cursorName, nextCursor, outputs);
+            projectionStore.commitProjection(cursorName, nextCursor, outputs, latestStates);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {

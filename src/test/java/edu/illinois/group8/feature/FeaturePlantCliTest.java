@@ -460,7 +460,8 @@ class FeaturePlantCliTest {
         public void commitProjection(
             String cursorName,
             edu.illinois.group8.storage.db.CanonicalDbCursor cursor,
-            List<edu.illinois.group8.storage.db.FeatureOutputDbEvent> outputs
+            List<edu.illinois.group8.storage.db.FeatureOutputDbEvent> outputs,
+            List<edu.illinois.group8.storage.db.LatestMarketState> latestStates
         ) {
         }
     }

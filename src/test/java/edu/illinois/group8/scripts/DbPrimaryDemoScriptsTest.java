@@ -97,6 +97,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("featureplant_cursors"));
         assertTrue(script.contains("last_commit_seq"));
         assertTrue(script.contains("feature_outputs"));
+        assertTrue(script.contains("latest_market_state"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=\"${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}\""));
         assertTrue(script.contains("source_event_id like 'demo-db-primary-canonical-%'"));
         assertTrue(script.contains("EXPECTED_FRONTEND_STARTED_AT"));
         assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN=1"));
@@ -245,7 +247,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB URLs to match."));
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB users to match."));
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB passwords to match."));
-        assertTrue(script.contains("live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"));
+        assertTrue(script.contains("live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state"));
         assertTrue(script.contains("Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight."));
         assertTrue(script.contains("compose_profile \"$env_file\" run --rm --no-deps -T db-migrate-live"));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
@@ -515,7 +517,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD"));
         assertTrue(workflow.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE"));
         assertTrue(workflow.contains("live-product|db-primary-product)"));
-        assertTrue(workflow.contains("requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"));
+        assertTrue(workflow.contains("requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state"));
         assertTrue(workflow.contains("printf -v q_db_primary_product_frontend_host_port '%q' \"$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_live_product_semantic_smoke_enabled '%q' \"$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED\""));

@@ -75,6 +75,7 @@ FEATUREPLANT_DB_PASSWORD="$(env_or_file FEATUREPLANT_DB_PASSWORD "$DB_WRITER_DAT
 FRONTEND_ADAPTER_DB_URL="$(env_or_file FRONTEND_ADAPTER_DB_URL "$DB_WRITER_DATABASE_URL")"
 FRONTEND_ADAPTER_DB_USER="$(env_or_file FRONTEND_ADAPTER_DB_USER "$DB_WRITER_DATABASE_USER")"
 FRONTEND_ADAPTER_DB_PASSWORD="$(env_or_file FRONTEND_ADAPTER_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
+EXPECTED_FEATURE_SOURCE="$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE feature_outputs)"
 LIVE_PRODUCT_SMOKE_DB_URL="$(env_or_file LIVE_PRODUCT_SMOKE_DB_URL "$DB_WRITER_DATABASE_URL")"
 LIVE_PRODUCT_SMOKE_DB_USER="$(env_or_file LIVE_PRODUCT_SMOKE_DB_USER "$DB_WRITER_DATABASE_USER")"
 LIVE_PRODUCT_SMOKE_DB_PASSWORD="$(env_or_file LIVE_PRODUCT_SMOKE_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
@@ -304,6 +305,7 @@ wait_frontend_ready() {
     while :; do
         if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
             && python3 - "$output" \
+                "$EXPECTED_FEATURE_SOURCE" \
                 "$EXPECTED_KALSHI_RELEASE_SHA" \
                 "$EXPECTED_KALSHI_APP_IMAGE" \
                 "$EXPECTED_KALSHI_DEPLOY_PROFILE" \
@@ -315,8 +317,11 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
     body = json.load(handle)
 if body.get("service") != "frontend-adapter":
     raise SystemExit("frontend service mismatch")
-if body.get("feature_source") != "feature_outputs":
-    raise SystemExit("frontend is not using feature_outputs")
+expected_feature_source = sys.argv[2].strip().replace("-", "_")
+if expected_feature_source == "latest_state":
+    expected_feature_source = "latest_market_state"
+if body.get("feature_source") != expected_feature_source:
+    raise SystemExit(f"frontend is not using {expected_feature_source}")
 refresh = body.get("feature_output_refresh")
 if not isinstance(refresh, dict):
     raise SystemExit("feature output refresh status missing")
@@ -332,11 +337,11 @@ release = body.get("release")
 if not isinstance(release, dict):
     raise SystemExit("health check failed: release is missing")
 for field, expected_index in (
-    ("sha", 2),
-    ("image", 3),
-    ("profile", 4),
-    ("run_id", 5),
-    ("run_attempt", 6),
+    ("sha", 3),
+    ("image", 4),
+    ("profile", 5),
+    ("run_id", 6),
+    ("run_attempt", 7),
 ):
     if field not in release:
         raise SystemExit(f"frontend release.{field} is missing")

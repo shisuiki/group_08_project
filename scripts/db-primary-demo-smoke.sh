@@ -150,13 +150,16 @@ feature_source = body.get("feature_source")
 if not feature_source:
     raise SystemExit("health check failed: feature_source is missing")
 expected = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+expected = expected.replace("-", "_")
+if expected == "latest_state":
+    expected = "latest_market_state"
 if expected and feature_source != expected:
     raise SystemExit(
         f"health check failed: feature_source is {feature_source!r}, expected {expected!r}; "
-        "restart frontend-adapter with FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"
+        "restart frontend-adapter with FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state"
     )
 refresh = body.get("feature_output_refresh")
-if feature_source == "feature_outputs":
+if feature_source in ("feature_outputs", "latest_market_state"):
     if not isinstance(refresh, dict):
         raise SystemExit("health check failed: feature_output_refresh is missing")
     expected_refresh = sys.argv[3].strip().lower() if len(sys.argv) > 3 else ""

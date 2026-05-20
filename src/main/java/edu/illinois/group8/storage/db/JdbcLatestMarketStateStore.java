@@ -12,25 +12,27 @@ public final class JdbcLatestMarketStateStore implements LatestMarketStateStore 
             market_ticker,
             last_event_ts_ms,
             last_canonical_event_id,
+            last_canonical_commit_seq,
             best_bid_micros,
             best_ask_micros,
             midpoint_micros,
             open_interest,
             payload
-        ) values (?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
         on conflict (market_ticker) do update set
             last_event_ts_ms = excluded.last_event_ts_ms,
             last_canonical_event_id = excluded.last_canonical_event_id,
+            last_canonical_commit_seq = excluded.last_canonical_commit_seq,
             best_bid_micros = excluded.best_bid_micros,
             best_ask_micros = excluded.best_ask_micros,
             midpoint_micros = excluded.midpoint_micros,
             open_interest = excluded.open_interest,
             payload = excluded.payload,
             updated_at = now()
-        where latest_market_state.last_event_ts_ms is null
+        where latest_market_state.last_canonical_commit_seq is null
            or (
-               excluded.last_event_ts_ms is not null
-               and excluded.last_event_ts_ms >= latest_market_state.last_event_ts_ms
+               excluded.last_canonical_commit_seq is not null
+               and excluded.last_canonical_commit_seq > latest_market_state.last_canonical_commit_seq
            )
         """;
 
@@ -56,15 +58,32 @@ public final class JdbcLatestMarketStateStore implements LatestMarketStateStore 
         }
     }
 
-    private static void bindState(PreparedStatement statement, LatestMarketState state) throws SQLException {
+    static void upsertLatestMarketStates(Connection connection, Iterable<LatestMarketState> states) throws SQLException {
+        Objects.requireNonNull(connection, "connection");
+        Objects.requireNonNull(states, "states");
+        try (PreparedStatement statement = connection.prepareStatement(UPSERT_SQL)) {
+            boolean hasRows = false;
+            for (LatestMarketState state : states) {
+                bindState(statement, Objects.requireNonNull(state, "state"));
+                statement.addBatch();
+                hasRows = true;
+            }
+            if (hasRows) {
+                statement.executeBatch();
+            }
+        }
+    }
+
+    static void bindState(PreparedStatement statement, LatestMarketState state) throws SQLException {
         statement.setString(1, state.marketTicker());
         setNullableLong(statement, 2, state.lastEventTsMs());
         statement.setString(3, state.lastCanonicalEventId());
-        setNullableLong(statement, 4, state.bestBidMicros());
-        setNullableLong(statement, 5, state.bestAskMicros());
-        setNullableLong(statement, 6, state.midpointMicros());
-        setNullableLong(statement, 7, state.openInterest());
-        setNullableJson(statement, 8, state.payload());
+        setNullableLong(statement, 4, state.lastCanonicalCommitSeq());
+        setNullableLong(statement, 5, state.bestBidMicros());
+        setNullableLong(statement, 6, state.bestAskMicros());
+        setNullableLong(statement, 7, state.midpointMicros());
+        setNullableLong(statement, 8, state.openInterest());
+        setNullableJson(statement, 9, state.payload());
     }
 
     private static void validateMarketTicker(String marketTicker) {

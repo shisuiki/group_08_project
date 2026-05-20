@@ -93,6 +93,21 @@ class FrontendAdapterMainTest {
     }
 
     @Test
+    void latestMarketStateModeRequiresDatabaseUrl() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "latest_market_state",
+            "FRONTEND_ADAPTER_DB_URL", ""
+        ));
+
+        IllegalArgumentException thrown = assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterMain.buildLatestMarketStateReader(config)
+        );
+
+        assertTrue(thrown.getMessage().contains("FRONTEND_ADAPTER_FEATURE_SOURCE=latest_market_state"));
+    }
+
+    @Test
     void featureOutputReadRequestUsesConfiguredModulesAndLimit() {
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
             "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
@@ -175,6 +190,32 @@ class FrontendAdapterMainTest {
         assertEquals(1L, service.status().refreshErrors());
         assertTrue(service.status().lastError().contains("db unavailable"));
         assertEquals("refresh", store.latest("MKT-1", "feature.bbo").orElseThrow().sourceEventId());
+    }
+
+    @Test
+    void latestMarketStateRefreshDoesNotGrowSequenceWhenReaderReturnsNoRowsAfterCursor() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "latest_market_state",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "10",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "3"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 10);
+        AtomicInteger calls = new AtomicInteger();
+        FeatureOutputRefreshService service = new FeatureOutputRefreshService(config, store, request -> {
+            return switch (calls.getAndIncrement()) {
+                case 0 -> List.of(row("MKT-1", "2026-05-20T00:00:01Z", 1_000L, "seed"));
+                default -> List.of();
+            };
+        });
+
+        assertEquals(1, service.seedOnce());
+        long seededSequence = store.sequence();
+
+        assertEquals(0, service.refreshOnce());
+
+        assertEquals(seededSequence, store.sequence());
+        assertEquals(1L, service.status().totalLoaded());
+        assertEquals(0, service.status().lastRowCount());
     }
 
     @Test

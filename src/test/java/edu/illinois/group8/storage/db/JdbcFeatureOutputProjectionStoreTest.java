@@ -87,6 +87,36 @@ class JdbcFeatureOutputProjectionStoreTest {
     }
 
     @Test
+    void commitProjectionUpsertsLatestStatesBeforeCursorInSameTransaction() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        JdbcFeatureOutputProjectionStore store = new JdbcFeatureOutputProjectionStore(jdbc::openConnection);
+
+        store.commitProjection(
+            "featureplant-prod",
+            new CanonicalDbCursor(11L),
+            List.of(new FeatureOutputDbEvent("feature-1", "source-1", "feature.bbo", 1, "M", 11L, "{\"x\":1}")),
+            List.of(new LatestMarketState("M", 11L, "source-1", 11L, 100L, 200L, 150L, null, "{\"x\":1}"))
+        );
+
+        assertEquals(List.of(
+            JdbcFeatureOutputStore.INSERT_SQL,
+            JdbcLatestMarketStateStore.UPSERT_SQL,
+            JdbcFeaturePlantCursorStore.UPSERT_SQL
+        ), jdbc.preparedSqls);
+        assertEquals(2, jdbc.executeBatchCalls);
+        assertEquals(1, jdbc.executeUpdateCalls);
+        assertEquals(1, jdbc.commitCalls);
+        assertEquals(0, jdbc.rollbackCalls);
+        assertEquals("feature-1", jdbc.batchParameters.get(0).get(1));
+        assertEquals("M", jdbc.batchParameters.get(1).get(1));
+        assertEquals(11L, jdbc.batchParameters.get(1).get(4));
+        assertEquals("{\"x\":1}", jdbc.batchParameters.get(1).get(9));
+        Map<Integer, Object> cursorParams = jdbc.statementParameters.get(2);
+        assertEquals("featureplant-prod", cursorParams.get(1));
+        assertEquals(11L, cursorParams.get(2));
+    }
+
+    @Test
     void commitProjectionRollsBackWhenCursorUpsertFails() {
         RecordingJdbc jdbc = new RecordingJdbc();
         jdbc.executeUpdateFailure = new SQLException("cursor failed");
@@ -124,6 +154,27 @@ class JdbcFeatureOutputProjectionStoreTest {
         assertEquals(List.of(false, true), jdbc.autoCommitSetValues);
     }
 
+    @Test
+    void commitProjectionRollsBackWhenLatestStateBatchFailsBeforeCursorUpsert() {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        jdbc.executeBatchFailure = new SQLException("latest state failed");
+        jdbc.executeBatchFailureOnCall = 2;
+        JdbcFeatureOutputProjectionStore store = new JdbcFeatureOutputProjectionStore(jdbc::openConnection);
+
+        assertThrows(Exception.class, () -> store.commitProjection(
+            "featureplant-prod",
+            new CanonicalDbCursor(10L),
+            List.of(new FeatureOutputDbEvent("feature-1", "source-1", "feature.bbo", 1, "M", 11L, "{}")),
+            List.of(new LatestMarketState("M", 11L, "source-1", 10L, 100L, 200L, 150L, null, "{}"))
+        ));
+
+        assertEquals(2, jdbc.executeBatchCalls);
+        assertEquals(0, jdbc.executeUpdateCalls);
+        assertEquals(0, jdbc.commitCalls);
+        assertEquals(1, jdbc.rollbackCalls);
+        assertEquals(List.of(false, true), jdbc.autoCommitSetValues);
+    }
+
     private record SqlNull(int sqlType) {
     }
 
@@ -135,6 +186,7 @@ class JdbcFeatureOutputProjectionStoreTest {
         private int rollbackCalls;
         private Long loadCursorValue;
         private SQLException executeBatchFailure;
+        private int executeBatchFailureOnCall;
         private SQLException executeUpdateFailure;
         private final List<String> preparedSqls = new ArrayList<>();
         private final List<Boolean> autoCommitSetValues = new ArrayList<>();
@@ -214,7 +266,8 @@ class JdbcFeatureOutputProjectionStoreTest {
                 }
                 case "executeBatch" -> {
                     executeBatchCalls++;
-                    if (executeBatchFailure != null) {
+                    if (executeBatchFailure != null
+                        && (executeBatchFailureOnCall == 0 || executeBatchCalls == executeBatchFailureOnCall)) {
                         throw executeBatchFailure;
                     }
                     yield new int[batchParameters.size()];

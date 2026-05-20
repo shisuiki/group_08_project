@@ -4,6 +4,7 @@ public record LatestMarketState(
     String marketTicker,
     Long lastEventTsMs,
     String lastCanonicalEventId,
+    Long lastCanonicalCommitSeq,
     Long bestBidMicros,
     Long bestAskMicros,
     Long midpointMicros,

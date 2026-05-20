@@ -13,6 +13,9 @@ where feature_event_id like 'demo-db-primary-%'
    or source_event_id like 'demo-db-primary-%'
    or market_ticker in (select market_ticker from db_primary_demo_markets);
 
+delete from latest_market_state
+where market_ticker in (select market_ticker from db_primary_demo_markets);
+
 delete from canonical_events
 where event_id like 'demo-db-primary-canonical-%'
    or market_ticker in (select market_ticker from db_primary_demo_markets);

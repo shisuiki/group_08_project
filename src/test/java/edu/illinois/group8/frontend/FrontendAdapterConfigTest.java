@@ -83,6 +83,14 @@ class FrontendAdapterConfigTest {
             FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS,
             FrontendAdapterConfig.FeatureSource.parse("persisted")
         );
+        assertEquals(
+            FrontendAdapterConfig.FeatureSource.LATEST_MARKET_STATE,
+            FrontendAdapterConfig.FeatureSource.parse("latest-state")
+        );
+        assertEquals(
+            FrontendAdapterConfig.FeatureSource.LATEST_MARKET_STATE,
+            FrontendAdapterConfig.FeatureSource.parse("latest_market_state")
+        );
     }
 
     @Test
@@ -175,6 +183,20 @@ class FrontendAdapterConfigTest {
         assertEquals(250, config.featureOutputMaxRows());
         assertTrue(config.featureOutputRefreshEnabled());
         assertEquals(1_000, config.featureOutputRefreshIntervalMs());
+        assertEquals(250, config.featureOutputRefreshMaxRows());
+    }
+
+    @Test
+    void latestMarketStateModeDefaultsToDbRefresh() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "latest-state",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS", "250"
+        ));
+
+        assertEquals(FrontendAdapterConfig.FeatureSource.LATEST_MARKET_STATE, config.featureSource());
+        assertEquals(250, config.featureOutputMaxRows());
+        assertTrue(config.featureOutputRefreshEnabled());
+        assertEquals(250, config.featureOutputRefreshIntervalMs());
         assertEquals(250, config.featureOutputRefreshMaxRows());
     }
 

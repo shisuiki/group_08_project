@@ -423,7 +423,7 @@ assert_live_product_db_writer_expectations() {
         'live-product requires DB writer, FeaturePlant, and frontend DB URLs to match.' \
         'live-product requires DB writer, FeaturePlant, and frontend DB users to match.' \
         'live-product requires DB writer, FeaturePlant, and frontend DB passwords to match.' \
-        'live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs' \
+        'live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state' \
         'Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight.' \
         'compose_profile "$env_file" run --rm --no-deps -T db-migrate-live' \
         'validate_live_product_frontend_feature_source()' \
@@ -776,7 +776,7 @@ assert_live_product_manual_smoke_contract() {
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \
         "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}" \
         "live-product|db-primary-product" \
-        "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs" \
+        "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
         "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
@@ -898,6 +898,39 @@ assert_live_product_manual_smoke_contract() {
     printf 'PASS live_product_manual_smoke_contract\n'
 }
 
+assert_latest_market_state_smoke_contract() {
+    for script in scripts/db-primary-product-smoke.sh scripts/db-primary-demo-pipeline.sh; do
+        for expected in \
+            'FRONTEND_ADAPTER_FEATURE_SOURCE="${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}"' \
+            'FRONTEND_ADAPTER_FEATURE_SOURCE="$FRONTEND_ADAPTER_FEATURE_SOURCE"' \
+            'EXPECTED_FEATURE_SOURCE="$FRONTEND_ADAPTER_FEATURE_SOURCE"' \
+            'expected_feature_source = sys.argv[2].strip().replace("-", "_")'; do
+            if ! grep -Fq "$expected" "$script"; then
+                printf '%s missing latest-market-state smoke contract: %s\n' "$script" "$expected" >&2
+                exit 1
+            fi
+        done
+    done
+    for expected in \
+        'delete from latest_market_state' \
+        'latest_market_state=0 before FeaturePlant'; do
+        if ! grep -Fq "$expected" scripts/db-primary-demo-seed.sh scripts/db-primary-demo-seed.sql; then
+            printf 'demo seed missing latest-market-state cleanup contract: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    for expected in \
+        'count_latest_states()' \
+        'featureplant latest state check failed' \
+        'PASS demo_featureplant feature_outputs_before='; do
+        if ! grep -Fq "$expected" scripts/db-primary-demo-run-featureplant.sh; then
+            printf 'demo FeaturePlant script missing latest-market-state check: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS latest_market_state_smoke_contract\n'
+}
+
 validate_config "cluster-live" --profile cluster-live
 validate_config "single-node-local" --profile single-node-local
 validate_config "recording-capture" --profile recording-capture
@@ -922,6 +955,7 @@ assert_cluster_live_db_writer_stays_opt_in
 assert_live_product_db_writer_expectations
 assert_kalshi_app_image_contract
 assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration
+assert_latest_market_state_smoke_contract
 assert_published_ports_loopback "cluster-live" --profile cluster-live
 assert_published_ports_loopback "single-node-local" --profile single-node-local
 assert_published_ports_loopback "recording-capture" --profile recording-capture

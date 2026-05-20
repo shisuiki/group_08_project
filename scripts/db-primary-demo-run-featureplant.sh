@@ -17,6 +17,7 @@ FEATUREPLANT_MAX_EVENTS="${FEATUREPLANT_MAX_EVENTS:-10000}"
 FEATUREPLANT_BATCH_SIZE="${FEATUREPLANT_BATCH_SIZE:-100}"
 EXPECTED_FEATURE_OUTPUTS_BEFORE="${EXPECTED_FEATURE_OUTPUTS_BEFORE:-}"
 EXPECTED_FEATURE_OUTPUTS_MIN="${EXPECTED_FEATURE_OUTPUTS_MIN:-1}"
+EXPECTED_LATEST_MARKET_STATES_MIN="${EXPECTED_LATEST_MARKET_STATES_MIN:-1}"
 
 cd "$REPO_ROOT"
 
@@ -24,6 +25,12 @@ count_outputs() {
     docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
         psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
         -c "select count(*) from feature_outputs where source_event_id like 'demo-db-primary-canonical-%'"
+}
+
+count_latest_states() {
+    docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
+        psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
+        -c "select count(*) from latest_market_state where market_ticker like 'DEMO-DBPRIMARY-%'"
 }
 
 before_count="$(count_outputs)"
@@ -47,11 +54,17 @@ FEATUREPLANT_RUN_ONCE=true \
 docker compose --profile featureplant run --rm --build featureplant
 
 after_count="$(count_outputs)"
+latest_state_count="$(count_latest_states)"
 if [ "$after_count" -lt "$EXPECTED_FEATURE_OUTPUTS_MIN" ]; then
     printf 'featureplant output check failed: feature_outputs=%s expected_at_least=%s\n' \
         "$after_count" "$EXPECTED_FEATURE_OUTPUTS_MIN" >&2
     exit 1
 fi
+if [ "$latest_state_count" -lt "$EXPECTED_LATEST_MARKET_STATES_MIN" ]; then
+    printf 'featureplant latest state check failed: latest_market_state=%s expected_at_least=%s\n' \
+        "$latest_state_count" "$EXPECTED_LATEST_MARKET_STATES_MIN" >&2
+    exit 1
+fi
 
-printf 'PASS demo_featureplant feature_outputs_before=%s feature_outputs_after=%s streams=%s modules=%s\n' \
-    "$before_count" "$after_count" "$FEATUREPLANT_STREAMS" "$FEATUREPLANT_MODULES"
+printf 'PASS demo_featureplant feature_outputs_before=%s feature_outputs_after=%s latest_market_state=%s streams=%s modules=%s\n' \
+    "$before_count" "$after_count" "$latest_state_count" "$FEATUREPLANT_STREAMS" "$FEATUREPLANT_MODULES"

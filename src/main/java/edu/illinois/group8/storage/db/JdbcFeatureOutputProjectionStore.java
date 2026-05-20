@@ -37,11 +37,16 @@ public final class JdbcFeatureOutputProjectionStore implements FeatureOutputProj
     }
 
     @Override
-    public void commitProjection(String cursorName, CanonicalDbCursor cursor, List<FeatureOutputDbEvent> outputs)
-        throws Exception {
+    public void commitProjection(
+        String cursorName,
+        CanonicalDbCursor cursor,
+        List<FeatureOutputDbEvent> outputs,
+        List<LatestMarketState> latestStates
+    ) throws Exception {
         String normalizedName = JdbcFeaturePlantCursorStore.normalizeCursorName(cursorName);
         Objects.requireNonNull(cursor, "cursor");
         Objects.requireNonNull(outputs, "outputs");
+        Objects.requireNonNull(latestStates, "latestStates");
 
         try (Connection connection = connectionFactory.openConnection()) {
             boolean originalAutoCommit = connection.getAutoCommit();
@@ -49,6 +54,9 @@ public final class JdbcFeatureOutputProjectionStore implements FeatureOutputProj
             Exception failure = null;
             try {
                 insertOutputs(connection, outputs);
+                if (!latestStates.isEmpty()) {
+                    JdbcLatestMarketStateStore.upsertLatestMarketStates(connection, latestStates);
+                }
                 upsertCursor(connection, normalizedName, cursor);
                 connection.commit();
             } catch (Exception e) {

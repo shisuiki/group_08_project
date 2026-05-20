@@ -41,6 +41,12 @@ feature_count="$(
         -c "select count(*) from feature_outputs where source_event_id like 'demo-db-primary-canonical-%'"
 )"
 
+latest_state_count="$(
+    docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
+        psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
+        -c "select count(*) from latest_market_state where market_ticker like 'DEMO-DBPRIMARY-%'"
+)"
+
 market_count="$(
     docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
         psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 \
@@ -58,8 +64,13 @@ if [ "$feature_count" != "0" ]; then
     exit 1
 fi
 
-printf 'PASS demo_seed canonical_events=%s feature_outputs=%s market_metadata=%s symbols=%s\n' \
-    "$canonical_count" "$feature_count" "$market_count" "$symbols"
+if [ "$latest_state_count" != "0" ]; then
+    printf 'demo seed expected latest_market_state=0 before FeaturePlant, got %s\n' "$latest_state_count" >&2
+    exit 1
+fi
+
+printf 'PASS demo_seed canonical_events=%s feature_outputs=%s latest_market_state=%s market_metadata=%s symbols=%s\n' \
+    "$canonical_count" "$feature_count" "$latest_state_count" "$market_count" "$symbols"
 
 cat <<EOF
 
@@ -67,7 +78,7 @@ Next local demo commands:
   FRONTEND_ADAPTER_DB_URL=jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME} \\
   FRONTEND_ADAPTER_DB_USER=${LOCAL_DB_USER} \\
   FRONTEND_ADAPTER_DB_PASSWORD=<local-db-password> \\
-  FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs \\
+  FRONTEND_ADAPTER_FEATURE_SOURCE=latest_market_state \\
   docker compose --profile frontend-integration up -d --build frontend-adapter
 
   scripts/db-primary-demo-run-featureplant.sh

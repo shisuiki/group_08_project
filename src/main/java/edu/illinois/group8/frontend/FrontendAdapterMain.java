@@ -18,6 +18,7 @@ import edu.illinois.group8.storage.db.FeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputReader;
+import edu.illinois.group8.storage.db.JdbcLatestMarketStateReader;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
@@ -42,12 +43,12 @@ public final class FrontendAdapterMain {
             config.maxFeaturesPerMarket(),
             config.maxSymbolsIndexed()
         );
-        if (config.featureSource() == FrontendAdapterConfig.FeatureSource.FEATURE_OUTPUTS) {
-            JdbcFeatureOutputReader featureOutputReader = buildFeatureOutputReader(config);
+        if (config.featureSource().dbBacked()) {
+            FeatureOutputRefreshService.RowReader featureOutputReader = buildFeatureOutputRowReader(config);
             FeatureOutputRefreshService refreshService = new FeatureOutputRefreshService(
                 config,
                 store,
-                featureOutputReader::readRows
+                featureOutputReader
             );
             int seeded = refreshService.seedOnce();
             FrontendMarketMetadataCatalog metadataCatalog = buildMarketMetadataCatalog(config);
@@ -131,13 +132,32 @@ public final class FrontendAdapterMain {
     }
 
     static JdbcFeatureOutputReader buildFeatureOutputReader(FrontendAdapterConfig config) {
+        requireFeatureDbUrl(config);
+        return JdbcFeatureOutputReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+    }
+
+    static JdbcLatestMarketStateReader buildLatestMarketStateReader(FrontendAdapterConfig config) {
+        requireFeatureDbUrl(config);
+        return JdbcLatestMarketStateReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+    }
+
+    static FeatureOutputRefreshService.RowReader buildFeatureOutputRowReader(FrontendAdapterConfig config) {
+        return switch (config.featureSource()) {
+            case FEATURE_OUTPUTS -> buildFeatureOutputReader(config)::readRows;
+            case LATEST_MARKET_STATE -> buildLatestMarketStateReader(config)::readRows;
+            case MODULES -> throw new IllegalArgumentException(
+                "FRONTEND_ADAPTER_FEATURE_SOURCE must be DB-backed for feature output refresh"
+            );
+        };
+    }
+
+    private static void requireFeatureDbUrl(FrontendAdapterConfig config) {
         if (config.dbUrl().isBlank()) {
             throw new IllegalArgumentException(
                 "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when "
-                    + "FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"
+                    + "FRONTEND_ADAPTER_FEATURE_SOURCE=" + config.featureSource().name().toLowerCase(Locale.ROOT)
             );
         }
-        return JdbcFeatureOutputReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
     }
 
     static FrontendMarketMetadataCatalog buildMarketMetadataCatalog(FrontendAdapterConfig config) {

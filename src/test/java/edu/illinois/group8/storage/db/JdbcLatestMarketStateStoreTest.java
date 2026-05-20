@@ -40,15 +40,32 @@ class JdbcLatestMarketStateStoreTest {
     }
 
     @Test
-    void upsertSqlUsesJsonbPayloadAndTimestampFence() {
+    void commitSeqMigrationAddsFenceColumnAndCursorIndex() throws Exception {
+        String sql = migrationSql("db/migration/V011__latest_market_state_commit_seq.sql")
+            .toLowerCase(Locale.ROOT);
+
+        assertTrue(sql.contains("alter table latest_market_state"));
+        assertTrue(sql.contains("add column if not exists last_canonical_commit_seq bigint"));
+        assertTrue(sql.contains("latest_market_state_commit_seq_idx"));
+        assertTrue(sql.contains("latest_market_state_commit_market_idx"));
+        assertTrue(sql.contains("on latest_market_state (last_canonical_commit_seq asc, market_ticker asc)"));
+        assertTrue(sql.contains("latest_market_state_updated_market_idx"));
+        assertTrue(sql.contains("on latest_market_state (updated_at asc, market_ticker asc)"));
+    }
+
+    @Test
+    void upsertSqlUsesJsonbPayloadAndCommitSequenceFence() {
         String sql = JdbcLatestMarketStateStore.UPSERT_SQL.toLowerCase(Locale.ROOT);
 
         assertTrue(sql.contains("insert into latest_market_state"));
-        assertTrue(sql.contains("values (?, ?, ?, ?, ?, ?, ?, ?::jsonb)"));
+        assertTrue(sql.contains("last_canonical_commit_seq"));
+        assertTrue(sql.contains("values (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)"));
         assertTrue(sql.contains("on conflict (market_ticker) do update"));
-        assertTrue(sql.contains("where latest_market_state.last_event_ts_ms is null"));
-        assertTrue(sql.contains("excluded.last_event_ts_ms is not null"));
-        assertTrue(sql.contains("excluded.last_event_ts_ms >= latest_market_state.last_event_ts_ms"));
+        assertTrue(sql.contains("where latest_market_state.last_canonical_commit_seq is null"));
+        assertTrue(sql.contains("excluded.last_canonical_commit_seq is not null"));
+        assertTrue(sql.contains(
+            "excluded.last_canonical_commit_seq > latest_market_state.last_canonical_commit_seq"
+        ));
         assertTrue(sql.contains("updated_at = now()"));
     }
 
@@ -60,8 +77,9 @@ class JdbcLatestMarketStateStoreTest {
             "MARKET-1",
             123L,
             "event-1",
-            null,
             456L,
+            null,
+            567L,
             null,
             789L,
             null
@@ -75,11 +93,33 @@ class JdbcLatestMarketStateStoreTest {
         assertEquals("MARKET-1", jdbc.parameters.get(1));
         assertEquals(123L, jdbc.parameters.get(2));
         assertEquals("event-1", jdbc.parameters.get(3));
+        assertEquals(456L, jdbc.parameters.get(4));
+        assertEquals(new SqlNull(Types.BIGINT), jdbc.parameters.get(5));
+        assertEquals(567L, jdbc.parameters.get(6));
+        assertEquals(new SqlNull(Types.BIGINT), jdbc.parameters.get(7));
+        assertEquals(789L, jdbc.parameters.get(8));
+        assertEquals(new SqlNull(Types.VARCHAR), jdbc.parameters.get(9));
+    }
+
+    @Test
+    void upsertBindsNullCommitSeqForBackfillCompatibility() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        JdbcLatestMarketStateStore store = new JdbcLatestMarketStateStore(jdbc::openConnection);
+        LatestMarketState state = new LatestMarketState(
+            "MARKET-1",
+            123L,
+            "event-1",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        store.upsertLatestMarketState(state);
+
         assertEquals(new SqlNull(Types.BIGINT), jdbc.parameters.get(4));
-        assertEquals(456L, jdbc.parameters.get(5));
-        assertEquals(new SqlNull(Types.BIGINT), jdbc.parameters.get(6));
-        assertEquals(789L, jdbc.parameters.get(7));
-        assertEquals(new SqlNull(Types.VARCHAR), jdbc.parameters.get(8));
     }
 
     @Test
@@ -90,6 +130,7 @@ class JdbcLatestMarketStateStoreTest {
             "MARKET-2",
             124L,
             "event-2",
+            125L,
             100L,
             200L,
             150L,
@@ -99,19 +140,22 @@ class JdbcLatestMarketStateStoreTest {
 
         store.upsertLatestMarketState(state);
 
-        assertEquals("{\"market_ticker\":\"MARKET-2\"}", jdbc.parameters.get(8));
+        assertEquals("{\"market_ticker\":\"MARKET-2\"}", jdbc.parameters.get(9));
     }
 
     @Test
     void blankMarketTickerIsRejectedBeforeStoreUse() {
         assertThrows(
             IllegalArgumentException.class,
-            () -> new LatestMarketState(" ", 1L, null, null, null, null, null, null)
+            () -> new LatestMarketState(" ", 1L, null, null, null, null, null, null, null)
         );
     }
 
     private static String migrationSql() throws Exception {
-        String resource = "db/migration/V005__latest_market_state.sql";
+        return migrationSql("db/migration/V005__latest_market_state.sql");
+    }
+
+    private static String migrationSql(String resource) throws Exception {
         try (InputStream inputStream = JdbcLatestMarketStateStoreTest.class.getClassLoader()
             .getResourceAsStream(resource)) {
             if (inputStream == null) {
