@@ -51,6 +51,7 @@ down_all_profiles() {
         --profile local-db \
         --profile db-primary-product \
         --profile live-product \
+        --profile live-product-local-db \
         --profile featureplant \
         --profile raw-replay \
         --profile historical-backfill \
@@ -144,6 +145,11 @@ diagnose_profile() {
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
             db-migrate-live node0 node1 node2 wsclient streamtap \
             featureplant-db-follower frontend-adapter-db-primary >&2 || true
+    elif [ "$DEPLOY_PROFILE" = "live-product-local-db" ]; then
+        log "Recent live-product-local-db logs:"
+        sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
+            timescaledb db-migrate node0 node1 node2 wsclient streamtap \
+            featureplant-db-follower frontend-adapter-db-primary >&2 || true
     fi
 }
 
@@ -184,7 +190,10 @@ compose_app_image_tar() {
 }
 
 evidence_env_file() {
-    if [ -f "$CANDIDATE_ENV_FILE" ]; then
+    kind="${1:-candidate}"
+    if [ "$kind" = "rollback" ] && [ -f "$COMPOSE_ENV_FILE" ]; then
+        printf '%s\n' "$COMPOSE_ENV_FILE"
+    elif [ -f "$CANDIDATE_ENV_FILE" ]; then
         printf '%s\n' "$CANDIDATE_ENV_FILE"
     else
         printf '%s\n' "$COMPOSE_ENV_FILE"
@@ -204,7 +213,7 @@ release_identity_value() {
 
 release_evidence_file() {
     kind="$1"
-    env_file="$(evidence_env_file)"
+    env_file="$(evidence_env_file "$kind")"
     release_sha="$(release_identity_value "$env_file" KALSHI_RELEASE_SHA "${KALSHI_RELEASE_SHA:-$candidate_ref}")"
     run_id="$(release_identity_value "$env_file" KALSHI_GITHUB_RUN_ID "${KALSHI_GITHUB_RUN_ID:-local}")"
     run_attempt="$(release_identity_value "$env_file" KALSHI_GITHUB_RUN_ATTEMPT "${KALSHI_GITHUB_RUN_ATTEMPT:-1}")"
@@ -260,7 +269,7 @@ runtime_images_json() {
 
 frontend_health_url() {
     case "$DEPLOY_PROFILE" in
-        db-primary-product|live-product)
+        db-primary-product|live-product|live-product-local-db)
             printf 'http://127.0.0.1:%s/health\n' "$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"
             ;;
         *)
@@ -385,12 +394,8 @@ rollback_json() {
 release_evidence_json() {
     kind="$1"
     outcome="$2"
-    identity_env_file="$(evidence_env_file)"
-    if [ "$kind" = "rollback" ]; then
-        env_file="$COMPOSE_ENV_FILE"
-    else
-        env_file="$identity_env_file"
-    fi
+    identity_env_file="$(evidence_env_file "$kind")"
+    env_file="$identity_env_file"
     release_sha="$(release_identity_value "$identity_env_file" KALSHI_RELEASE_SHA "${KALSHI_RELEASE_SHA:-$candidate_ref}")"
     run_id="$(release_identity_value "$identity_env_file" KALSHI_GITHUB_RUN_ID "${KALSHI_GITHUB_RUN_ID:-local}")"
     run_attempt="$(release_identity_value "$identity_env_file" KALSHI_GITHUB_RUN_ATTEMPT "${KALSHI_GITHUB_RUN_ATTEMPT:-1}")"
@@ -544,6 +549,7 @@ db_preflight_service() {
         recording-capture) printf '%s\n' wsclient-capture ;;
         db-primary-product) printf '%s\n' featureplant-db-follower ;;
         live-product) printf '%s\n' wsclient ;;
+        live-product-local-db) printf '%s\n' wsclient ;;
         *) printf '%s\n' "" ;;
     esac
 }
@@ -646,6 +652,47 @@ validate_live_product_db_writer() {
     fi
 }
 
+validate_live_product_local_db_writer() {
+    env_file="$1"
+    db_enabled="$(env_file_value "$env_file" DB_WRITER_ENABLED)"
+    db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
+    db_user="$(env_file_value "$env_file" DB_WRITER_DATABASE_USER)"
+    db_password="$(env_file_value "$env_file" DB_WRITER_DATABASE_PASSWORD)"
+    local_url="$(local_db_url "$env_file")"
+    local_user="$(local_db_value "$env_file" LOCAL_DB_USER kalshi)"
+    local_password="$(local_db_value "$env_file" LOCAL_DB_PASSWORD kalshi)"
+    featureplant_url="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_URL "$local_url")"
+    featureplant_user="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_USER "$local_user")"
+    featureplant_password="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_PASSWORD "$local_password")"
+    frontend_url="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_URL "$local_url")"
+    frontend_user="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_USER "$local_user")"
+    frontend_password="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_PASSWORD "$local_password")"
+
+    case "$db_enabled" in
+        true|TRUE|True) ;;
+        *)
+            log "live-product-local-db requires DB_WRITER_ENABLED=true."
+            return 1
+            ;;
+    esac
+    if [ "$db_url" != "$local_url" ] || [ "$db_user" != "$local_user" ] || [ "$db_password" != "$local_password" ]; then
+        log "live-product-local-db requires DB writer to use local Timescale/Postgres settings."
+        return 1
+    fi
+    if [ "$db_url" != "$featureplant_url" ] || [ "$db_url" != "$frontend_url" ]; then
+        log "live-product-local-db requires DB writer, FeaturePlant, and frontend DB URLs to match."
+        return 1
+    fi
+    if [ "$db_user" != "$featureplant_user" ] || [ "$db_user" != "$frontend_user" ]; then
+        log "live-product-local-db requires DB writer, FeaturePlant, and frontend DB users to match."
+        return 1
+    fi
+    if [ "$db_password" != "$featureplant_password" ] || [ "$db_password" != "$frontend_password" ]; then
+        log "live-product-local-db requires DB writer, FeaturePlant, and frontend DB passwords to match."
+        return 1
+    fi
+}
+
 validate_live_product_frontend_feature_source() {
     env_file="$1"
     feature_source="$(env_file_value "$env_file" FRONTEND_ADAPTER_FEATURE_SOURCE)"
@@ -697,6 +744,26 @@ run_db_release_preflight() {
             if ! compose_profile "$env_file" run --rm --no-deps -T db-migrate-live; then
                 DB_PREFLIGHT_STATUS="failed"
                 log "live-product Flyway migration failed."
+                return 1
+            fi
+            ;;
+        live-product-local-db)
+            if ! validate_live_product_local_db_writer "$env_file"; then
+                DB_PREFLIGHT_STATUS="failed"
+                return 1
+            fi
+            if ! validate_live_product_frontend_feature_source "$env_file"; then
+                DB_PREFLIGHT_STATUS="failed"
+                return 1
+            fi
+            db_url="$(local_db_url "$env_file")"
+            db_user="$(local_db_value "$env_file" LOCAL_DB_USER kalshi)"
+            db_password="$(local_db_value "$env_file" LOCAL_DB_PASSWORD kalshi)"
+            required="true"
+            log "Running live-product-local-db Flyway migration against local Timescale before release preflight."
+            if ! compose_profile "$env_file" run --rm -T db-migrate; then
+                DB_PREFLIGHT_STATUS="failed"
+                log "live-product-local-db Flyway migration failed."
                 return 1
             fi
             ;;
@@ -797,7 +864,7 @@ profile_health_smoke() {
                 featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health" \
                 frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"
             ;;
-        live-product)
+        live-product|live-product-local-db)
             health_smoke_services \
                 wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health" \
                 streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health" \
@@ -817,6 +884,7 @@ profile_app_services() {
         recording-capture) printf '%s\n' node0-capture wsclient-capture stream-recorder ;;
         db-primary-product) printf '%s\n' featureplant-db-follower frontend-adapter-db-primary ;;
         live-product) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary ;;
+        live-product-local-db) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary ;;
         featureplant) printf '%s\n' featureplant ;;
         raw-replay) printf '%s\n' raw-ingress-replay ;;
         historical-backfill) printf '%s\n' historical-backfill ;;
@@ -1021,11 +1089,14 @@ PY
 
 run_live_product_semantic_smoke() {
     env_file="$1"
-    if [ "$DEPLOY_PROFILE" != "live-product" ]; then
+    case "$DEPLOY_PROFILE" in
+        live-product|live-product-local-db) ;;
+        *)
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
         LIVE_PRODUCT_SMOKE_JSON='{"checked":false,"status":"not_applicable"}'
         return 0
-    fi
+            ;;
+    esac
 
     if ! validate_live_product_frontend_feature_source "$env_file"; then
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"

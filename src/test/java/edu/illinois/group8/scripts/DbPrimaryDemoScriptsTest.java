@@ -193,6 +193,13 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
         assertTrue(script.contains("FEATUREPLANT_DB_URL"));
         assertTrue(script.contains("FRONTEND_ADAPTER_DB_URL"));
+        assertTrue(script.contains("COMPOSE_PROFILE=\"${COMPOSE_PROFILE:-live-product}\""));
+        assertTrue(script.contains("live-product-local-db)"));
+        assertTrue(script.contains("LOCAL_DB_URL=\"jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME}\""));
+        assertTrue(script.contains("DB_WRITER_DATABASE_URL=\"$LOCAL_DB_URL\""));
+        assertTrue(script.contains("DB_WRITER_DATABASE_USER=\"$LOCAL_DB_USER\""));
+        assertTrue(script.contains("DB_WRITER_DATABASE_PASSWORD=\"$LOCAL_DB_PASSWORD\""));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DB_URL=\"$LOCAL_DB_URL\""));
         assertTrue(script.contains("EXPECTED_FEATURE_SOURCE=\"$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS=\"${LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS:-30000}\""));
         assertTrue(script.contains("print(body.get(\"feature_source\") or \"\")"));
@@ -314,8 +321,6 @@ class DbPrimaryDemoScriptsTest {
         assertFalse(script.contains("docker compose run"));
         assertFalse(script.contains("psql_scalar()"));
         assertFalse(script.contains("compose exec -T -e PGPASSWORD"));
-        assertFalse(script.contains("LOCAL_DB_NAME"));
-        assertFalse(script.contains("timescaledb"));
     }
 
     @Test
@@ -340,9 +345,12 @@ class DbPrimaryDemoScriptsTest {
         String script = read("scripts/ec2-compose-rollback-gate.sh");
 
         assertTrue(script.contains("--profile live-product"));
+        assertTrue(script.contains("--profile live-product-local-db"));
         assertTrue(script.contains("node0 node1 node2 wsclient streamtap"));
         assertTrue(script.contains("live-product) printf '%s\\n' wsclient"));
+        assertTrue(script.contains("live-product-local-db) printf '%s\\n' wsclient"));
         assertTrue(script.contains("validate_live_product_db_writer()"));
+        assertTrue(script.contains("validate_live_product_local_db_writer()"));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
         assertTrue(script.contains("FRONTEND_NO_PROXY=\"${FRONTEND_NO_PROXY:-127.0.0.1,localhost}\""));
@@ -351,9 +359,14 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB URLs to match."));
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB users to match."));
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB passwords to match."));
+        assertTrue(script.contains("live-product-local-db requires DB_WRITER_ENABLED=true."));
+        assertTrue(script.contains("live-product-local-db requires DB writer to use local Timescale/Postgres settings."));
+        assertTrue(script.contains("live-product-local-db requires DB writer, FeaturePlant, and frontend DB URLs to match."));
         assertTrue(script.contains("live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state"));
         assertTrue(script.contains("Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight."));
         assertTrue(script.contains("compose_profile \"$env_file\" run --rm --no-deps -T db-migrate-live"));
+        assertTrue(script.contains("Running live-product-local-db Flyway migration against local Timescale before release preflight."));
+        assertTrue(script.contains("compose_profile \"$env_file\" run --rm -T db-migrate"));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
         assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
         assertTrue(script.contains("live-product semantic smoke must be enabled before recording a live-product deploy success."));
@@ -367,6 +380,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("\"expected_feature_source\","));
         assertTrue(script.contains("> \"$smoke_stdout\" 2> \"$smoke_stderr\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true"));
+        assertTrue(script.contains("COMPOSE_PROFILE=\"$DEPLOY_PROFILE\""));
         assertTrue(script.contains("sh scripts/live-product-smoke.sh"));
         assertTrue(script.contains("wsclient \"http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health\""));
         assertTrue(script.contains("streamtap \"http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health\""));
@@ -423,6 +437,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("load_last_success_image_if_needed()"));
         assertTrue(script.contains("load_app_image_from_tar \"$previous_image\" \"$previous_image_tar\""));
         assertFalse(script.contains("Skipping health smoke checks for DEPLOY_PROFILE=live-product"));
+        assertFalse(script.contains("Skipping health smoke checks for DEPLOY_PROFILE=live-product-local-db"));
     }
 
     @Test
@@ -489,6 +504,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("| frontend_feature_source | latest_market_state |"));
         assertTrue(validator.contains("\"product_latency\""));
         assertTrue(validator.contains("| product_latency_seed_to_quote_ms | 500 |"));
+        assertTrue(validator.contains("local-profile-release-evidence.json"));
+        assertTrue(validator.contains("PASS release_evidence_local_profile_contract"));
         assertTrue(validator.contains("missing-product-latency-release-evidence.json"));
         assertTrue(validator.contains("accepted missing product_latency"));
         assertTrue(validator.contains("slow-product-latency-release-evidence.json"));
@@ -497,6 +514,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("secret-db-password"));
         String verifier = read("scripts/verify-live-product-release-evidence.sh");
         assertTrue(verifier.contains("PASS live_product_release_evidence"));
+        assertTrue(verifier.contains("\"live-product-local-db\""));
+        assertTrue(verifier.contains("deploy_profile must be live-product or live-product-local-db"));
+        assertTrue(verifier.contains("environment whitelisted deploy_profile mismatch"));
+        assertTrue(verifier.contains("frontend release health profile mismatch"));
+        assertTrue(verifier.contains("frontend release_profile mismatch"));
         assertTrue(verifier.contains("frontend release health feature_source missing"));
         assertTrue(verifier.contains("final smoke feature_source missing"));
         assertTrue(verifier.contains("frontend health feature_source mismatch"));
@@ -532,21 +554,30 @@ class DbPrimaryDemoScriptsTest {
         String script = read("scripts/validate-compose-profiles.sh");
 
         assertTrue(script.contains("validate_config \"live-product\" --profile live-product"));
+        assertTrue(script.contains("validate_config \"live-product-local-db\" --profile live-product-local-db"));
         assertTrue(script.contains("assert_services_absent \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_services_absent \"live-product-local-db\" --profile live-product-local-db"));
         assertTrue(script.contains("assert_live_product_services_present"));
         assertTrue(script.contains("node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower frontend-adapter-db-primary"));
+        assertTrue(script.contains("assert_live_product_local_db_services_present"));
+        assertTrue(script.contains("node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary"));
         assertTrue(script.contains("assert_cluster_live_db_writer_stays_opt_in"));
         assertTrue(script.contains("'DB_WRITER_ENABLED: \"\"'"));
         assertTrue(script.contains("\"LOCAL_DB_PASSWORD: \\${{ secrets.LOCAL_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD || 'kalshi' }}\""));
         assertTrue(script.contains("\"FRONTEND_ADAPTER_DB_PASSWORD: \\${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}\""));
         assertTrue(script.contains("'LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD'"));
-        assertTrue(script.contains("'FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD'"));
+        assertTrue(script.contains("'FRONTEND_ADAPTER_DB_PASSWORD=$EFFECTIVE_FRONTEND_ADAPTER_DB_PASSWORD'"));
         assertTrue(script.contains("assert_live_product_db_writer_expectations"));
+        assertTrue(script.contains("assert_live_product_local_db_writer_expectations"));
         assertTrue(script.contains("live_db_url=\"jdbc:postgresql://live-db.example.internal:5432/kalshi_live\""));
+        assertTrue(script.contains("local_db_url=\"jdbc:postgresql://timescaledb:5432/kalshi_test\""));
         assertTrue(script.contains("FLYWAY_URL: $live_db_url"));
         assertTrue(script.contains("live-product must not include local DB service"));
+        assertTrue(script.contains("live-product-local-db must not include %s"));
         assertTrue(script.contains("assert_published_ports_loopback \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_published_ports_loopback \"live-product-local-db\" --profile live-product-local-db"));
         assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
+        assertTrue(script.contains("assert_no_default_network \"live-product-local-db\" --profile live-product-local-db"));
         assertTrue(script.contains("assert_live_product_manual_smoke_contract"));
         assertTrue(script.contains("assert_kalshi_app_image_contract"));
         assertTrue(script.contains("assert_frontend_release_health_contract"));
@@ -654,11 +685,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("LOCAL_DB_NAME=$LOCAL_DB_NAME"));
         assertTrue(workflow.contains("LOCAL_DB_USER=$LOCAL_DB_USER"));
         assertTrue(workflow.contains("LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD"));
-        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_URL=$FRONTEND_ADAPTER_DB_URL"));
-        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_USER=$FRONTEND_ADAPTER_DB_USER"));
-        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_URL=$EFFECTIVE_FRONTEND_ADAPTER_DB_URL"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_USER=$EFFECTIVE_FRONTEND_ADAPTER_DB_USER"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_PASSWORD=$EFFECTIVE_FRONTEND_ADAPTER_DB_PASSWORD"));
         assertTrue(workflow.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE"));
-        assertTrue(workflow.contains("live-product|db-primary-product)"));
+        assertTrue(workflow.contains("live-product|live-product-local-db|db-primary-product)"));
         assertTrue(workflow.contains("requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state"));
         assertTrue(workflow.contains("printf -v q_db_primary_product_frontend_host_port '%q' \"$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
@@ -682,7 +713,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("sh -n scripts/verify-live-product-release-evidence.sh"));
         assertTrue(workflow.contains("run: scripts/validate-release-evidence.sh"));
         assertTrue(workflow.contains("Verify live-product release evidence"));
-        assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product'"));
+        assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db'"));
         assertTrue(workflow.contains("scripts/verify-live-product-release-evidence.sh $q_evidence_file"));
         assertTrue(workflow.contains("printf -v q_remote_evidence_path '%q' \"$DEPLOY_PATH/$evidence_file\""));
         assertTrue(workflow.contains("scp -i ~/.ssh/ec2_key \"$EC2_USER@$EC2_HOST:$q_remote_evidence_path\" \"$local_evidence\""));
@@ -747,6 +778,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("deploy_profile:"));
         assertTrue(workflow.contains("default: cluster-live"));
         assertTrue(workflow.contains("- live-product"));
+        assertTrue(workflow.contains("- live-product-local-db"));
         assertTrue(workflow.contains("run_live_product_smoke:"));
         assertTrue(workflow.contains("run_live_product_browser_smoke:"));
         assertTrue(workflow.contains("require_live_product_data:"));
@@ -762,11 +794,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("require_present EC2_SSH_PRIVATE_KEY"));
         assertTrue(workflow.contains("Validate manual live-product rehearsal inputs"));
         assertTrue(workflow.contains("if [ \"$GITHUB_EVENT_NAME\" != \"workflow_dispatch\" ]; then"));
-        assertTrue(workflow.contains("DEPLOY_PROFILE must be cluster-live or live-product"));
-        assertTrue(workflow.contains("require_live_product_data=true requires deploy_profile=live-product"));
+        assertTrue(workflow.contains("DEPLOY_PROFILE must be cluster-live, live-product, or live-product-local-db"));
+        assertTrue(workflow.contains("require_live_product_data=true requires deploy_profile=live-product or live-product-local-db"));
         assertTrue(workflow.contains("require_live_product_data=true requires run_live_product_smoke=true"));
         assertTrue(workflow.contains("run_live_product_browser_smoke=true requires run_live_product_smoke=true"));
-        assertTrue(workflow.contains("run_live_product_smoke=true requires deploy_profile=live-product"));
+        assertTrue(workflow.contains("run_live_product_smoke=true requires deploy_profile=live-product or live-product-local-db"));
         assertTrue(workflow.contains("live-product rehearsal required configuration missing: %s"));
         assertTrue(workflow.contains("DB_WRITER_DATABASE_PASSWORD"));
         assertTrue(workflow.contains("bash -n scripts/live-product-smoke.sh"));
@@ -775,7 +807,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("sh -n scripts/verify-live-product-release-evidence.sh"));
         assertTrue(workflow.contains("bash -n scripts/frontend-product-browser-smoke.sh"));
         assertTrue(workflow.contains("sh -n scripts/frontend-product-browser-smoke.sh"));
-        assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));
+        assertTrue(workflow.contains("if: (env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db') && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));
+        assertTrue(workflow.contains("COMPOSE_PROFILE=\"$KALSHI_DEPLOY_PROFILE\""));
         assertTrue(workflow.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=$q_live_product_browser_smoke_enabled"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=$q_require_live_product_data"));
         assertTrue(workflow.contains("FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED=true"));

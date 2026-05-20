@@ -60,7 +60,11 @@ def require_freshness_contract(mapping, label):
 require(at(evidence, "schema_version") == 1, "schema_version must be 1")
 require(at(evidence, "evidence_type") == "candidate", "evidence_type must be candidate")
 require(at(evidence, "outcome") == "success", "outcome must be success")
-require(at(evidence, "deploy_profile") == "live-product", "deploy_profile must be live-product")
+deploy_profile = at(evidence, "deploy_profile")
+require(deploy_profile in {"live-product", "live-product-local-db"}, "deploy_profile must be live-product or live-product-local-db")
+environment = at(evidence, "environment")
+whitelisted = at(environment, "whitelisted")
+require(at(whitelisted, "deploy_profile") == deploy_profile, "environment whitelisted deploy_profile mismatch")
 if expected_sha:
     require(at(evidence, "release_sha") == expected_sha, "release_sha mismatch")
 if expected_run_id:
@@ -74,6 +78,12 @@ require(at(gates, "live_product_semantic_smoke") == "passed", "live_product_sema
 frontend = at(evidence, "frontend_release_health")
 require(at(frontend, "status") == "observed", "frontend release health must be observed")
 require(isinstance(at(frontend, "feature_source"), str) and at(frontend, "feature_source"), "frontend release health feature_source missing")
+frontend_release = at(frontend, "release")
+require(isinstance(frontend_release, dict), "frontend release health release identity missing")
+if isinstance(frontend_release, dict):
+    require(at(frontend_release, "profile") == deploy_profile, "frontend release health profile mismatch")
+    if expected_sha:
+        require(at(frontend_release, "sha") == expected_sha, "frontend release health sha mismatch")
 
 smoke = at(evidence, "live_product_smoke")
 require(at(smoke, "checked") is True, "live_product_smoke.checked must be true")
@@ -104,7 +114,7 @@ frontend_health = at(smoke, "frontend_health")
 require(isinstance(frontend_health, dict), "frontend PASS health missing")
 if isinstance(frontend_health, dict):
     require(at(frontend_health, "service") == "frontend-adapter", "frontend health service mismatch")
-    require(at(frontend_health, "release_profile") == "live-product", "frontend release_profile mismatch")
+    require(at(frontend_health, "release_profile") == deploy_profile, "frontend release_profile mismatch")
     require(isinstance(at(frontend_health, "feature_source"), str) and at(frontend_health, "feature_source"), "frontend health feature_source missing")
     require(isinstance(at(frontend_health, "expected_feature_source"), str) and at(frontend_health, "expected_feature_source"), "frontend health expected_feature_source missing")
     require(

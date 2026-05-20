@@ -119,6 +119,13 @@ assert_live_product_services_present() {
         --profile live-product
 }
 
+assert_live_product_local_db_services_present() {
+    assert_exact_services \
+        "live-product-local-db" \
+        "node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary" \
+        --profile live-product-local-db
+}
+
 assert_db_primary_product_defaults_aligned() {
     featureplant_rendered="$(service_config_for featureplant-db-follower --profile db-primary-product)"
     for expected in \
@@ -195,10 +202,13 @@ assert_db_primary_product_defaults_aligned() {
         'LOCAL_DB_NAME=$LOCAL_DB_NAME' \
         'LOCAL_DB_USER=$LOCAL_DB_USER' \
         'LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD' \
-        'FRONTEND_ADAPTER_DB_URL=$FRONTEND_ADAPTER_DB_URL' \
-        'FRONTEND_ADAPTER_DB_USER=$FRONTEND_ADAPTER_DB_USER' \
-        'FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD' \
+        'FRONTEND_ADAPTER_DB_URL=$EFFECTIVE_FRONTEND_ADAPTER_DB_URL' \
+        'FRONTEND_ADAPTER_DB_USER=$EFFECTIVE_FRONTEND_ADAPTER_DB_USER' \
+        'FRONTEND_ADAPTER_DB_PASSWORD=$EFFECTIVE_FRONTEND_ADAPTER_DB_PASSWORD' \
         'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE' \
+        'EFFECTIVE_BACKEND_PROFILE=production' \
+        'EFFECTIVE_BACKEND_PROFILE=recording-capture' \
+        'BACKEND_PROFILE=$EFFECTIVE_BACKEND_PROFILE' \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port'; do
         if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
             printf 'deploy workflow missing db-primary-product frontend propagation: %s\n' "$expected" >&2
@@ -209,7 +219,7 @@ assert_db_primary_product_defaults_aligned() {
 }
 
 assert_frontend_adapter_db_primary_static_root() {
-    for profile in db-primary-product live-product; do
+    for profile in db-primary-product live-product live-product-local-db; do
         rendered="$(service_config_for frontend-adapter-db-primary --profile "$profile")"
         if ! printf '%s\n' "$rendered" \
             | grep -q '^      FRONTEND_ADAPTER_STATIC_ROOT: /app/frontend/tradingview-lightweight$'; then
@@ -457,6 +467,170 @@ assert_live_product_db_writer_expectations() {
         fi
     done
     printf 'PASS live_product_db_writer_expectations\n'
+}
+
+assert_live_product_local_db_writer_expectations() {
+    local_db_url="jdbc:postgresql://timescaledb:5432/kalshi_test"
+    local_db_user="kalshi"
+    local_db_password="kalshi"
+    rendered_wsclient="$(
+        DB_WRITER_ENABLED=true \
+        DB_WRITER_DATABASE_URL="$local_db_url" \
+        DB_WRITER_DATABASE_USER="$local_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$local_db_password" \
+        service_config_for wsclient --profile live-product-local-db
+    )"
+    for expected in \
+        'DB_WRITER_ENABLED: "true"' \
+        "DB_WRITER_DATABASE_URL: $local_db_url" \
+        "DB_WRITER_DATABASE_USER: $local_db_user" \
+        "DB_WRITER_DATABASE_PASSWORD: $local_db_password"; do
+        if ! printf '%s\n' "$rendered_wsclient" | grep -q "^      ${expected}$"; then
+            printf 'live-product-local-db wsclient missing local DB writer setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    rendered_featureplant="$(
+        DB_WRITER_DATABASE_URL="$local_db_url" \
+        DB_WRITER_DATABASE_USER="$local_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$local_db_password" \
+        service_config_for featureplant-db-follower --profile live-product-local-db
+    )"
+    for expected in \
+        "FEATUREPLANT_DB_URL: $local_db_url" \
+        "FEATUREPLANT_DB_USER: $local_db_user" \
+        "FEATUREPLANT_DB_PASSWORD: $local_db_password"; do
+        if ! printf '%s\n' "$rendered_featureplant" | grep -q "^      ${expected}$"; then
+            printf 'live-product-local-db featureplant-db-follower missing local DB setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    rendered_frontend="$(
+        DB_WRITER_DATABASE_URL="$local_db_url" \
+        DB_WRITER_DATABASE_USER="$local_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$local_db_password" \
+        service_config_for frontend-adapter-db-primary --profile live-product-local-db
+    )"
+    for expected in \
+        "FRONTEND_ADAPTER_DB_URL: $local_db_url" \
+        "FRONTEND_ADAPTER_DB_USER: $local_db_user" \
+        "FRONTEND_ADAPTER_DB_PASSWORD: $local_db_password"; do
+        if ! printf '%s\n' "$rendered_frontend" | grep -q "^      ${expected}$"; then
+            printf 'live-product-local-db frontend-adapter-db-primary missing local DB setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    rendered_migration="$(service_config_for db-migrate --profile live-product-local-db)"
+    for expected in \
+        "FLYWAY_URL: $local_db_url" \
+        "FLYWAY_USER: $local_db_user" \
+        "FLYWAY_PASSWORD: $local_db_password"; do
+        if ! printf '%s\n' "$rendered_migration" | grep -q "^      ${expected}$"; then
+            printf 'live-product-local-db db-migrate missing local DB setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    local_services="$(services_for --profile live-product-local-db)"
+    for service in db-migrate-live stream-recorder s3-recording-sync; do
+        if printf '%s\n' "$local_services" | grep -qx "$service"; then
+            printf 'live-product-local-db must not include %s\n' "$service" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        'validate_live_product_local_db_writer()' \
+        'live-product-local-db requires DB_WRITER_ENABLED=true.' \
+        'live-product-local-db requires DB writer to use local Timescale/Postgres settings.' \
+        'live-product-local-db requires DB writer, FeaturePlant, and frontend DB URLs to match.' \
+        'live-product-local-db requires DB writer, FeaturePlant, and frontend DB users to match.' \
+        'live-product-local-db requires DB writer, FeaturePlant, and frontend DB passwords to match.' \
+        'Running live-product-local-db Flyway migration against local Timescale before release preflight.' \
+        'compose_profile "$env_file" run --rm -T db-migrate' \
+        'live-product|live-product-local-db)' \
+        'live-product-local-db) printf '\''%s\n'\'' wsclient' \
+        'live-product|live-product-local-db)' \
+        'COMPOSE_PROFILE="$DEPLOY_PROFILE"' \
+        'node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary'; do
+        if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
+            printf 'rollback gate missing live-product-local-db behavior: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    for expected in \
+        'DB_WRITER_DATABASE_URL="$LOCAL_DB_URL"' \
+        'FEATUREPLANT_DB_URL="$LOCAL_DB_URL"' \
+        'FRONTEND_ADAPTER_DB_URL="$LOCAL_DB_URL"' \
+        'LIVE_PRODUCT_SMOKE_DB_URL="$LOCAL_DB_URL"'; do
+        if ! grep -Fq "$expected" scripts/live-product-smoke.sh; then
+            printf 'live-product smoke missing local DB pin for live-product-local-db: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/live-product-local-db-contract.XXXXXX")"
+    rollback_functions="$tmpdir/rollback-functions.sh"
+    local_env="$tmpdir/local.env"
+    remote_env="$tmpdir/remote.env"
+    sed '/^if \[ ! -f "\$CANDIDATE_ENV_FILE" \]; then$/,$d' scripts/ec2-compose-rollback-gate.sh > "$rollback_functions"
+    cat > "$local_env" <<EOF
+DB_WRITER_ENABLED=true
+DB_WRITER_DATABASE_URL=$local_db_url
+DB_WRITER_DATABASE_USER=$local_db_user
+DB_WRITER_DATABASE_PASSWORD=$local_db_password
+FEATUREPLANT_DB_URL=$local_db_url
+FEATUREPLANT_DB_USER=$local_db_user
+FEATUREPLANT_DB_PASSWORD=$local_db_password
+FRONTEND_ADAPTER_DB_URL=$local_db_url
+FRONTEND_ADAPTER_DB_USER=$local_db_user
+FRONTEND_ADAPTER_DB_PASSWORD=$local_db_password
+LOCAL_DB_NAME=kalshi_test
+LOCAL_DB_USER=$local_db_user
+LOCAL_DB_PASSWORD=$local_db_password
+EOF
+    cat > "$remote_env" <<'EOF'
+DB_WRITER_ENABLED=true
+DB_WRITER_DATABASE_URL=jdbc:postgresql://remote.example.internal:5432/kalshi_live
+DB_WRITER_DATABASE_USER=remote
+DB_WRITER_DATABASE_PASSWORD=remote
+FEATUREPLANT_DB_URL=jdbc:postgresql://remote.example.internal:5432/kalshi_live
+FEATUREPLANT_DB_USER=remote
+FEATUREPLANT_DB_PASSWORD=remote
+FRONTEND_ADAPTER_DB_URL=jdbc:postgresql://remote.example.internal:5432/kalshi_live
+FRONTEND_ADAPTER_DB_USER=remote
+FRONTEND_ADAPTER_DB_PASSWORD=remote
+LOCAL_DB_NAME=kalshi_test
+LOCAL_DB_USER=kalshi
+LOCAL_DB_PASSWORD=kalshi
+EOF
+    if ! (
+        DEPLOY_PROFILE=live-product-local-db
+        CANDIDATE_ENV_FILE="$local_env"
+        COMPOSE_ENV_FILE="$local_env"
+        . "$rollback_functions"
+        validate_live_product_local_db_writer "$local_env"
+    ) >/dev/null 2>&1; then
+        rm -rf "$tmpdir"
+        printf 'live-product-local-db validator rejected matching local DB settings\n' >&2
+        exit 1
+    fi
+    if (
+        DEPLOY_PROFILE=live-product-local-db
+        CANDIDATE_ENV_FILE="$remote_env"
+        COMPOSE_ENV_FILE="$remote_env"
+        . "$rollback_functions"
+        validate_live_product_local_db_writer "$remote_env"
+    ) >/dev/null 2>&1; then
+        rm -rf "$tmpdir"
+        printf 'live-product-local-db validator accepted remote DB settings\n' >&2
+        exit 1
+    fi
+    rm -rf "$tmpdir"
+    printf 'PASS live_product_local_db_writer_expectations\n'
 }
 
 assert_kalshi_app_image_contract() {
@@ -794,19 +968,21 @@ assert_live_product_manual_smoke_contract() {
         "deployment required configuration present: %s" \
         "Validate manual live-product rehearsal inputs" \
         'if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then' \
-        "DEPLOY_PROFILE must be cluster-live or live-product" \
-        "require_live_product_data=true requires deploy_profile=live-product" \
+        "DEPLOY_PROFILE must be cluster-live, live-product, or live-product-local-db" \
+        "require_live_product_data=true requires deploy_profile=live-product or live-product-local-db" \
         "require_live_product_data=true requires run_live_product_smoke=true" \
         "run_live_product_browser_smoke=true requires run_live_product_smoke=true" \
-        "run_live_product_smoke=true requires deploy_profile=live-product" \
+        "run_live_product_smoke=true requires deploy_profile=live-product or live-product-local-db" \
         "live-product rehearsal required configuration missing: %s" \
-        "live-product|db-primary-product" \
+        "live-product|live-product-local-db|db-primary-product" \
         "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
-        "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
+        "env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db'" \
+        "(env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db') && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
         "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=\$q_live_product_browser_smoke_enabled" \
         "LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=\$q_require_live_product_data" \
+        "COMPOSE_PROFILE=\"\$KALSHI_DEPLOY_PROFILE\"" \
         "FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED=true" \
         "FRONTEND_BROWSER_SMOKE_DOCKER_PREFER=true" \
         "FRONTEND_BROWSER_SMOKE_DOCKER_SUDO=true" \
@@ -844,6 +1020,13 @@ assert_live_product_manual_smoke_contract() {
         'DB_WRITER_DATABASE_URL' \
         'FEATUREPLANT_DB_URL' \
         'FRONTEND_ADAPTER_DB_URL' \
+        'COMPOSE_PROFILE="${COMPOSE_PROFILE:-live-product}"' \
+        'live-product-local-db)' \
+        'LOCAL_DB_URL="jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME}"' \
+        'DB_WRITER_DATABASE_URL="$LOCAL_DB_URL"' \
+        'DB_WRITER_DATABASE_USER="$LOCAL_DB_USER"' \
+        'DB_WRITER_DATABASE_PASSWORD="$LOCAL_DB_PASSWORD"' \
+        'LIVE_PRODUCT_SMOKE_DB_URL="$LOCAL_DB_URL"' \
         'LiveProductSmokeDbProbeCli' \
         'cursorCommitSeq' \
         'seedCanonicalEvents' \
@@ -953,9 +1136,7 @@ assert_live_product_manual_smoke_contract() {
         'docker compose rm' \
         'docker compose run' \
         'psql_scalar()' \
-        'compose exec -T -e PGPASSWORD' \
-        'LOCAL_DB_NAME' \
-        'timescaledb'; do
+        'compose exec -T -e PGPASSWORD'; do
         if grep -Fq -- "$forbidden" "$smoke_script"; then
             printf 'live-product smoke script must not mutate services: %s\n' "$forbidden" >&2
             exit 1
@@ -1012,18 +1193,22 @@ validate_config "featureplant" --profile featureplant
 validate_config "raw-replay" --profile raw-replay
 validate_config "db-primary-product" --profile db-primary-product
 validate_config "live-product" --profile live-product
+validate_config "live-product-local-db" --profile live-product-local-db
 
 assert_services_absent "observability" --profile observability
 assert_services_absent "cluster-live,observability" --profile cluster-live --profile observability
 assert_services_absent "live-product" --profile live-product
+assert_services_absent "live-product-local-db" --profile live-product-local-db
 assert_services_present "recording-capture" --profile recording-capture
 assert_db_primary_product_services_present
 assert_live_product_services_present
+assert_live_product_local_db_services_present
 assert_db_primary_product_defaults_aligned
 assert_frontend_adapter_db_primary_static_root
 assert_frontend_release_health_contract
 assert_cluster_live_db_writer_stays_opt_in
 assert_live_product_db_writer_expectations
+assert_live_product_local_db_writer_expectations
 assert_kalshi_app_image_contract
 assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration
 assert_latest_market_state_smoke_contract
@@ -1037,6 +1222,7 @@ assert_published_ports_loopback "featureplant" --profile featureplant
 assert_published_ports_loopback "raw-replay" --profile raw-replay
 assert_published_ports_loopback "db-primary-product" --profile db-primary-product
 assert_published_ports_loopback "live-product" --profile live-product
+assert_published_ports_loopback "live-product-local-db" --profile live-product-local-db
 assert_no_default_network "cluster-live" --profile cluster-live
 assert_no_default_network "recording-capture" --profile recording-capture
 assert_no_default_network "observability" --profile observability
@@ -1046,6 +1232,7 @@ assert_no_default_network "featureplant" --profile featureplant
 assert_no_default_network "raw-replay" --profile raw-replay
 assert_no_default_network "db-primary-product" --profile db-primary-product
 assert_no_default_network "live-product" --profile live-product
+assert_no_default_network "live-product-local-db" --profile live-product-local-db
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned

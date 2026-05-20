@@ -28,7 +28,9 @@ Optional repository secrets:
 Recommended repository variables:
 
 - `DEPLOY_PATH`: remote app path, default `/opt/group_08_project`.
-- `DEPLOY_PROFILE`: Docker Compose profile, default `cluster-live`.
+- `DEPLOY_PROFILE`: Docker Compose profile, default `cluster-live`. Use
+  `live-product` with an external DB, or `live-product-local-db` for the
+  self-contained DB-primary live product stack on local Timescale/Postgres.
 - `COMPOSE_HOST_BIND_IP`: host IP for Docker Compose published ports, default
   `127.0.0.1`. Override only behind a firewall, authenticated reverse proxy, or
   isolated network.
@@ -97,6 +99,19 @@ Recommended repository variables:
 Optional:
 
 - `KALSHI_MARKET_TICKERS`: comma-separated explicit market ticker list. If unset, the live client resolves open markets from `KALSHI_MARKET_SERIES_TICKER` unless `KALSHI_MARKET_SELECTION_MODE=open_markets`.
+
+## Live Product Profiles
+
+- `live-product`: runs the live cluster, WebSocket client, streamtap,
+  FeaturePlant DB follower, and frontend adapter against an externally
+  configured Postgres/Timescale database. Manual rehearsal and smoke require
+  matching `DB_WRITER_*`, `FEATUREPLANT_DB_*`, and `FRONTEND_ADAPTER_DB_*`
+  credentials.
+- `live-product-local-db`: runs the same live product stack plus local
+  `timescaledb` and `db-migrate`. The workflow writes `.env.next` with
+  `DB_WRITER_ENABLED=true` and DB writer, FeaturePlant, and frontend DB
+  settings pointed at `jdbc:postgresql://timescaledb:5432/${LOCAL_DB_NAME}`.
+  It does not require external DB secrets.
 
 ## EC2 Bootstrap
 
