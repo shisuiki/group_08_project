@@ -352,7 +352,12 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("window.location.origin"));
         assertTrue(app.contains("/quotes?symbols="));
         assertTrue(app.contains("nextSequence < quoteSequence"));
-        assertTrue(app.contains("/markets?limit=100"));
+        assertTrue(app.contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(app.contains("'/markets?' + params.join('&')"));
+        assertTrue(app.contains("market-search"));
+        assertTrue(app.contains("market-status-filter"));
+        assertTrue(app.contains("market-search-apply"));
+        assertTrue(app.contains("market-state"));
         assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(app.contains("/features?symbol="));
         assertTrue(app.contains("/health"));

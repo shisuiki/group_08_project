@@ -112,8 +112,48 @@ main {
     flex-direction: column;
     gap: 4px;
     overflow-y: auto;
-    height: calc(100% - 36px);
+    height: calc(100% - 106px);
     padding-right: 4px;
+}
+
+.market-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.market-filters input,
+.market-filters select {
+    width: 100%;
+    min-width: 0;
+    background: #111315;
+    color: #f4f7f9;
+    border: 1px solid #3b444b;
+    border-radius: 4px;
+    padding: 6px 7px;
+    font-size: 12px;
+}
+
+.market-filters button {
+    background: #2b6d5d;
+    color: white;
+    border: 0;
+    border-radius: 4px;
+    padding: 7px 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.market-filters button:hover { background: #236052; }
+.market-filters button:active { background: #1d5146; }
+
+.market-state {
+    min-height: 16px;
+    margin: 0 0 8px 0;
+    color: #a8b0b7;
+    font-size: 11px;
+    overflow-wrap: anywhere;
 }
 
 .market-list button {

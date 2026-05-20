@@ -149,6 +149,19 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void marketsEndpointCombinesSearchStatusAndLimitFilters() throws Exception {
+        JsonNode closedMatch = getJson("/markets?query=EVENT-META&status=closed&limit=10");
+
+        assertEquals(1, closedMatch.path("count").asInt());
+        assertEquals("MKT-META", closedMatch.path("markets").get(0).path("market_ticker").asText());
+
+        JsonNode openMiss = getJson("/markets?query=EVENT-META&status=open&limit=10");
+
+        assertEquals(0, openMiss.path("count").asInt());
+        assertEquals(0, openMiss.path("markets").size());
+    }
+
+    @Test
     void marketCatalogHidesSmokeByDefaultAndAllowsExplicitOverride() throws Exception {
         server.stop();
         FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
@@ -270,6 +283,10 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"release-identity\""));
         assertTrue(root.body().contains("id=\"health-data-age\""));
         assertTrue(root.body().contains("id=\"quote-update-health\""));
+        assertTrue(root.body().contains("id=\"market-search\""));
+        assertTrue(root.body().contains("id=\"market-status-filter\""));
+        assertTrue(root.body().contains("id=\"market-search-apply\""));
+        assertTrue(root.body().contains("id=\"market-state\""));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("<dt>Quote feed</dt>"));
@@ -296,7 +313,12 @@ class UdfEndpointsTest {
         assertTrue(css.headers().firstValue("content-type").orElse("").contains("text/css"));
         assertTrue(chart.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
-        assertTrue(js.body().contains("/markets?limit=100"));
+        assertTrue(js.body().contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(js.body().contains("'/markets?' + params.join('&')"));
+        assertTrue(js.body().contains("market-search"));
+        assertTrue(js.body().contains("market-status-filter"));
+        assertTrue(js.body().contains("market-search-apply"));
+        assertTrue(js.body().contains("market-state"));
         assertTrue(js.body().contains("markets.markets.length > 0"));
         assertTrue(js.body().contains("/features?symbol="));
         assertTrue(js.body().contains("/health"));

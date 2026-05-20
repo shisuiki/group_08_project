@@ -109,6 +109,45 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void productDemoLauncherCreatesIsolatedStackEvidenceAndCleanup() throws Exception {
+        String up = read("scripts/product-demo-up.sh");
+        String down = read("scripts/product-demo-down.sh");
+
+        assertTrue(up.contains("PROJECT_PREFIX=\"${PRODUCT_DEMO_PROJECT_PREFIX:-kalshi_product_demo}\""));
+        assertTrue(up.contains("PRODUCT_DEMO_PROJECT_NAME"));
+        assertTrue(up.contains("choose_free_port()"));
+        assertTrue(up.contains("POSTGRES_HOST_PORT=\"$postgres_port\""));
+        assertTrue(up.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=\"$frontend_port\""));
+        assertTrue(up.contains("FEATUREPLANT_METRICS_HOST_PORT=\"$featureplant_port\""));
+        assertTrue(up.contains("COMPOSE_HOST_BIND_IP=127.0.0.1"));
+        assertTrue(up.contains("FEATUREPLANT_DB_CURSOR_NAME=\"$featureplant_cursor\""));
+        assertTrue(up.contains("choose_cluster_subnet()"));
+        assertTrue(up.contains("docker\", \"network\", \"inspect\""));
+        assertTrue(up.contains("CLUSTER_SUBNET=\"$cluster_subnet\""));
+        assertTrue(up.contains("scripts/db-primary-product-smoke.sh"));
+        assertTrue(up.contains("scripts/frontend-product-browser-smoke.sh"));
+        assertTrue(up.contains("SKIP browser_smoke reason=missing_browser"));
+        assertTrue(up.contains("\"evidence_type\": \"product_demo\""));
+        assertTrue(up.contains("\"compose_profile\": \"db-primary-product\""));
+        assertTrue(up.contains("\"compose_project_name\": project"));
+        assertTrue(up.contains("\"featureplant_cursor_name\": featureplant_cursor"));
+        assertTrue(up.contains("\"dashboard_url\": dashboard_url"));
+        assertTrue(up.contains("\"featureplant_metrics_url\": featureplant_metrics_url"));
+        assertTrue(up.contains("\"smoke_pass_labels\": labels"));
+        assertTrue(up.contains("\"smoke_stdout_sha256\": smoke_sha256"));
+        assertTrue(up.contains("\"cleanup_command\": f\"scripts/product-demo-down.sh {final_evidence_path}\""));
+        assertTrue(up.contains("PASS product_demo project=%s dashboard_url=%s"));
+        assertFalse(up.contains("DB_WRITER_DATABASE_PASSWORD"));
+        assertFalse(up.contains("FEATUREPLANT_DB_PASSWORD"));
+        assertFalse(up.contains("FRONTEND_ADAPTER_DB_PASSWORD"));
+
+        assertTrue(down.contains("compose_project_name"));
+        assertTrue(down.contains("refusing to clean non-isolated compose project"));
+        assertTrue(down.contains("COMPOSE_PROJECT_NAME=\"$project\" docker compose --profile db-primary-product down --remove-orphans -v"));
+        assertTrue(down.contains("PASS product_demo_down project=%s"));
+    }
+
+    @Test
     void liveProductSmokeAssumesRunningStackAndChecksFeatureOutputsPath() throws Exception {
         String script = read("scripts/live-product-smoke.sh");
         String probe = read("src/main/java/edu/illinois/group8/storage/db/LiveProductSmokeDbProbe.java");
@@ -205,6 +244,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(browserSmoke.contains("--no-first-run"));
         assertTrue(browserSmoke.contains("--dump-dom"));
         assertTrue(browserSmoke.contains("id=\"chart-container\""));
+        assertTrue(browserSmoke.contains("id=\"market-search\""));
+        assertTrue(browserSmoke.contains("id=\"market-status-filter\""));
+        assertTrue(browserSmoke.contains("id=\"market-state\""));
         assertTrue(browserSmoke.contains("<canvas"));
         assertTrue(browserSmoke.contains("id=\"quote-update-health\""));
         assertTrue(browserSmoke.contains("quote feed status did not show active SSE/fallback traffic"));
@@ -507,6 +549,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"release-identity\""));
         assertTrue(index.contains("id=\"health-data-age\""));
         assertTrue(index.contains("id=\"quote-update-health\""));
+        assertTrue(index.contains("id=\"market-search\""));
+        assertTrue(index.contains("id=\"market-status-filter\""));
+        assertTrue(index.contains("id=\"market-search-apply\""));
+        assertTrue(index.contains("id=\"market-state\""));
         assertTrue(app.contains("body.release"));
         assertTrue(app.contains("body.data_freshness"));
         assertTrue(app.contains("body.quote_streams"));
@@ -517,6 +563,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("long-poll fallback"));
         assertTrue(app.contains("fallback polling"));
         assertTrue(app.contains("latest_event_ts_ms"));
+        assertTrue(app.contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(app.contains("'/markets?' + params.join('&')"));
+        assertTrue(app.contains("market-search"));
+        assertTrue(app.contains("market-status-filter"));
+        assertTrue(app.contains("market-search-apply"));
+        assertTrue(app.contains("No markets match the current search/filter."));
         assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));
         assertTrue(chart.contains("v4.2.0"));

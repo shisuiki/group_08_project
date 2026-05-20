@@ -7,6 +7,8 @@
     const QUOTES_STREAM_ERROR_LIMIT = 2;
     const QUOTES_UPDATE_RETRY_MS = 500;
     const HEALTH_POLL_MS = 5000;
+    const MARKET_SEARCH_DEBOUNCE_MS = 250;
+    const MARKET_CATALOG_LIMIT = 200;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
 
     const dom = {
@@ -20,6 +22,10 @@
         statusLine: document.getElementById('status-line'),
         footer: document.querySelector('footer'),
         marketCount: document.getElementById('market-count'),
+        marketSearch: document.getElementById('market-search'),
+        marketStatusFilter: document.getElementById('market-status-filter'),
+        marketSearchApply: document.getElementById('market-search-apply'),
+        marketState: document.getElementById('market-state'),
         marketList: document.getElementById('market-list'),
         marketStatus: document.getElementById('market-status'),
         marketEvent: document.getElementById('market-event'),
@@ -96,6 +102,7 @@
     let quoteSequence = null;
     let quoteUpdateErrors = 0;
     let marketEntries = [];
+    let marketSearchTimer = null;
 
     function setStatus(message, tone) {
         dom.statusLine.textContent = message;
@@ -170,25 +177,44 @@
     async function loadSymbols() {
         setStatus('Loading market catalog...');
         try {
+            const previousSymbol = dom.symbolSelect.value;
             marketEntries = await loadMarketEntries();
-            populateSymbolDropdown(marketEntries);
+            populateSymbolDropdown(marketEntries, previousSymbol);
             renderMarketCatalog(marketEntries);
             if (marketEntries.length === 0) {
+                quotesLoopGeneration += 1;
+                stopQuotesLoop();
                 renderMissingQuote('');
                 renderFeatures([]);
-                setStatus('No markets indexed yet; confirm FeaturePlant outputs are flowing.', 'error');
+                renderQuoteUpdateState('no selected market', 'stale');
+                const filtered = hasMarketFilter();
+                const message = filtered
+                    ? 'No markets match the current search/filter.'
+                    : 'No markets indexed yet; confirm FeaturePlant outputs are flowing.';
+                setStatus(message, filtered ? '' : 'error');
                 return;
             }
             setStatus(`Loaded ${marketEntries.length} market(s)`, 'ok');
             onSelectedSymbolChanged();
         } catch (err) {
+            renderMarketCatalogError(err.message);
             setStatus(`Failed to load markets: ${err.message}`, 'error');
         }
     }
 
     async function loadMarketEntries() {
+        const query = dom.marketSearch ? dom.marketSearch.value.trim() : '';
+        const status = dom.marketStatusFilter ? dom.marketStatusFilter.value.trim() : '';
+        const filtered = query !== '' || status !== '';
+        const params = [`limit=${MARKET_CATALOG_LIMIT}`];
+        if (query) {
+            params.push(`query=${encodeURIComponent(query)}`);
+        }
+        if (status) {
+            params.push(`status=${encodeURIComponent(status)}`);
+        }
         try {
-            const markets = await fetchJson('/markets?limit=100');
+            const markets = await fetchJson('/markets?' + params.join('&'));
             if (markets && Array.isArray(markets.markets) && markets.markets.length > 0) {
                 return markets.markets.map(row => ({
                     symbol: row.market_ticker,
@@ -199,7 +225,13 @@
                     closeTime: row.close_time || null
                 })).filter(row => row.symbol);
             }
+            if (filtered) {
+                return [];
+            }
         } catch (err) {
+            if (filtered) {
+                throw err;
+            }
             console.warn('Falling back to /symbols after /markets failed', err);
         }
         const symbols = await fetchJson('/symbols');
@@ -214,7 +246,7 @@
         })).filter(row => row.symbol);
     }
 
-    function populateSymbolDropdown(entries) {
+    function populateSymbolDropdown(entries, preferredSymbol) {
         dom.symbolSelect.innerHTML = '';
         if (entries.length === 0) {
             const opt = document.createElement('option');
@@ -229,12 +261,33 @@
             opt.textContent = entry.symbol;
             dom.symbolSelect.appendChild(opt);
         }
+        if (preferredSymbol && entries.some(entry => entry.symbol === preferredSymbol)) {
+            dom.symbolSelect.value = preferredSymbol;
+        }
     }
 
     function renderMarketCatalog(entries) {
         dom.marketCount.textContent = String(entries.length);
         dom.marketList.innerHTML = '';
-        for (const entry of entries.slice(0, 80)) {
+        if (entries.length === 0) {
+            dom.marketState.textContent = hasMarketFilter()
+                ? 'No markets match the current search/filter.'
+                : 'No markets indexed yet.';
+            return;
+        }
+        const filters = [];
+        const query = dom.marketSearch ? dom.marketSearch.value.trim() : '';
+        const status = dom.marketStatusFilter ? dom.marketStatusFilter.value.trim() : '';
+        if (query) {
+            filters.push(`query "${query}"`);
+        }
+        if (status) {
+            filters.push(`status ${status}`);
+        }
+        dom.marketState.textContent = filters.length
+            ? `${entries.length} market(s) for ${filters.join(' / ')}`
+            : `${entries.length} market(s)`;
+        for (const entry of entries) {
             const button = document.createElement('button');
             button.type = 'button';
             button.dataset.symbol = entry.symbol;
@@ -245,6 +298,28 @@
             });
             dom.marketList.appendChild(button);
         }
+    }
+
+    function renderMarketCatalogError(message) {
+        dom.marketCount.textContent = '0';
+        dom.marketState.textContent = `Market catalog unavailable: ${message}`;
+        dom.marketList.innerHTML = '<div class="empty">market catalog unavailable</div>';
+    }
+
+    function hasMarketFilter() {
+        const query = dom.marketSearch ? dom.marketSearch.value.trim() : '';
+        const status = dom.marketStatusFilter ? dom.marketStatusFilter.value.trim() : '';
+        return query !== '' || status !== '';
+    }
+
+    function scheduleMarketSearch() {
+        if (marketSearchTimer != null) {
+            clearTimeout(marketSearchTimer);
+        }
+        marketSearchTimer = setTimeout(() => {
+            marketSearchTimer = null;
+            loadSymbols();
+        }, MARKET_SEARCH_DEBOUNCE_MS);
     }
 
     async function loadMarketDetails(symbol) {
@@ -794,6 +869,9 @@
         loadConfig();
         loadSymbols();
     });
+    dom.marketSearch.addEventListener('input', scheduleMarketSearch);
+    dom.marketStatusFilter.addEventListener('change', loadSymbols);
+    dom.marketSearchApply.addEventListener('click', loadSymbols);
     dom.loadHistory.addEventListener('click', loadHistory);
     dom.symbolSelect.addEventListener('change', onSelectedSymbolChanged);
     dom.adapterUrl.addEventListener('change', () => {

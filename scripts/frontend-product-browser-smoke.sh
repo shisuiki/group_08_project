@@ -67,6 +67,9 @@ def require(fragment, label):
 for fragment, label in (
     ("Kalshi Product Dashboard", "title"),
     ('id="market-list"', "market list"),
+    ('id="market-search"', "market search"),
+    ('id="market-status-filter"', "market status filter"),
+    ('id="market-state"', "market filter state"),
     ('id="chart-container"', "chart container"),
     ('id="quote-strip"', "quote strip"),
     ('id="feature-list"', "feature list"),
@@ -84,9 +87,14 @@ if "<canvas" not in html.lower():
     raise SystemExit("browser dashboard did not create chart canvas")
 if "(loading...)" in html:
     raise SystemExit("browser dashboard still shows initial loading placeholder")
-if 'data-symbol=' not in html and "No markets indexed yet" not in html:
+if 'data-symbol=' not in html and "No markets indexed yet" not in html and "No markets match" not in html:
     raise SystemExit("browser dashboard did not render market list or empty state")
-if 'class="feature-row"' not in html and "no feature outputs" not in html and "No markets indexed yet" not in html:
+if (
+    'class="feature-row"' not in html
+    and "no feature outputs" not in html
+    and "No markets indexed yet" not in html
+    and "No markets match" not in html
+):
     raise SystemExit("browser dashboard did not render feature list state")
 if not re.search(r'id="freshness-state"[^>]*>\s*(waiting|fresh|stale)\s*<', html):
     raise SystemExit("browser dashboard did not render quote freshness state")

@@ -47,6 +47,17 @@
                 <h2>Market Catalog</h2>
                 <span id="market-count">0</span>
             </div>
+            <div class="market-filters">
+                <input id="market-search" type="search" placeholder="Search markets" autocomplete="off" />
+                <select id="market-status-filter" aria-label="Market status">
+                    <option value="">Any status</option>
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
+                    <option value="settled">Settled</option>
+                </select>
+                <button id="market-search-apply" type="button">Search</button>
+            </div>
+            <div id="market-state" class="market-state">Loading markets...</div>
             <div id="market-list" class="market-list"></div>
         </section>
 
