@@ -30,6 +30,7 @@ COMPOSE_UP_STATUS="not_run"
 RUNTIME_IMAGE_STATUS="not_run"
 PROFILE_HEALTH_SMOKE_STATUS="not_run"
 LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
+LIVE_PRODUCT_SMOKE_JSON='{"checked":false,"status":"not_applicable"}'
 RECORD_SUCCESS_STATUS="not_run"
 POST_GATE_FAILURE_CLASS="candidate_failed"
 FRONTEND_RELEASE_HEALTH_JSON='{"checked":false,"status":"not_applicable"}'
@@ -75,6 +76,7 @@ reset_gate_statuses() {
     RUNTIME_IMAGE_STATUS="not_run"
     PROFILE_HEALTH_SMOKE_STATUS="not_run"
     LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
+    LIVE_PRODUCT_SMOKE_JSON='{"checked":false,"status":"not_applicable"}'
     FRONTEND_RELEASE_HEALTH_JSON='{"checked":false,"status":"not_applicable"}'
 }
 
@@ -315,6 +317,9 @@ if not isinstance(refresh, dict):
 quote_updates = body.get("quote_updates")
 if not isinstance(quote_updates, dict):
     quote_updates = {}
+product_readiness = body.get("product_readiness")
+if not isinstance(product_readiness, dict):
+    product_readiness = {}
 
 def pick(source, keys):
     return {key: source.get(key) for key in keys if key in source}
@@ -335,6 +340,10 @@ evidence = {
     "feature_output_refresh": pick(
         refresh,
         ("enabled", "running", "total_loaded", "refresh_errors", "last_success_at", "last_error_at"),
+    ),
+    "product_readiness": pick(
+        product_readiness,
+        ("status", "stale", "degraded", "stale_after_ms", "reasons"),
     ),
     "quote_updates": pick(
         quote_updates,
@@ -451,6 +460,7 @@ release_evidence_json() {
     printf ',"runtime_images":'
     runtime_images_json "$env_file"
     printf ',"frontend_release_health":%s' "$FRONTEND_RELEASE_HEALTH_JSON"
+    printf ',"live_product_smoke":%s' "$LIVE_PRODUCT_SMOKE_JSON"
     printf ',"rollback":'
     rollback_json
     printf ',"outcome":'
@@ -839,15 +849,149 @@ assert_runtime_container_images() {
     log "Runtime app containers use expected image $expected_image."
 }
 
+live_product_smoke_summary_json() {
+    smoke_status="$1"
+    stdout_file="$2"
+    stderr_file="$3"
+    stdout_sha="$(file_sha256 "$stdout_file")"
+    stderr_sha="$(file_sha256 "$stderr_file")"
+    python3 - "$smoke_status" "$stdout_file" "$stderr_file" "$stdout_sha" "$stderr_sha" <<'PY'
+import json
+import os
+import re
+import shlex
+import sys
+
+status, stdout_path, stderr_path, stdout_sha, stderr_sha = sys.argv[1:6]
+ALLOWED_KEYS = {
+    "pipeline_reliability": {
+        "status",
+        "window_seconds",
+        "row_limit",
+        "raw_recent",
+        "raw_latest_receive_ts_ns",
+        "canonical_recent",
+        "canonical_max_commit_seq",
+        "cursor_commit_seq",
+        "cursor_lag_events",
+        "feature_recent",
+        "raw_without_canonical",
+    },
+    "health": {
+        "service",
+        "started_at",
+        "feature_output_refresh_total_loaded",
+        "refresh_errors",
+        "release_sha",
+        "release_image",
+        "release_profile",
+        "freshness_event_ts_ms",
+        "freshness_age_ms",
+        "freshness_symbol",
+        "freshness_source_event_id",
+        "product_readiness_status",
+        "product_readiness_stale",
+        "product_readiness_degraded",
+    },
+    "live_product_smoke": {
+        "market",
+        "run_id",
+        "cursor_before",
+        "target_commit_seq",
+        "cursor_after",
+        "feature_outputs",
+        "frontend_started_at",
+        "frontend_total_loaded_before",
+        "frontend_total_loaded_after",
+        "frontend_refresh_errors_after",
+        "product_readiness_status",
+        "product_readiness_stale",
+        "product_readiness_degraded",
+    },
+}
+
+def convert(value):
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if re.fullmatch(r"-?[0-9]+", value):
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    return value
+
+def parse_pass_lines(path):
+    passes = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except FileNotFoundError:
+        return passes
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line.startswith("PASS "):
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            continue
+        if len(tokens) < 2 or tokens[0] != "PASS":
+            continue
+        label = tokens[1]
+        allowed = ALLOWED_KEYS.get(label)
+        if allowed is None:
+            continue
+        fields = {}
+        for token in tokens[2:]:
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            if key in allowed:
+                fields[key] = convert(value)
+        passes.setdefault(label, []).append(fields)
+    return passes
+
+def latest(records, predicate=lambda value: True):
+    for record in reversed(records):
+        if predicate(record):
+            return record
+    return None
+
+passes = parse_pass_lines(stdout_path)
+frontend_health = latest(
+    passes.get("health", []),
+    lambda item: item.get("service") == "frontend-adapter",
+)
+summary = {
+    "checked": True,
+    "status": status,
+    "output_sha256": stdout_sha or None,
+    "stderr_sha256": stderr_sha or None,
+    "stderr_present": os.path.exists(stderr_path) and os.path.getsize(stderr_path) > 0,
+    "pass_labels": sorted(passes),
+    "pipeline_reliability": latest(passes.get("pipeline_reliability", [])),
+    "frontend_health": frontend_health,
+    "final_pass": latest(passes.get("live_product_smoke", [])) is not None,
+    "live_product_smoke": latest(passes.get("live_product_smoke", [])),
+}
+print(json.dumps(summary, separators=(",", ":")))
+PY
+}
+
 run_live_product_semantic_smoke() {
     env_file="$1"
     if [ "$DEPLOY_PROFILE" != "live-product" ]; then
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
+        LIVE_PRODUCT_SMOKE_JSON='{"checked":false,"status":"not_applicable"}'
         return 0
     fi
 
     if ! validate_live_product_frontend_feature_source "$env_file"; then
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
+        LIVE_PRODUCT_SMOKE_JSON='{"checked":true,"status":"failed","reason":"frontend_feature_source"}'
         return 1
     fi
 
@@ -857,22 +1001,44 @@ run_live_product_semantic_smoke() {
     fi
     if ! is_true "$enabled"; then
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
+        LIVE_PRODUCT_SMOKE_JSON='{"checked":true,"status":"failed","reason":"disabled"}'
         log "live-product semantic smoke must be enabled before recording a live-product deploy success."
         return 1
     fi
 
     LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="running"
     log "Running live-product semantic smoke before recording candidate success."
-    if ! COMPOSE_ENV_FILE="$env_file" \
+    mkdir -p "$DEPLOY_STATE_DIR"
+    chmod 700 "$DEPLOY_STATE_DIR"
+    smoke_stdout="$DEPLOY_STATE_DIR/.live-product-smoke.stdout.$$"
+    smoke_stderr="$DEPLOY_STATE_DIR/.live-product-smoke.stderr.$$"
+    rm -f "$smoke_stdout" "$smoke_stderr"
+    : > "$smoke_stdout"
+    : > "$smoke_stderr"
+    chmod 600 "$smoke_stdout" "$smoke_stderr"
+    if COMPOSE_ENV_FILE="$env_file" \
         COMPOSE_PROFILE="$DEPLOY_PROFILE" \
         LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true \
         FRONTEND_NO_PROXY="$FRONTEND_NO_PROXY" \
-        sh scripts/live-product-smoke.sh; then
+        sh scripts/live-product-smoke.sh > "$smoke_stdout" 2> "$smoke_stderr"; then
+        cat "$smoke_stdout"
+        LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="passed"
+        LIVE_PRODUCT_SMOKE_JSON="$(live_product_smoke_summary_json "passed" "$smoke_stdout" "$smoke_stderr")"
+        rm -f "$smoke_stdout" "$smoke_stderr"
+        return 0
+    else
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
+        if [ -s "$smoke_stdout" ]; then
+            cat "$smoke_stdout"
+        fi
+        if [ -s "$smoke_stderr" ]; then
+            cat "$smoke_stderr" >&2
+        fi
+        LIVE_PRODUCT_SMOKE_JSON="$(live_product_smoke_summary_json "failed" "$smoke_stdout" "$smoke_stderr")"
+        rm -f "$smoke_stdout" "$smoke_stderr"
         log "live-product semantic smoke failed."
         return 1
     fi
-    LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="passed"
 }
 
 deploy_env() {

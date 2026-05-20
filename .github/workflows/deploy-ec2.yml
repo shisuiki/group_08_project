@@ -98,6 +98,8 @@ jobs:
           sh -n scripts/validate-compose-profiles.sh
           bash -n scripts/validate-release-evidence.sh
           sh -n scripts/validate-release-evidence.sh
+          bash -n scripts/verify-live-product-release-evidence.sh
+          sh -n scripts/verify-live-product-release-evidence.sh
 
       - name: Validate Docker Compose profiles
         run: scripts/validate-compose-profiles.sh
@@ -279,6 +281,10 @@ jobs:
 
           if ! command -v curl >/dev/null 2>&1; then
             sudo dnf install -y curl
+          fi
+
+          if ! command -v python3 >/dev/null 2>&1; then
+            sudo dnf install -y python3
           fi
 
           if ! command -v docker >/dev/null 2>&1; then
@@ -563,6 +569,18 @@ jobs:
           printf -v q_live_product_semantic_smoke_enabled '%q' "$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
             "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile KALSHI_APP_IMAGE=$q_kalshi_app_image CANDIDATE_IMAGE_TAR=$q_candidate_image_tar KALSHI_RELEASE_SHA=$q_kalshi_release_sha KALSHI_GITHUB_RUN_ID=$q_kalshi_github_run_id KALSHI_GITHUB_RUN_ATTEMPT=$q_kalshi_github_run_attempt CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$q_live_product_semantic_smoke_enabled sh scripts/ec2-compose-rollback-gate.sh"
+
+      - name: Verify live-product release evidence
+        if: env.DEPLOY_PROFILE == 'live-product'
+        run: |
+          evidence_file=".deploy-state/releases/${KALSHI_RELEASE_SHA}-${KALSHI_GITHUB_RUN_ID}-${KALSHI_GITHUB_RUN_ATTEMPT}.json"
+          printf -v q_deploy_path '%q' "$DEPLOY_PATH"
+          printf -v q_evidence_file '%q' "$evidence_file"
+          printf -v q_kalshi_release_sha '%q' "$KALSHI_RELEASE_SHA"
+          printf -v q_kalshi_github_run_id '%q' "$KALSHI_GITHUB_RUN_ID"
+          printf -v q_kalshi_github_run_attempt '%q' "$KALSHI_GITHUB_RUN_ATTEMPT"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
+            "cd $q_deploy_path && EXPECTED_KALSHI_RELEASE_SHA=$q_kalshi_release_sha EXPECTED_KALSHI_GITHUB_RUN_ID=$q_kalshi_github_run_id EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=$q_kalshi_github_run_attempt sh scripts/verify-live-product-release-evidence.sh $q_evidence_file"
 
       - name: Run live-product smoke
         if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'

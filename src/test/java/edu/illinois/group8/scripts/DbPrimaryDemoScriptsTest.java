@@ -245,6 +245,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
         assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
         assertTrue(script.contains("live-product semantic smoke must be enabled before recording a live-product deploy success."));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_JSON"));
+        assertTrue(script.contains("live_product_smoke_summary_json()"));
+        assertTrue(script.contains("> \"$smoke_stdout\" 2> \"$smoke_stderr\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true"));
         assertTrue(script.contains("sh scripts/live-product-smoke.sh"));
         assertTrue(script.contains("wsclient \"http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health\""));
@@ -328,6 +331,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("\"db_preflight\""));
         assertTrue(script.contains("\"profile_health_smoke\""));
         assertTrue(script.contains("\"live_product_semantic_smoke\""));
+        assertTrue(script.contains("\"live_product_smoke\""));
         assertTrue(script.contains("\"frontend_release_health\""));
         assertTrue(script.contains("\"rollback\""));
         assertTrue(script.contains("\"outcome\""));
@@ -354,8 +358,15 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("PASS release_evidence_contract"));
         assertTrue(validator.contains("sed '/^if \\[ ! -f \"\\$CANDIDATE_ENV_FILE\" \\]; then$/,$d' \"$rollback_gate\""));
         assertTrue(validator.contains("write_release_evidence \"candidate\" \"success\""));
+        assertTrue(validator.contains("scripts/verify-live-product-release-evidence.sh \"$evidence_file\""));
+        assertTrue(validator.contains("degraded-release-evidence.json"));
+        assertTrue(validator.contains("verifier accepted degraded product readiness"));
         assertTrue(validator.contains("python3 -m json.tool \"$evidence_file\""));
         assertTrue(validator.contains("secret-db-password"));
+        String verifier = read("scripts/verify-live-product-release-evidence.sh");
+        assertTrue(verifier.contains("PASS live_product_release_evidence"));
+        assertTrue(verifier.contains("final product_readiness must not be degraded"));
+        assertTrue(verifier.contains("final product_readiness status must be ok"));
 
         String evidenceBlock = script.substring(
             script.indexOf("release_evidence_json()"),
@@ -503,12 +514,20 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("EXPECTED_KALSHI_RELEASE_SHA=$q_kalshi_release_sha"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_APP_IMAGE=$q_kalshi_app_image"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_DEPLOY_PROFILE=$q_deploy_profile"));
+        assertTrue(workflow.contains("sudo dnf install -y python3"));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$q_live_product_semantic_smoke_enabled"));
         assertTrue(workflow.contains("bash -n scripts/validate-release-evidence.sh"));
         assertTrue(workflow.contains("sh -n scripts/validate-release-evidence.sh"));
+        assertTrue(workflow.contains("bash -n scripts/verify-live-product-release-evidence.sh"));
+        assertTrue(workflow.contains("sh -n scripts/verify-live-product-release-evidence.sh"));
         assertTrue(workflow.contains("run: scripts/validate-release-evidence.sh"));
+        assertTrue(workflow.contains("Verify live-product release evidence"));
+        assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product'"));
+        assertTrue(workflow.contains("scripts/verify-live-product-release-evidence.sh $q_evidence_file"));
+        assertTrue(workflow.contains("EXPECTED_KALSHI_GITHUB_RUN_ID=$q_kalshi_github_run_id"));
+        assertTrue(workflow.contains("EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=$q_kalshi_github_run_attempt"));
     }
 
     @Test
@@ -572,6 +591,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: ${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}"));
         assertTrue(workflow.contains("bash -n scripts/live-product-smoke.sh"));
         assertTrue(workflow.contains("sh -n scripts/live-product-smoke.sh"));
+        assertTrue(workflow.contains("bash -n scripts/verify-live-product-release-evidence.sh"));
+        assertTrue(workflow.contains("sh -n scripts/verify-live-product-release-evidence.sh"));
         assertTrue(workflow.contains("bash -n scripts/frontend-product-browser-smoke.sh"));
         assertTrue(workflow.contains("sh -n scripts/frontend-product-browser-smoke.sh"));
         assertTrue(workflow.contains("if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));

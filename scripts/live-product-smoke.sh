@@ -500,10 +500,15 @@ wait_frontend_refresh_progress() {
         started_at="$(printf '%s\n' "$health" | sed -n '1p')"
         total_loaded="$(printf '%s\n' "$health" | sed -n '2p')"
         refresh_errors="$(printf '%s\n' "$health" | sed -n '3p')"
+        readiness_status="$(printf '%s\n' "$health" | sed -n '11p')"
+        readiness_stale="$(printf '%s\n' "$health" | sed -n '12p')"
+        readiness_degraded="$(printf '%s\n' "$health" | sed -n '13p')"
         if [ "$started_at" = "$expected_started_at" ] \
             && [ "$total_loaded" -gt "$min_total_loaded" ] \
             && [ "$refresh_errors" -le "$max_refresh_errors" ]; then
-            printf '%s\n%s\n%s\n' "$started_at" "$total_loaded" "$refresh_errors"
+            printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+                "$started_at" "$total_loaded" "$refresh_errors" \
+                "$readiness_status" "$readiness_stale" "$readiness_degraded"
             return 0
         fi
         if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
@@ -967,6 +972,9 @@ frontend_after="$(wait_frontend_refresh_progress "$frontend_started_at_before" "
 frontend_started_at_after="$(printf '%s\n' "$frontend_after" | sed -n '1p')"
 frontend_loaded_after="$(printf '%s\n' "$frontend_after" | sed -n '2p')"
 frontend_errors_after="$(printf '%s\n' "$frontend_after" | sed -n '3p')"
+frontend_readiness_status_after="$(printf '%s\n' "$frontend_after" | sed -n '4p')"
+frontend_readiness_stale_after="$(printf '%s\n' "$frontend_after" | sed -n '5p')"
+frontend_readiness_degraded_after="$(printf '%s\n' "$frontend_after" | sed -n '6p')"
 wait_frontend_feature_output "$market_ticker" "$bbo_event_id"
 wait_frontend_quote "$market_ticker"
 
@@ -974,6 +982,7 @@ wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health
 wait_plain_health featureplant-db-follower "$FEATUREPLANT_HEALTH_URL"
 
-printf 'PASS live_product_smoke market=%s run_id=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s\n' \
+printf 'PASS live_product_smoke market=%s run_id=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
     "$market_ticker" "$run_id" "$cursor_before" "$target_commit_seq" "$cursor_after" "$feature_outputs_after" \
-    "$frontend_started_at_after" "$frontend_loaded_before" "$frontend_loaded_after" "$frontend_errors_after"
+    "$frontend_started_at_after" "$frontend_loaded_before" "$frontend_loaded_after" "$frontend_errors_after" \
+    "$frontend_readiness_status_after" "$frontend_readiness_stale_after" "$frontend_readiness_degraded_after"
