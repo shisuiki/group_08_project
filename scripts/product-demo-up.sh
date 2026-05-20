@@ -110,6 +110,11 @@ evidence_file="${PRODUCT_DEMO_EVIDENCE_FILE:-${evidence_dir}/product-demo-${proj
 smoke_log="$(mktemp "${TMPDIR:-/tmp}/product-demo-smoke.XXXXXX")"
 browser_log="$(mktemp "${TMPDIR:-/tmp}/product-demo-browser.XXXXXX")"
 trap 'rm -f "$smoke_log" "$browser_log"' EXIT INT HUP TERM
+browser_artifact_dir="${PRODUCT_DEMO_BROWSER_ARTIFACT_DIR:-${evidence_dir}/browser-${project}}"
+mkdir -p "$browser_artifact_dir"
+browser_evidence_file="${browser_artifact_dir}/browser-smoke.json"
+browser_dom_file="${browser_artifact_dir}/dashboard.dom.html"
+browser_screenshot_file="${browser_artifact_dir}/dashboard.png"
 
 commit_sha="$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -136,27 +141,38 @@ fi
 
 browser_status="skipped"
 browser_reason="missing_browser"
+browser_exit_code=0
+browser_failed=0
 if FRONTEND_BASE_URL="http://127.0.0.1:${frontend_port}" \
     BROWSER_BIN="${BROWSER_BIN:-}" \
+    FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED="${FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED:-false}" \
+    FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE="${FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE:-mcr.microsoft.com/playwright:v1.49.1-jammy}" \
+    FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE="$browser_evidence_file" \
+    FRONTEND_BROWSER_SMOKE_OUTPUT_DIR="$browser_artifact_dir" \
+    FRONTEND_BROWSER_SMOKE_DOM_FILE="$browser_dom_file" \
+    FRONTEND_BROWSER_SMOKE_SCREENSHOT_FILE="$browser_screenshot_file" \
     scripts/frontend-product-browser-smoke.sh > "$browser_log" 2>&1; then
     browser_status="passed"
     browser_reason=""
+    browser_exit_code=0
     cat "$browser_log"
 else
     browser_exit="$?"
+    browser_exit_code="$browser_exit"
     if [ "$browser_exit" -eq 2 ]; then
         printf 'SKIP browser_smoke reason=missing_browser\n'
     else
+        browser_status="failed"
+        browser_reason="browser_smoke_failed"
+        browser_failed=1
         sed -n '1,120p' "$browser_log" >&2 || true
-        printf 'product demo browser smoke failed; cleanup with: scripts/product-demo-down.sh %s\n' "$project" >&2
-        exit 1
     fi
 fi
 
 tmp_evidence="${evidence_file}.tmp.$$"
-python3 - "$tmp_evidence" "$evidence_file" "$smoke_log" "$project" "$postgres_port" "$frontend_port" "$featureplant_port" \
+python3 - "$tmp_evidence" "$evidence_file" "$smoke_log" "$browser_evidence_file" "$project" "$postgres_port" "$frontend_port" "$featureplant_port" \
     "$cluster_subnet" "$featureplant_cursor" "$commit_sha" "$dashboard_url" "$featureplant_metrics_url" "$featureplant_health_url" \
-    "$started_at" "$browser_status" "$browser_reason" <<'PY'
+    "$started_at" "$browser_status" "$browser_reason" "$browser_exit_code" <<'PY'
 import hashlib
 import json
 import re
@@ -167,6 +183,7 @@ from pathlib import Path
     evidence_path,
     final_evidence_path,
     smoke_log,
+    browser_evidence_path,
     project,
     postgres_port,
     frontend_port,
@@ -180,6 +197,7 @@ from pathlib import Path
     started_at,
     browser_status,
     browser_reason,
+    browser_exit_code,
 ) = sys.argv[1:]
 
 labels = []
@@ -192,6 +210,34 @@ with open(smoke_log, "r", encoding="utf-8", errors="replace") as handle:
                 labels.append(label)
 with open(smoke_log, "rb") as handle:
     smoke_sha256 = hashlib.sha256(handle.read()).hexdigest()
+
+browser_smoke = {
+    "status": browser_status,
+    "mode": "none",
+    "reason": browser_reason or None,
+    "exit_code": int(browser_exit_code),
+    "evidence_path": browser_evidence_path if Path(browser_evidence_path).is_file() else None,
+    "dom_path": None,
+    "dom_sha256": None,
+    "screenshot_path": None,
+    "screenshot_sha256": None,
+    "checks": {},
+}
+if Path(browser_evidence_path).is_file():
+    with open(browser_evidence_path, "r", encoding="utf-8") as handle:
+        browser_body = json.load(handle)
+    browser_smoke.update({
+        "status": browser_body.get("status", browser_status),
+        "mode": browser_body.get("mode", "none"),
+        "reason": browser_body.get("reason"),
+        "browser": browser_body.get("browser"),
+        "docker_image": browser_body.get("docker_image"),
+        "dom_path": browser_body.get("dom_path"),
+        "dom_sha256": browser_body.get("dom_sha256"),
+        "screenshot_path": browser_body.get("screenshot_path"),
+        "screenshot_sha256": browser_body.get("screenshot_sha256"),
+        "checks": browser_body.get("checks") or {},
+    })
 
 body = {
     "schema_version": 1,
@@ -212,10 +258,7 @@ body = {
     "featureplant_health_url": featureplant_health_url,
     "smoke_pass_labels": labels,
     "smoke_stdout_sha256": smoke_sha256,
-    "browser_smoke": {
-        "status": browser_status,
-        "reason": browser_reason or None,
-    },
+    "browser_smoke": browser_smoke,
     "cleanup_command": f"scripts/product-demo-down.sh {final_evidence_path}",
 }
 Path(evidence_path).parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +268,12 @@ with open(evidence_path, "w", encoding="utf-8") as handle:
 PY
 chmod 600 "$tmp_evidence"
 mv "$tmp_evidence" "$evidence_file"
+
+if [ "$browser_failed" -ne 0 ]; then
+    printf 'product demo browser smoke failed; evidence=%s cleanup with: scripts/product-demo-down.sh %s\n' \
+        "$evidence_file" "$project" >&2
+    exit 1
+fi
 
 printf 'PASS product_demo project=%s dashboard_url=%s featureplant_metrics_url=%s evidence=%s cleanup_command=%s\n' \
     "$project" "$dashboard_url" "$featureplant_metrics_url" "$evidence_file" "scripts/product-demo-down.sh $evidence_file"

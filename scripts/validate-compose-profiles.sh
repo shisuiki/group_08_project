@@ -776,6 +776,7 @@ assert_live_product_manual_smoke_contract() {
     workflow=".github/workflows/deploy-ec2.yml"
     smoke_script="scripts/live-product-smoke.sh"
     browser_smoke_script="scripts/frontend-product-browser-smoke.sh"
+    cdp_browser_smoke_script="scripts/frontend-browser-cdp-smoke.py"
     smoke_probe="src/main/java/edu/illinois/group8/storage/db/LiveProductSmokeDbProbe.java"
     for expected in \
         "deploy_profile:" \
@@ -875,11 +876,11 @@ assert_live_product_manual_smoke_contract() {
 
     for expected in \
         'chromium chromium-browser google-chrome google-chrome-stable' \
-        '--headless=new' \
-        '--disable-background-networking' \
-        '--disable-component-update' \
-        '--no-first-run' \
-        '--dump-dom' \
+        'FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED' \
+        'FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE' \
+        'docker image inspect' \
+        'docker run --rm' \
+        'frontend-browser-cdp-smoke.py' \
         'id="chart-container"' \
         '<canvas' \
         'id="quote-update-health"' \
@@ -891,6 +892,23 @@ assert_live_product_manual_smoke_contract() {
         'PASS frontend_browser_smoke'; do
         if ! grep -Fq -- "$expected" "$browser_smoke_script"; then
             printf 'frontend browser smoke script missing contract fragment: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        '--headless=new' \
+        '--disable-background-networking' \
+        '--disable-component-update' \
+        '--no-first-run' \
+        'Page.captureScreenshot' \
+        'document.documentElement.outerHTML' \
+        'INTERACTION_EXPR' \
+        'market-search' \
+        'market-status-filter' \
+        'quoteFeedVisible'; do
+        if ! grep -Fq -- "$expected" "$cdp_browser_smoke_script"; then
+            printf 'frontend CDP browser smoke script missing contract fragment: %s\n' "$expected" >&2
             exit 1
         fi
     done
