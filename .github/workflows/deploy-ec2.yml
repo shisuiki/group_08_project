@@ -455,8 +455,18 @@ jobs:
               exit 1
               ;;
           esac
-          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
-            "mkdir -p '$DEPLOY_PATH/.deploy-state/images' && chmod 700 '$DEPLOY_PATH/.deploy-state' '$DEPLOY_PATH/.deploy-state/images'"
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "bash -s" <<REMOTE
+          set -euo pipefail
+          APP_DIR="$DEPLOY_PATH"
+          IMAGE_DIR="\$APP_DIR/.deploy-state/images"
+          mkdir -p "\$IMAGE_DIR"
+          chmod 700 "\$APP_DIR/.deploy-state" "\$IMAGE_DIR"
+          cd "\$IMAGE_DIR"
+          ls -1t kalshi-project-*.tar.gz 2>/dev/null | awk 'NR>6 {print}' | while IFS= read -r old_tar; do
+            rm -f -- "\$old_tar" "\$old_tar.sha256"
+          done
+          sudo docker builder prune -af >/dev/null || true
+          REMOTE
           scp -i ~/.ssh/ec2_key "$image_tar" "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/$KALSHI_APP_IMAGE_TAR"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "bash -s" <<REMOTE
           set -euo pipefail

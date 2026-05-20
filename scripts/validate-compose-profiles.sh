@@ -692,13 +692,15 @@ assert_kalshi_app_image_contract() {
         'docker save "$KALSHI_APP_IMAGE"' \
         'actions/upload-artifact@v6' \
         'actions/download-artifact@v7' \
-        'mkdir -p '\''$DEPLOY_PATH/.deploy-state/images'\''' \
         'scp -i ~/.ssh/ec2_key "$image_tar" "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/$KALSHI_APP_IMAGE_TAR"' \
         'IMAGE_TAR="\$APP_DIR/$KALSHI_APP_IMAGE_TAR"' \
         'LAST_SUCCESS_ENV="\$STATE_DIR/last_success.env"' \
         'previous_image="\$(sed -n '\''s/^KALSHI_APP_IMAGE=//p'\'' "\$LAST_SUCCESS_ENV" | tail -n 1)"' \
         'sudo docker save "\$previous_image" | gzip -1 > "\$previous_tar"' \
         'printf '\''%s\n'\'' "\$previous_tar_rel" > "\$LAST_SUCCESS_IMAGE_TAR"' \
+        'IMAGE_DIR="\$APP_DIR/.deploy-state/images"' \
+        "ls -1t kalshi-project-*.tar.gz 2>/dev/null | awk 'NR>6 {print}'" \
+        'sudo docker builder prune -af >/dev/null || true' \
         'gzip -t "\$IMAGE_TAR"' \
         'sudo docker load' \
         'sudo docker image inspect "$KALSHI_APP_IMAGE"' \
