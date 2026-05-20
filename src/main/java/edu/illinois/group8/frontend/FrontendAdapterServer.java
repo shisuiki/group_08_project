@@ -82,6 +82,7 @@ public class FrontendAdapterServer {
     private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
     private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
     private final SemanticMarketMetadataReader semanticMarketMetadataReader;
+    private final SemanticMetadataOperatorService semanticMetadataOperator;
     private final FrontendReleaseInfo releaseInfo;
     private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -226,6 +227,34 @@ public class FrontendAdapterServer {
         SemanticMarketMetadataReader semanticMarketMetadataReader,
         FrontendReleaseInfo releaseInfo
     ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            SemanticMetadataOperatorService.create(config, System.getenv())
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo,
+        SemanticMetadataOperatorService semanticMetadataOperator
+    ) {
         this.config = config;
         this.store = store;
         this.metadataCatalog = metadataCatalog == null
@@ -247,6 +276,9 @@ public class FrontendAdapterServer {
         this.semanticMarketMetadataReader = semanticMarketMetadataReader == null
             ? request -> List.of()
             : semanticMarketMetadataReader;
+        this.semanticMetadataOperator = semanticMetadataOperator == null
+            ? SemanticMetadataOperatorService.create(config, System.getenv())
+            : semanticMetadataOperator;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
     }
@@ -272,6 +304,8 @@ public class FrontendAdapterServer {
         bind("/ops/latency", this::handleOpsLatency);
         bind("/operator/status", this::handleOperatorStatus);
         bind("/operator/plan", this::handleOperatorPlan);
+        bind("/operator/semantic-metadata/run", this::handleOperatorSemanticMetadataRun);
+        bind("/operator/semantic-metadata/run-status", this::handleOperatorSemanticMetadataRunStatus);
         bind("/", this::handleStaticAsset);
         httpExecutor = Executors.newFixedThreadPool(
             HTTP_WORKER_THREADS,
@@ -294,6 +328,7 @@ public class FrontendAdapterServer {
             httpExecutor.shutdownNow();
             httpExecutor = null;
         }
+        semanticMetadataOperator.close();
     }
 
     private void bind(String path, HttpHandler delegate) {
@@ -878,6 +913,7 @@ public class FrontendAdapterServer {
         body.put("configuration", operatorControlPlane.configurationStatus());
         body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
         body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
+        body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
         body.put("data_freshness", dataFreshnessBody(freshness));
         body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
         body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
@@ -907,6 +943,42 @@ public class FrontendAdapterServer {
         } catch (IOException e) {
             writeError(exchange, 400, "malformed JSON payload");
         }
+    }
+
+    private void handleOperatorSemanticMetadataRun(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!config.operatorControlEnabled()) {
+            writeError(exchange, 403, "operator control POST is disabled");
+            return;
+        }
+        if (!config.basicAuthEnabled()) {
+            writeError(exchange, 403, "operator control POST requires Basic Auth");
+            return;
+        }
+        try {
+            JsonNode request = mapper.readTree(exchange.getRequestBody());
+            writeJson(exchange, 202, semanticMetadataOperator.start(request));
+        } catch (SemanticMetadataOperatorService.RunAlreadyActiveException e) {
+            Map<String, Object> body = new LinkedHashMap<>(semanticMetadataOperator.statusBody());
+            body.put("status", "blocked");
+            body.put("message", e.getMessage());
+            writeJson(exchange, 409, body);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+        } catch (IOException e) {
+            writeError(exchange, 400, "malformed JSON payload");
+        }
+    }
+
+    private void handleOperatorSemanticMetadataRunStatus(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        writeJson(exchange, 200, semanticMetadataOperator.statusBody());
     }
 
     private void handleMetrics(HttpExchange exchange) throws IOException {

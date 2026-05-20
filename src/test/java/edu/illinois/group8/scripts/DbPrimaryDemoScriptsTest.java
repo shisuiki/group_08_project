@@ -690,6 +690,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"semantic-tab\""));
         assertTrue(index.contains("id=\"semantic-map-panel\""));
         assertTrue(index.contains("id=\"semantic-treemap\""));
+        assertTrue(index.contains("id=\"semantic-operator-panel\""));
+        assertTrue(index.contains("id=\"semantic-run-start\""));
+        assertTrue(index.contains("id=\"semantic-run-openrouter-key\""));
         assertTrue(app.contains("body.release"));
         assertTrue(app.contains("body.data_freshness"));
         assertTrue(app.contains("body.quote_streams"));
@@ -708,6 +711,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("No markets match the current search/filter."));
         assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
+        assertTrue(app.contains("/operator/semantic-metadata/run"));
         assertTrue(app.contains("layoutSemanticTreemap"));
         assertTrue(styles.contains("semantic-treemap"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));

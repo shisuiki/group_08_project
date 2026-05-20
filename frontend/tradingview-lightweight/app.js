@@ -138,6 +138,25 @@
         operatorChecklist: document.getElementById('operator-checklist'),
         operatorCommandPlan: document.getElementById('operator-command-plan'),
         operatorEnvPlan: document.getElementById('operator-env-plan'),
+        semanticRunState: document.getElementById('semantic-run-state'),
+        semanticRunId: document.getElementById('semantic-run-id'),
+        semanticRunCounts: document.getElementById('semantic-run-counts'),
+        semanticRunConfig: document.getElementById('semantic-run-config'),
+        semanticRunError: document.getElementById('semantic-run-error'),
+        semanticRunModel: document.getElementById('semantic-run-model'),
+        semanticRunFallbackModel: document.getElementById('semantic-run-fallback-model'),
+        semanticRunTaxonomy: document.getElementById('semantic-run-taxonomy'),
+        semanticRunMarketTicker: document.getElementById('semantic-run-market-ticker'),
+        semanticRunMaxMarkets: document.getElementById('semantic-run-max-markets'),
+        semanticRunBudgetUsd: document.getElementById('semantic-run-budget-usd'),
+        semanticRunEstimatedCost: document.getElementById('semantic-run-estimated-cost'),
+        semanticRunOpenRouterKey: document.getElementById('semantic-run-openrouter-key'),
+        semanticRunOpenRouterKeyPresent: document.getElementById('semantic-run-openrouter-key-present'),
+        semanticRunDryRun: document.getElementById('semantic-run-dry-run'),
+        semanticRunAllowPaidFallback: document.getElementById('semantic-run-allow-paid-fallback'),
+        semanticRunStart: document.getElementById('semantic-run-start'),
+        semanticRunRefresh: document.getElementById('semantic-run-refresh'),
+        semanticRunOutput: document.getElementById('semantic-run-output'),
         live: {
             symbol: document.getElementById('live-symbol'),
             bid: document.getElementById('live-bid'),
@@ -201,6 +220,8 @@
     let marketSearchTimer = null;
     let semanticSearchTimer = null;
     let semanticMapGeneration = 0;
+    let semanticRunStatusTimer = null;
+    let lastSemanticRunCompletion = '';
     let lastHealthBody = null;
     let lastOpsPipeline = null;
     let lastOpsLatency = null;
@@ -1134,11 +1155,85 @@
             : 'disabled';
         dom.operatorDataSource.textContent =
             `${freshness.source_kind || 'unknown'} / live ${yesNo(freshness.live_data_observed)}`;
+        if (body.semantic_metadata_run) {
+            renderSemanticRunStatus(body.semantic_metadata_run);
+        }
+        const semanticConfig = body.semantic_metadata || {};
+        if (!dom.semanticRunModel.value && semanticConfig.model) {
+            dom.semanticRunModel.value = semanticConfig.model;
+        }
+        if (!dom.semanticRunFallbackModel.value && semanticConfig.fallback_model) {
+            dom.semanticRunFallbackModel.value = semanticConfig.fallback_model;
+        }
+        if (!dom.semanticRunTaxonomy.value && semanticConfig.taxonomy_version) {
+            dom.semanticRunTaxonomy.value = semanticConfig.taxonomy_version;
+        }
         if (!dom.operatorImage.value && release.image) {
             dom.operatorImage.value = release.image;
         }
         if (!dom.operatorRef.value && release.sha) {
             dom.operatorRef.value = release.sha;
+        }
+    }
+
+    async function loadSemanticRunStatus() {
+        try {
+            const body = await fetchJson('/operator/semantic-metadata/run-status');
+            renderSemanticRunStatus(body);
+        } catch (err) {
+            dom.semanticRunState.textContent = 'unavailable';
+            dom.semanticRunState.className = 'stale';
+            dom.semanticRunError.textContent = err.message;
+            dom.semanticRunStart.disabled = true;
+            dom.semanticRunOutput.textContent = '';
+        }
+    }
+
+    function renderSemanticRunStatus(body) {
+        const latest = body?.latest_run || null;
+        const state = latest?.state || body?.status || 'idle';
+        const summary = latest?.summary || null;
+        const config = latest?.config || {};
+        dom.semanticRunState.textContent = state;
+        dom.semanticRunState.className = state === 'completed' ? 'fresh'
+            : state === 'running' ? ''
+            : state === 'idle' ? ''
+            : 'stale';
+        dom.semanticRunId.textContent = latest
+            ? `${latest.run_id} / ${latest.started_at || '-'}${latest.finished_at ? ' -> ' + latest.finished_at : ''}`
+            : '-';
+        dom.semanticRunCounts.textContent = summary
+            ? `processed ${summary.processed || 0} / generated ${summary.generated || 0}` +
+                ` / review ${summary.review_required || 0} / rate ${summary.rate_limited || 0}` +
+                ` / failed ${summary.failed || 0} / skipped ${summary.skipped || 0}` +
+                ` / ${summary.outcome || 'completed'}`
+            : '-';
+        dom.semanticRunConfig.textContent = latest
+            ? `model ${config.model || '-'} / fallback ${config.fallback_model || '-'} / taxonomy ${config.taxonomy_version || '-'}` +
+                ` / max ${config.max_markets || '-'} / dry ${yesNo(config.dry_run)}` +
+                ` / db ${yesNo(config.db_configured)} / key ${yesNo(config.openrouter_api_key_configured)}`
+            : `db ${yesNo(body?.db_configured)} / key ${yesNo(body?.openrouter_api_key_configured)}`;
+        dom.semanticRunError.textContent = latest?.last_error || (state === 'disabled' ? 'operator control disabled' : '-');
+        dom.semanticRunStart.disabled = body?.running === true || body?.operator_control_enabled !== true;
+        dom.semanticRunOpenRouterKeyPresent.checked = body?.openrouter_api_key_configured === true;
+        dom.semanticRunOutput.textContent = latest ? JSON.stringify({
+            state: latest.state,
+            run_id: latest.run_id,
+            summary,
+            config,
+            last_error: latest.last_error || null
+        }, null, 2) : '';
+        if (body?.running === true) {
+            scheduleSemanticRunStatusRefresh();
+        } else {
+            clearSemanticRunStatusTimer();
+        }
+        const completionKey = latest && latest.state === 'completed'
+            ? `${latest.run_id}:${latest.finished_at || ''}`
+            : '';
+        if (completionKey && completionKey !== lastSemanticRunCompletion) {
+            lastSemanticRunCompletion = completionKey;
+            loadSemanticMap();
         }
     }
 
@@ -1391,6 +1486,62 @@
                 `<div class="operator-plan-warning">${escapeHtml(err.message)}</div>`;
         } finally {
             await loadOperatorStatus();
+        }
+    }
+
+    function buildSemanticRunRequest() {
+        const request = {
+            dry_run: dom.semanticRunDryRun.checked,
+            max_markets: Number(dom.semanticRunMaxMarkets.value || 25) || 25,
+            taxonomy_version: dom.semanticRunTaxonomy.value.trim(),
+            model: dom.semanticRunModel.value.trim(),
+            fallback_model: dom.semanticRunFallbackModel.value.trim(),
+            allow_paid_fallback: dom.semanticRunAllowPaidFallback.checked,
+            budget_usd: dom.semanticRunBudgetUsd.value.trim() || '0',
+            estimated_paid_request_cost_usd: dom.semanticRunEstimatedCost.value.trim() || '0.01',
+            openrouter_api_key_present: dom.semanticRunOpenRouterKeyPresent.checked
+        };
+        const ticker = dom.semanticRunMarketTicker.value.trim();
+        if (ticker) {
+            request.market_ticker = ticker;
+        }
+        const apiKey = dom.semanticRunOpenRouterKey.value.trim();
+        if (apiKey) {
+            request.openrouter_api_key = apiKey;
+        }
+        return request;
+    }
+
+    async function startSemanticMetadataRun() {
+        dom.semanticRunStart.disabled = true;
+        dom.semanticRunState.textContent = 'starting';
+        dom.semanticRunError.textContent = '-';
+        try {
+            const body = await fetchJson('/operator/semantic-metadata/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildSemanticRunRequest())
+            });
+            dom.semanticRunOpenRouterKey.value = '';
+            renderSemanticRunStatus(body);
+        } catch (err) {
+            dom.semanticRunState.textContent = 'blocked';
+            dom.semanticRunState.className = 'stale';
+            dom.semanticRunError.textContent = err.message;
+        } finally {
+            await loadOperatorStatus();
+        }
+    }
+
+    function scheduleSemanticRunStatusRefresh() {
+        clearSemanticRunStatusTimer();
+        semanticRunStatusTimer = setTimeout(loadSemanticRunStatus, 2500);
+    }
+
+    function clearSemanticRunStatusTimer() {
+        if (semanticRunStatusTimer != null) {
+            clearTimeout(semanticRunStatusTimer);
+            semanticRunStatusTimer = null;
         }
     }
 
@@ -1683,6 +1834,8 @@
     dom.semanticTagFilter.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticSearch.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticRefresh.addEventListener('click', loadSemanticMap);
+    dom.semanticRunStart.addEventListener('click', startSemanticMetadataRun);
+    dom.semanticRunRefresh.addEventListener('click', loadSemanticRunStatus);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
     for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
         button.addEventListener('click', () => setActiveRole(button.dataset.role));
@@ -1696,6 +1849,7 @@
         loadOpsTelemetry();
         loadOperatorStatus();
         loadSemanticMap();
+        loadSemanticRunStatus();
     });
 
     setInterval(() => {
@@ -1708,5 +1862,6 @@
         loadOpsTelemetry();
         loadOperatorStatus();
         loadSemanticMap();
+        loadSemanticRunStatus();
     });
 })();

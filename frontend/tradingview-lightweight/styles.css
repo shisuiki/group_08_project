@@ -516,7 +516,8 @@ main {
     width: auto;
 }
 
-#operator-generate-plan {
+#operator-generate-plan,
+.operator-actions button {
     width: 100%;
     background: #2b6d5d;
     color: #fff;
@@ -527,10 +528,22 @@ main {
     font-size: 12px;
 }
 
-#operator-generate-plan:disabled {
+#operator-generate-plan:disabled,
+.operator-actions button:disabled {
     background: #3b444b;
     color: #a8b0b7;
     cursor: not-allowed;
+}
+
+.operator-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.semantic-run-grid {
+    grid-template-columns: 1fr;
 }
 
 .operator-warnings {

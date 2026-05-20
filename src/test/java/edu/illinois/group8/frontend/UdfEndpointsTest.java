@@ -3,6 +3,8 @@ package edu.illinois.group8.frontend;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.illinois.group8.feature.FeatureOutput;
+import edu.illinois.group8.semantic.SemanticMetadataBatchSummary;
+import edu.illinois.group8.semantic.SemanticMetadataConfig;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
@@ -33,8 +35,13 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -335,6 +342,9 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"operator-private-key-pem-present\""));
         assertTrue(root.body().contains("id=\"operator-db-password-present\""));
         assertTrue(root.body().contains("id=\"operator-command-plan\""));
+        assertTrue(root.body().contains("id=\"semantic-operator-panel\""));
+        assertTrue(root.body().contains("id=\"semantic-run-start\""));
+        assertTrue(root.body().contains("id=\"semantic-run-openrouter-key\""));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("<dt>Quote feed</dt>"));
@@ -379,6 +389,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('operator-env-plan')"));
         assertTrue(js.body().contains("document.getElementById('operator-control-enabled')"));
         assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
+        assertTrue(js.body().contains("document.getElementById('semantic-run-start')"));
+        assertTrue(js.body().contains("document.getElementById('semantic-run-openrouter-key')"));
         assertTrue(js.body().contains("document.getElementById('trader-bid')"));
         assertTrue(js.body().contains("document.getElementById('research-feature-limit')"));
         assertTrue(js.body().contains("document.getElementById('semantic-group-by')"));
@@ -389,6 +401,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("body.quote_streams"));
         assertTrue(js.body().contains("/operator/status"));
         assertTrue(js.body().contains("/operator/plan"));
+        assertTrue(js.body().contains("/operator/semantic-metadata/run"));
+        assertTrue(js.body().contains("/operator/semantic-metadata/run-status"));
         assertTrue(js.body().contains("/ops/pipeline"));
         assertTrue(js.body().contains("/ops/latency"));
         assertTrue(js.body().contains("/api/semantic-metadata/treemap?"));
@@ -1156,6 +1170,144 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void operatorSemanticMetadataRunPostIsDisabledByDefault() throws Exception {
+        HttpResponse<String> response = postJson("/operator/semantic-metadata/run", "{\"dry_run\":true}");
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("operator control POST is disabled"));
+    }
+
+    @Test
+    void operatorSemanticMetadataRunEnabledStillRequiresBasicAuth() throws Exception {
+        restartWithOperatorControl(false);
+
+        HttpResponse<String> response = postJson("/operator/semantic-metadata/run", "{\"dry_run\":true}");
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("requires Basic Auth"));
+    }
+
+    @Test
+    void operatorSemanticMetadataRunStartsAsyncAndBlocksConcurrentRun() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<SemanticMetadataConfig> observed = new AtomicReference<>();
+        String requestKey = "sk-test-run-secret-000000000000000000000000";
+        restartWithSemanticOperator(
+            Map.of(),
+            config -> {
+                observed.set(config);
+                started.countDown();
+                try {
+                    assertTrue(release.await(2, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+                return summary(2, 1, 0, 0, 0, 1);
+            }
+        );
+
+        String request = """
+            {
+              "dry_run": false,
+              "max_markets": 2,
+              "market_ticker": "MKT-SEM",
+              "model": "deepseek/deepseek-v4-flash:free",
+              "fallback_model": "deepseek/deepseek-v4-flash",
+              "allow_paid_fallback": false,
+              "openrouter_api_key": "%s"
+            }
+            """.formatted(requestKey);
+        HttpResponse<String> response =
+            postJsonWithBasicAuth("/operator/semantic-metadata/run", request, "operator", "secret");
+        JsonNode body = MAPPER.readTree(response.body());
+
+        assertEquals(202, response.statusCode());
+        assertEquals("running", body.path("status").asText());
+        assertTrue(body.path("running").asBoolean());
+        assertFalse(response.body().contains(requestKey));
+        assertTrue(started.await(2, TimeUnit.SECONDS));
+        assertEquals("MKT-SEM", observed.get().marketTicker());
+        assertEquals(observed.get().model(), observed.get().fallbackModel());
+        assertEquals(409, postJsonWithBasicAuth(
+            "/operator/semantic-metadata/run",
+            request,
+            "operator",
+            "secret"
+        ).statusCode());
+
+        release.countDown();
+        JsonNode completed = waitForSemanticRunState("completed");
+        assertEquals(1, completed.path("latest_run").path("summary").path("generated").asInt());
+        assertFalse(completed.toString().contains(requestKey));
+    }
+
+    @Test
+    void operatorSemanticMetadataRunDryRunDoesNotRequireApiKey() throws Exception {
+        AtomicReference<SemanticMetadataConfig> observed = new AtomicReference<>();
+        restartWithSemanticOperator(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> {
+                observed.set(config);
+                return summary(1, 0, 0, 0, 0, 1);
+            }
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/semantic-metadata/run",
+            "{\"dry_run\":true,\"max_markets\":1}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForSemanticRunState("completed");
+        assertTrue(observed.get().dryRun());
+        assertEquals("", observed.get().openRouterApiKey());
+        assertEquals(1, completed.path("latest_run").path("summary").path("skipped").asInt());
+    }
+
+    @Test
+    void operatorSemanticMetadataRunRejectsMissingApiKeyForNonDryRun() throws Exception {
+        restartWithSemanticOperator(Map.of("OPENROUTER_API_KEY", ""), config -> summary(0, 0, 0, 0, 0, 0));
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/semantic-metadata/run",
+            "{\"dry_run\":false,\"max_markets\":1}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("OPENROUTER_API_KEY"));
+    }
+
+    @Test
+    void operatorSemanticMetadataRunStatusRedactsRuntimeError() throws Exception {
+        String requestKey = "sk-test-error-secret-0000000000000000000000";
+        restartWithSemanticOperator(
+            Map.of(),
+            config -> {
+                throw new IllegalStateException("provider failed api_key=" + config.openRouterApiKey());
+            }
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/semantic-metadata/run",
+            "{\"dry_run\":false,\"openrouter_api_key\":\"" + requestKey + "\"}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode failed = waitForSemanticRunState("failed");
+        String raw = failed.toString();
+        assertFalse(raw.contains(requestKey));
+        assertTrue(failed.path("latest_run").path("last_error").asText().contains("[redacted]"));
+    }
+
+    @Test
     void healthReportsReleaseIdentityAndDataFreshness() throws Exception {
         server.stop();
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
@@ -1704,6 +1856,85 @@ class UdfEndpointsTest {
         );
         server.start();
         baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
+    private void restartWithSemanticOperator(
+        Map<String, String> serviceEnv,
+        Function<SemanticMetadataConfig, SemanticMetadataBatchSummary> runner
+    ) throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        seed(store);
+        java.util.HashMap<String, String> env = new java.util.HashMap<>();
+        env.put("FRONTEND_ADAPTER_PORT", "0");
+        env.put("FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED", "true");
+        env.put("FRONTEND_ADAPTER_BASIC_AUTH_USER", "operator");
+        env.put("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret");
+        env.put("FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi");
+        env.put("FRONTEND_ADAPTER_DB_USER", "frontend");
+        env.put("FRONTEND_ADAPTER_DB_PASSWORD", "db-secret");
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(env);
+        java.util.HashMap<String, String> runEnv = new java.util.HashMap<>(serviceEnv);
+        if (!runEnv.containsKey("OPENROUTER_API_KEY")) {
+            runEnv.put("OPENROUTER_API_KEY", "sk-server-test-key-000000000000000000000000");
+        }
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        SemanticMetadataOperatorService operatorService =
+            new SemanticMetadataOperatorService(config, runEnv, executor, runner);
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("model", "fallback", "tax-v1"),
+            request -> List.of(),
+            FrontendReleaseInfo.empty(),
+            operatorService
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
+    private JsonNode waitForSemanticRunState(String expectedState) throws Exception {
+        JsonNode status = null;
+        for (int attempt = 0; attempt < 80; attempt++) {
+            status = MAPPER.readTree(getWithBasicAuth(
+                "/operator/semantic-metadata/run-status",
+                "operator",
+                "secret"
+            ).body());
+            if (expectedState.equals(status.path("latest_run").path("state").asText())) {
+                return status;
+            }
+            Thread.sleep(25L);
+        }
+        assertNotNull(status);
+        return status;
+    }
+
+    private static SemanticMetadataBatchSummary summary(
+        int processed,
+        int generated,
+        int reviewRequired,
+        int rateLimited,
+        int failed,
+        int skipped
+    ) {
+        return new SemanticMetadataBatchSummary(
+            processed,
+            generated,
+            reviewRequired,
+            rateLimited,
+            failed,
+            skipped,
+            0,
+            BigDecimal.ZERO,
+            "primary",
+            "fallback"
+        );
     }
 
     private static boolean checkPassed(JsonNode body, String id) {
