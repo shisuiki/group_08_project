@@ -433,6 +433,7 @@ wait_demo_orchestrator_smoke() {
                 -o "$latency_file" \
             && python3 - "$run_file" "$status_file" "$heatmap_file" "$quotes_file" "$latency_file" <<'PY'
 import json
+import os
 import sys
 
 paths = sys.argv[1:]
@@ -459,13 +460,22 @@ if latency.get("status") in {"", None}:
     raise SystemExit("latency status missing")
 raw = json.dumps(bodies, sort_keys=True)
 blocked = [
+    "raw_response",
+    "sk-or-v1-",
+    "-----BEGIN",
+    "PRIVATE KEY",
+]
+for env_name in (
     "OPENROUTER_API_KEY",
-    "openrouter_api_key",
     "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD",
     "FEATUREPLANT_DB_PASSWORD",
+    "FRONTEND_ADAPTER_DB_PASSWORD",
     "DB_WRITER_DATABASE_PASSWORD",
-    "raw_response",
-]
+    "LOCAL_DB_PASSWORD",
+):
+    value = os.environ.get(env_name, "")
+    if len(value) >= 8:
+        blocked.append(value)
 for needle in blocked:
     if needle in raw:
         raise SystemExit(f"reason=secret_leaked needle={needle}")
