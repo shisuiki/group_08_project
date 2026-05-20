@@ -102,6 +102,7 @@ case "$COMPOSE_PROFILE" in
         ;;
 esac
 EXPECTED_FEATURE_SOURCE="$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)"
+KALSHI_APP_IMAGE="$(env_or_file KALSHI_APP_IMAGE kalshi-project:local)"
 
 WSCLIENT_HEALTH_URL="${WSCLIENT_HEALTH_URL:-http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health}"
 STREAM_TAP_HEALTH_URL="${STREAM_TAP_HEALTH_URL:-http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health}"
@@ -130,6 +131,14 @@ docker_compose() {
         sudo docker compose "$@"
     else
         docker compose "$@"
+    fi
+}
+
+docker_cmd() {
+    if is_true "$LIVE_PRODUCT_SMOKE_DOCKER_SUDO"; then
+        sudo docker "$@"
+    else
+        docker "$@"
     fi
 }
 
@@ -208,13 +217,44 @@ validate_live_db_config() {
     require_same_db_value "password" "$LIVE_PRODUCT_SMOKE_DB_PASSWORD" "$FRONTEND_ADAPTER_DB_PASSWORD"
 }
 
+compose_service_network() {
+    service="$1"
+    container_id="$(compose ps -q "$service" 2>/dev/null | sed -n '1p' || true)"
+    if [ -z "$container_id" ]; then
+        return 1
+    fi
+    docker_cmd inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" 2>/dev/null | sed -n '1p'
+}
+
+db_probe_network() {
+    case "$LIVE_PRODUCT_SMOKE_DB_URL" in
+        jdbc:postgresql://timescaledb:*|postgresql://timescaledb:*)
+            compose_service_network timescaledb
+            ;;
+        *)
+            printf '%s\n' ""
+            ;;
+    esac
+}
+
 db_probe() {
     db_probe_output="$tmpdir/db-probe.out"
-    if ! compose run --rm --no-deps -T \
+    network="$(db_probe_network || true)"
+    if [ -n "$network" ]; then
+        if ! docker_cmd run --rm --network "$network" \
+            -e "LIVE_PRODUCT_SMOKE_DB_URL=$LIVE_PRODUCT_SMOKE_DB_URL" \
+            -e "LIVE_PRODUCT_SMOKE_DB_USER=$LIVE_PRODUCT_SMOKE_DB_USER" \
+            -e "LIVE_PRODUCT_SMOKE_DB_PASSWORD=$LIVE_PRODUCT_SMOKE_DB_PASSWORD" \
+            "$KALSHI_APP_IMAGE" java -cp /app/app.jar edu.illinois.group8.storage.db.LiveProductSmokeDbProbeCli "$@" \
+            > "$db_probe_output"; then
+            cat "$db_probe_output" >&2
+            return 1
+        fi
+    elif ! docker_cmd run --rm \
         -e "LIVE_PRODUCT_SMOKE_DB_URL=$LIVE_PRODUCT_SMOKE_DB_URL" \
         -e "LIVE_PRODUCT_SMOKE_DB_USER=$LIVE_PRODUCT_SMOKE_DB_USER" \
         -e "LIVE_PRODUCT_SMOKE_DB_PASSWORD=$LIVE_PRODUCT_SMOKE_DB_PASSWORD" \
-        wsclient java -cp /app/app.jar edu.illinois.group8.storage.db.LiveProductSmokeDbProbeCli "$@" \
+        "$KALSHI_APP_IMAGE" java -cp /app/app.jar edu.illinois.group8.storage.db.LiveProductSmokeDbProbeCli "$@" \
         > "$db_probe_output"; then
         cat "$db_probe_output" >&2
         return 1

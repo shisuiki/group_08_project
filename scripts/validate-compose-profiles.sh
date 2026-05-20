@@ -1065,10 +1065,15 @@ assert_live_product_manual_smoke_contract() {
         'unpkg|jsdelivr|cdnjs|cdn' \
         'LIVE_PRODUCT_SMOKE_DOCKER_SUDO="${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}"' \
         'docker_compose()' \
+        'docker_cmd()' \
         'sudo docker compose "$@"' \
         'docker compose "$@"' \
+        'sudo docker "$@"' \
+        'docker "$@"' \
         'docker_compose --env-file "$COMPOSE_ENV_FILE" --profile "$COMPOSE_PROFILE" "$@"' \
         'docker_compose --profile "$COMPOSE_PROFILE" "$@"' \
+        'docker_cmd run --rm --network "$network"' \
+        'KALSHI_APP_IMAGE="$(env_or_file KALSHI_APP_IMAGE kalshi-project:local)"' \
         'LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA'; do
         if ! grep -Fq "$expected" "$smoke_script"; then
             printf 'live-product smoke script missing contract fragment: %s\n' "$expected" >&2
@@ -1146,6 +1151,7 @@ assert_live_product_manual_smoke_contract() {
         'docker compose stop' \
         'docker compose rm' \
         'docker compose run' \
+        'compose run' \
         'psql_scalar()' \
         'compose exec -T -e PGPASSWORD'; do
         if grep -Fq -- "$forbidden" "$smoke_script"; then

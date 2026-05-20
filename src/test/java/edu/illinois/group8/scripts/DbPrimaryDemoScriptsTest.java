@@ -170,8 +170,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("COMPOSE_PROFILE=\"${COMPOSE_PROFILE:-live-product}\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=\"${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}\""));
         assertTrue(script.contains("docker_compose()"));
+        assertTrue(script.contains("docker_cmd()"));
         assertTrue(script.contains("sudo docker compose \"$@\""));
         assertTrue(script.contains("docker compose \"$@\""));
+        assertTrue(script.contains("sudo docker \"$@\""));
+        assertTrue(script.contains("docker \"$@\""));
         assertTrue(script.contains("docker_compose --env-file \"$COMPOSE_ENV_FILE\" --profile \"$COMPOSE_PROFILE\" \"$@\""));
         assertTrue(script.contains("docker_compose --profile \"$COMPOSE_PROFILE\" \"$@\""));
         assertTrue(script.contains("WSCLIENT_HEALTH_URL"));
@@ -202,10 +205,14 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DB_URL=\"$LOCAL_DB_URL\""));
         assertTrue(script.contains("EXPECTED_FEATURE_SOURCE=\"$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS=\"${LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS:-30000}\""));
+        assertTrue(script.contains("KALSHI_APP_IMAGE=\"$(env_or_file KALSHI_APP_IMAGE kalshi-project:local)\""));
         assertTrue(script.contains("print(body.get(\"feature_source\") or \"\")"));
         assertTrue(script.contains("LiveProductSmokeDbProbeCli"));
         assertTrue(script.contains("db_probe_output=\"$tmpdir/db-probe.out\""));
-        assertTrue(script.contains("if ! compose run --rm --no-deps -T"));
+        assertTrue(script.contains("db_probe_network()"));
+        assertTrue(script.contains("compose_service_network timescaledb"));
+        assertTrue(script.contains("docker_cmd run --rm --network \"$network\""));
+        assertFalse(script.contains("compose run --rm --no-deps -T"));
         assertTrue(script.contains("tr -d '\\r' < \"$db_probe_output\""));
         assertTrue(script.contains("cursorCommitSeq"));
         assertTrue(script.contains("seedCanonicalEvents"));
