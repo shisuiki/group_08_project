@@ -761,6 +761,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("deployment required configuration present: %s"));
         assertTrue(workflow.contains("require_present EC2_SSH_PRIVATE_KEY"));
         assertTrue(workflow.contains("Validate manual live-product rehearsal inputs"));
+        assertTrue(workflow.contains("if [ \"$GITHUB_EVENT_NAME\" != \"workflow_dispatch\" ]; then"));
         assertTrue(workflow.contains("DEPLOY_PROFILE must be cluster-live or live-product"));
         assertTrue(workflow.contains("require_live_product_data=true requires deploy_profile=live-product"));
         assertTrue(workflow.contains("require_live_product_data=true requires run_live_product_smoke=true"));

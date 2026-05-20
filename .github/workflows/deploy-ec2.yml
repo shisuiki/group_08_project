@@ -307,14 +307,14 @@ jobs:
             return 0
           }
 
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            exit 0
+          fi
+
           case "$DEPLOY_PROFILE" in
             cluster-live|live-product) ;;
             *) fail_input "DEPLOY_PROFILE must be cluster-live or live-product" ;;
           esac
-
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
-            exit 0
-          fi
 
           if is_true "$REQUIRE_LIVE_PRODUCT_DATA"; then
             [ "$DEPLOY_PROFILE" = "live-product" ] \

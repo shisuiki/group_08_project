@@ -793,6 +793,7 @@ assert_live_product_manual_smoke_contract() {
         "deployment required configuration missing: %s" \
         "deployment required configuration present: %s" \
         "Validate manual live-product rehearsal inputs" \
+        'if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then' \
         "DEPLOY_PROFILE must be cluster-live or live-product" \
         "require_live_product_data=true requires deploy_profile=live-product" \
         "require_live_product_data=true requires run_live_product_smoke=true" \
