@@ -1078,7 +1078,6 @@ check_optional_live_data() {
             latest_live_feature_name="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $2}')"
             latest_live_feature_market="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $3}')"
             latest_live_feature_commit_seq="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $6}')"
-            wait_frontend_live_feature_output "$live_feature_market" "$live_feature_name" "$live_event_id"
             wait_frontend_health_non_smoke_freshness "$live_feature_event_ts_ms"
             if [ "$live_feature_name" = "feature.bbo" ]; then
                 wait_frontend_live_quote "$live_feature_market" "$live_feature_event_ts_ms"

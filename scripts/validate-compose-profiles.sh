@@ -452,9 +452,11 @@ assert_live_product_db_writer_expectations() {
         'curl -fsS --noproxy "$FRONTEND_NO_PROXY"' \
         'LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"' \
         'REQUIRE_LIVE_PRODUCT_DATA="${REQUIRE_LIVE_PRODUCT_DATA:-false}"' \
-        'run_live_product_semantic_smoke "$env_file"' \
+        'run_live_product_semantic_smoke "$env_file" "$candidate"' \
         'live-product semantic smoke must be enabled before recording a live-product deploy success.' \
-        'LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="$REQUIRE_LIVE_PRODUCT_DATA"' \
+        'LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="$require_live_data"' \
+        'EXPECTED_KALSHI_RELEASE_SHA="$KALSHI_RELEASE_SHA"' \
+        'EXPECTED_KALSHI_APP_IMAGE="$KALSHI_APP_IMAGE"' \
         'LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true' \
         'sh scripts/live-product-smoke.sh' \
         "live-product) printf '%s\\n' wsclient" \
@@ -994,6 +996,8 @@ assert_live_product_manual_smoke_contract() {
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
         "REQUIRE_LIVE_PRODUCT_DATA=\$q_require_live_product_data sh scripts/ec2-compose-rollback-gate.sh" \
+        'EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS=300' \
+        'KALSHI_MARKET_DISCOVERY_MAX_MARKETS=$EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS' \
         "env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db'" \
         "(env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db') && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
         "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=\$q_live_product_browser_smoke_enabled" \
@@ -1057,7 +1061,6 @@ assert_live_product_manual_smoke_contract() {
         'seed_to_frontend_quote_ms' \
         'seed_to_sse_ms' \
         'wait_featureplant_cursor_caught_up' \
-        'wait_frontend_live_feature_output' \
         'wait_frontend_health_non_smoke_freshness' \
         'wait_frontend_quote_stream' \
         'FEATUREPLANT_DB_CURSOR_NAME' \

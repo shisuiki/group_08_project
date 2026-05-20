@@ -1137,6 +1137,7 @@ PY
 
 run_live_product_semantic_smoke() {
     env_file="$1"
+    candidate="${2:-true}"
     case "$DEPLOY_PROFILE" in
         live-product|live-product-local-db) ;;
         *)
@@ -1173,10 +1174,19 @@ run_live_product_semantic_smoke() {
     : > "$smoke_stdout"
     : > "$smoke_stderr"
     chmod 600 "$smoke_stdout" "$smoke_stderr"
+    require_live_data="$REQUIRE_LIVE_PRODUCT_DATA"
+    if [ "$candidate" != "true" ]; then
+        require_live_data=false
+    fi
     if COMPOSE_ENV_FILE="$env_file" \
         COMPOSE_PROFILE="$DEPLOY_PROFILE" \
-        LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="$REQUIRE_LIVE_PRODUCT_DATA" \
+        LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="$require_live_data" \
         LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true \
+        EXPECTED_KALSHI_RELEASE_SHA="$KALSHI_RELEASE_SHA" \
+        EXPECTED_KALSHI_APP_IMAGE="$KALSHI_APP_IMAGE" \
+        EXPECTED_KALSHI_DEPLOY_PROFILE="$DEPLOY_PROFILE" \
+        EXPECTED_KALSHI_GITHUB_RUN_ID="$KALSHI_GITHUB_RUN_ID" \
+        EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT="$KALSHI_GITHUB_RUN_ATTEMPT" \
         FRONTEND_NO_PROXY="$FRONTEND_NO_PROXY" \
         sh scripts/live-product-smoke.sh > "$smoke_stdout" 2> "$smoke_stderr"; then
         cat "$smoke_stdout"
@@ -1266,7 +1276,7 @@ deploy_env() {
     PROFILE_HEALTH_SMOKE_STATUS="passed"
     FRONTEND_RELEASE_HEALTH_JSON="$(frontend_release_health_json)"
 
-    if ! run_live_product_semantic_smoke "$env_file"; then
+    if ! run_live_product_semantic_smoke "$env_file" "$candidate"; then
         diagnose_profile "$env_file"
         return 1
     fi

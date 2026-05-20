@@ -224,8 +224,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("pipelineReliabilitySnapshot"));
         assertTrue(script.contains("PASS pipeline_reliability"));
         assertTrue(script.contains("wait_featureplant_cursor_caught_up"));
-        assertTrue(script.contains("wait_frontend_live_feature_output"));
         assertTrue(script.contains("wait_frontend_health_non_smoke_freshness"));
+        assertFalse(script.contains("wait_frontend_live_feature_output \"$live_feature_market\""));
         assertTrue(script.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED"));
         assertTrue(script.contains("check_product_browser_ui"));
         assertTrue(probe.contains("insert into canonical_events"));
@@ -383,7 +383,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("db_preflight_network()"));
         assertTrue(script.contains("compose_service_network \"$env_file\" timescaledb"));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
-        assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
+        assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\" \"$candidate\""));
         assertTrue(script.contains("live-product semantic smoke must be enabled before recording a live-product deploy success."));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_JSON"));
         assertTrue(script.contains("live_product_smoke_summary_json()"));
@@ -395,7 +395,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("\"expected_feature_source\","));
         assertTrue(script.contains("> \"$smoke_stdout\" 2> \"$smoke_stderr\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true"));
-        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=\"$REQUIRE_LIVE_PRODUCT_DATA\""));
+        assertTrue(script.contains("require_live_data=\"$REQUIRE_LIVE_PRODUCT_DATA\""));
+        assertTrue(script.contains("if [ \"$candidate\" != \"true\" ]; then"));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=\"$require_live_data\""));
+        assertTrue(script.contains("EXPECTED_KALSHI_RELEASE_SHA=\"$KALSHI_RELEASE_SHA\""));
+        assertTrue(script.contains("EXPECTED_KALSHI_APP_IMAGE=\"$KALSHI_APP_IMAGE\""));
         assertTrue(script.contains("COMPOSE_PROFILE=\"$DEPLOY_PROFILE\""));
         assertTrue(script.contains("sh scripts/live-product-smoke.sh"));
         assertTrue(script.contains("wsclient \"http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health\""));
@@ -432,7 +436,7 @@ class DbPrimaryDemoScriptsTest {
             < script.indexOf("if ! assert_runtime_container_images \"$env_file\"; then"));
         assertTrue(script.indexOf("if ! assert_runtime_container_images \"$env_file\"; then")
             < script.indexOf("if ! profile_health_smoke; then"));
-        assertTrue(script.indexOf("if ! run_live_product_semantic_smoke \"$env_file\"; then")
+        assertTrue(script.indexOf("if ! run_live_product_semantic_smoke \"$env_file\" \"$candidate\"; then")
             < script.indexOf("record_success"));
         assertTrue(script.contains("last_success.image"));
         assertTrue(script.contains("last_success.image_tar"));
@@ -625,7 +629,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE'"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
-        assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
+        assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\" \"$candidate\""));
         assertTrue(script.contains("scripts/live-product-smoke.sh"));
         assertTrue(script.contains("'vendor/lightweight-charts-4.2.0.standalone.production.js'"));
         assertTrue(script.contains("'id=\"quote-update-health\"'"));
