@@ -1,5 +1,6 @@
 package edu.illinois.group8.frontend;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -35,7 +36,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 public class FrontendAdapterServer {
     private static final int DEFAULT_FEATURE_LIMIT = 100;
@@ -49,21 +49,6 @@ public class FrontendAdapterServer {
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
     private static final long QUOTE_STREAM_HEARTBEAT_MS = 1_000L;
     private static final long DATA_FRESHNESS_STALE_AFTER_MS = 15_000L;
-    private static final int MAX_OPERATOR_ERROR_LENGTH = 240;
-    private static final Pattern PRIVATE_KEY_PATTERN = Pattern.compile(
-        "-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
-    );
-    private static final Pattern AUTH_HEADER_PATTERN = Pattern.compile(
-        "(?i)(authorization\\s*[:=]\\s*basic\\s+)[^\\s,;]+"
-    );
-    private static final Pattern PASSWORD_PATTERN = Pattern.compile(
-        "(?i)\\b(password|passwd|pwd|secret|token|api[_-]?key)\\b\\s*([=:])\\s*[^\\s,;&]+"
-    );
-    private static final Pattern URI_USERINFO_PATTERN = Pattern.compile(
-        "(?i)([a-z][a-z0-9+.-]*:(?://)?)([^\\s/@:]+):([^\\s/@]+)@"
-    );
-    private static final Pattern LONG_TOKEN_PATTERN = Pattern.compile("\\b[A-Za-z0-9_./+=-]{32,}\\b");
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
         "app.js",
@@ -82,6 +67,7 @@ public class FrontendAdapterServer {
     private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
     private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
     private final FrontendReleaseInfo releaseInfo;
+    private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
     private final BackendMetrics metrics = new BackendMetrics();
     private final ConcurrentHashMap<String, LongAdder> requestCounters = new ConcurrentHashMap<>();
@@ -162,6 +148,7 @@ public class FrontendAdapterServer {
             ? OperatorPipelineStatus::disabled
             : operatorPipelineStatus;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
+        this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
     }
 
     public void start() throws IOException {
@@ -179,6 +166,8 @@ public class FrontendAdapterServer {
         bind("/markets", this::handleMarkets);
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
+        bind("/operator/status", this::handleOperatorStatus);
+        bind("/operator/plan", this::handleOperatorPlan);
         bind("/", this::handleStaticAsset);
         httpExecutor = Executors.newFixedThreadPool(
             HTTP_WORKER_THREADS,
@@ -637,24 +626,8 @@ public class FrontendAdapterServer {
         FeatureOutputRefreshStatus refreshStatus = featureOutputRefreshStatus.get();
         health.put("data_freshness", dataFreshnessBody(freshness));
         health.put("product_readiness", productReadinessBody(freshness, refreshStatus));
-        Map<String, Object> quoteUpdatesView = new LinkedHashMap<>();
-        quoteUpdatesView.put("requests", quoteUpdateRequests.sum());
-        quoteUpdatesView.put("changed", quoteUpdateChanged.sum());
-        quoteUpdatesView.put("timeouts", quoteUpdateTimeouts.sum());
-        quoteUpdatesView.put("client_disconnects", quoteUpdateClientDisconnects.sum());
-        quoteUpdatesView.put("rejected", quoteUpdateRejected.sum());
-        quoteUpdatesView.put("active_waits", quoteUpdateActiveWaits.get());
-        quoteUpdatesView.put("max_waits", QUOTE_UPDATE_MAX_WAITERS);
-        health.put("quote_updates", quoteUpdatesView);
-        Map<String, Object> quoteStreamsView = new LinkedHashMap<>();
-        quoteStreamsView.put("requests", quoteStreamRequests.sum());
-        quoteStreamsView.put("events", quoteStreamEvents.sum());
-        quoteStreamsView.put("heartbeats", quoteStreamHeartbeats.sum());
-        quoteStreamsView.put("client_disconnects", quoteStreamClientDisconnects.sum());
-        quoteStreamsView.put("rejected", quoteStreamRejected.sum());
-        quoteStreamsView.put("active_streams", quoteStreamActiveStreams.get());
-        quoteStreamsView.put("max_streams", QUOTE_STREAM_MAX_STREAMS);
-        health.put("quote_streams", quoteStreamsView);
+        health.put("quote_updates", quoteUpdatesBody());
+        health.put("quote_streams", quoteStreamsBody());
         Map<String, Object> metadataView = new LinkedHashMap<>();
         metadataView.put("source", metadataCatalog.source());
         metadataView.put("status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT));
@@ -671,6 +644,54 @@ public class FrontendAdapterServer {
         health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
         health.put("operator_pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
         writeJson(exchange, 200, health);
+    }
+
+    private void handleOperatorStatus(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        long nowMs = System.currentTimeMillis();
+        FeatureOutputRefreshStatus refreshStatus = featureOutputRefreshStatus.get();
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(nowMs);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", "ok");
+        body.put("service", "frontend-adapter");
+        body.put("generated_at", java.time.Instant.ofEpochMilli(nowMs).toString());
+        body.put("operator_control", operatorControlPlane.controlStatus());
+        body.put("release", releaseInfo.toBody());
+        body.put("runtime", runtimeStatusBody());
+        body.put("configuration", operatorControlPlane.configurationStatus());
+        body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
+        body.put("data_freshness", dataFreshnessBody(freshness));
+        body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
+        body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
+        body.put("quote_updates", quoteUpdatesBody());
+        body.put("quote_streams", quoteStreamsBody());
+        writeJson(exchange, 200, body);
+    }
+
+    private void handleOperatorPlan(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!config.operatorControlEnabled()) {
+            writeError(exchange, 403, "operator control POST is disabled");
+            return;
+        }
+        if (!config.basicAuthEnabled()) {
+            writeError(exchange, 403, "operator control POST requires Basic Auth");
+            return;
+        }
+        try {
+            JsonNode request = mapper.readTree(exchange.getRequestBody());
+            writeJson(exchange, 200, operatorControlPlane.plan(request));
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+        } catch (IOException e) {
+            writeError(exchange, 400, "malformed JSON payload");
+        }
     }
 
     private void handleMetrics(HttpExchange exchange) throws IOException {
@@ -800,6 +821,44 @@ public class FrontendAdapterServer {
         return body;
     }
 
+    private Map<String, Object> runtimeStatusBody() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("source_mode", config.sourceMode().name().toLowerCase(Locale.ROOT));
+        body.put("feature_source", config.featureSource().name().toLowerCase(Locale.ROOT));
+        body.put("metadata_source", config.metadataSource().name().toLowerCase(Locale.ROOT));
+        body.put("feature_output_refresh_enabled", config.featureOutputRefreshEnabled());
+        body.put("db_include_replay", config.dbIncludeReplayEvents());
+        body.put("db_replay_id_configured", !config.dbReplayId().isBlank());
+        body.put("basic_auth_enabled", config.basicAuthEnabled());
+        body.put("started_at", java.time.Instant.ofEpochMilli(startedAtMs).toString());
+        body.put("uptime_ms", System.currentTimeMillis() - startedAtMs);
+        return body;
+    }
+
+    private Map<String, Object> quoteUpdatesBody() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requests", quoteUpdateRequests.sum());
+        body.put("changed", quoteUpdateChanged.sum());
+        body.put("timeouts", quoteUpdateTimeouts.sum());
+        body.put("client_disconnects", quoteUpdateClientDisconnects.sum());
+        body.put("rejected", quoteUpdateRejected.sum());
+        body.put("active_waits", quoteUpdateActiveWaits.get());
+        body.put("max_waits", QUOTE_UPDATE_MAX_WAITERS);
+        return body;
+    }
+
+    private Map<String, Object> quoteStreamsBody() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requests", quoteStreamRequests.sum());
+        body.put("events", quoteStreamEvents.sum());
+        body.put("heartbeats", quoteStreamHeartbeats.sum());
+        body.put("client_disconnects", quoteStreamClientDisconnects.sum());
+        body.put("rejected", quoteStreamRejected.sum());
+        body.put("active_streams", quoteStreamActiveStreams.get());
+        body.put("max_streams", QUOTE_STREAM_MAX_STREAMS);
+        return body;
+    }
+
     private static Map<String, Object> operatorPipelineStatusBody(OperatorPipelineStatus status) {
         OperatorPipelineStatus view = status == null ? OperatorPipelineStatus.disabled() : status;
         Map<String, Object> body = new LinkedHashMap<>();
@@ -817,18 +876,7 @@ public class FrontendAdapterServer {
     }
 
     private static String operatorVisibleError(String message) {
-        if (message == null) {
-            return null;
-        }
-        String redacted = PRIVATE_KEY_PATTERN.matcher(message).replaceAll("[redacted-private-key]");
-        redacted = AUTH_HEADER_PATTERN.matcher(redacted).replaceAll("$1[redacted]");
-        redacted = URI_USERINFO_PATTERN.matcher(redacted).replaceAll("$1[redacted]@");
-        redacted = PASSWORD_PATTERN.matcher(redacted).replaceAll("$1$2[redacted]");
-        redacted = LONG_TOKEN_PATTERN.matcher(redacted).replaceAll("[redacted]");
-        if (redacted.length() > MAX_OPERATOR_ERROR_LENGTH) {
-            redacted = redacted.substring(0, MAX_OPERATOR_ERROR_LENGTH) + "...";
-        }
-        return redacted;
+        return OperatorRedactor.redact(message);
     }
 
     private static Map<String, Object> dataFreshnessBody(FrontendFeatureStore.DataFreshness freshness) {
@@ -1072,7 +1120,7 @@ public class FrontendAdapterServer {
 
     private void applyCors(HttpExchange exchange) {
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "*");
     }
 
@@ -1105,7 +1153,7 @@ public class FrontendAdapterServer {
     private void writeError(HttpExchange exchange, int status, String message) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", "error");
-        body.put("message", message == null ? "" : message);
+        body.put("message", OperatorRedactor.redact(message == null ? "" : message));
         write(exchange, status, "application/json; charset=utf-8", mapper.writeValueAsString(body));
     }
 

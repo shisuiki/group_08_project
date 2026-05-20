@@ -308,6 +308,11 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"runtime-operator-panel\""));
         assertTrue(root.body().contains("id=\"latency-freshness-panel\""));
         assertTrue(root.body().contains("id=\"operator-plan-panel\""));
+        assertTrue(root.body().contains("Operator Control"));
+        assertTrue(root.body().contains("id=\"operator-control-enabled\""));
+        assertTrue(root.body().contains("id=\"operator-private-key-pem-present\""));
+        assertTrue(root.body().contains("id=\"operator-db-password-present\""));
+        assertTrue(root.body().contains("id=\"operator-command-plan\""));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("<dt>Quote feed</dt>"));
@@ -350,9 +355,13 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('runtime-feature-source')"));
         assertTrue(js.body().contains("document.getElementById('freshness-age-ms')"));
         assertTrue(js.body().contains("document.getElementById('operator-env-plan')"));
+        assertTrue(js.body().contains("document.getElementById('operator-control-enabled')"));
+        assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
         assertTrue(js.body().contains("body.release"));
         assertTrue(js.body().contains("body.data_freshness"));
         assertTrue(js.body().contains("body.quote_streams"));
+        assertTrue(js.body().contains("/operator/status"));
+        assertTrue(js.body().contains("/operator/plan"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("quote_updates"));
@@ -700,6 +709,133 @@ class UdfEndpointsTest {
         assertFalse(body.contains("abcdef"));
         assertFalse(body.contains("secret-key"));
         assertTrue(body.contains("[redacted]"));
+    }
+
+    @Test
+    void operatorStatusReportsRedactedRuntimeConfiguration() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://user:secret@db/kalshi?password=hunter2",
+            "FRONTEND_ADAPTER_DB_USER", "frontend",
+            "FRONTEND_ADAPTER_DB_PASSWORD", "db-secret",
+            "FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED", "true"
+        ));
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            () -> new OperatorPipelineStatus("ok", "cursor", 7L, 7L, 0L, 7L, 10L, null),
+            new FrontendReleaseInfo("abcdef", "kalshi-project:abcdef", "live-product", "1", "1")
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        String body = get("/operator/status").body();
+        JsonNode status = MAPPER.readTree(body);
+
+        assertEquals("ok", status.path("status").asText());
+        assertTrue(status.path("operator_control").path("enabled").asBoolean());
+        assertFalse(status.path("operator_control").path("post_allowed").asBoolean());
+        assertEquals("live-product", status.path("release").path("profile").asText());
+        assertEquals("ok", status.path("pipeline").path("status").asText());
+        assertTrue(status.path("configuration").path("db").path("url_configured").asBoolean());
+        assertTrue(status.path("configuration").path("db").path("password_configured").asBoolean());
+        assertFalse(body.contains("hunter2"));
+        assertFalse(body.contains("secret@"));
+        assertFalse(body.contains("db-secret"));
+        assertTrue(body.contains("[redacted]"));
+    }
+
+    @Test
+    void operatorPlanPostIsDisabledByDefault() throws Exception {
+        HttpResponse<String> response = postJson("/operator/plan", "{\"profile\":\"live-product\"}");
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("operator control POST is disabled"));
+    }
+
+    @Test
+    void operatorPlanEnabledStillRequiresBasicAuth() throws Exception {
+        restartWithOperatorControl(false);
+
+        HttpResponse<String> response = postJson("/operator/plan", "{\"profile\":\"long-replay-demo\"}");
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("requires Basic Auth"));
+    }
+
+    @Test
+    void operatorPlanValidatesLiveProfileAndRedactsSecrets() throws Exception {
+        restartWithOperatorControl(true);
+        String request = """
+            {
+              "profile": "live-product",
+              "kalshi": {
+                "key_id": "key-123",
+                "private_key_pem": "-----BEGIN PRIVATE KEY-----secret-key-----END PRIVATE KEY-----"
+              },
+              "db": {
+                "url": "jdbc:postgresql://user:secret@db/kalshi?password=hunter2",
+                "user": "frontend",
+                "password": "db-secret"
+              },
+              "release": {"image": "kalshi-project:bd"}
+            }
+            """;
+
+        HttpResponse<String> response = postJsonWithBasicAuth("/operator/plan", request, "operator", "secret");
+        JsonNode body = MAPPER.readTree(response.body());
+
+        assertEquals(200, response.statusCode());
+        assertFalse(body.path("can_deploy").asBoolean());
+        assertEquals("blocked", body.path("status").asText());
+        assertFalse(checkPassed(body, "basic_auth"));
+        String raw = response.body();
+        assertFalse(raw.contains("key-123"));
+        assertFalse(raw.contains("hunter2"));
+        assertFalse(raw.contains("secret@"));
+        assertFalse(raw.contains("db-secret"));
+        assertFalse(raw.contains("secret-key"));
+        assertEquals("<set via secret>", body.path("redacted_env").path("DB_WRITER_DATABASE_PASSWORD").asText());
+    }
+
+    @Test
+    void operatorPlanReadyWhenRequiredLiveInputsArePresent() throws Exception {
+        restartWithOperatorControl(true);
+        String request = """
+            {
+              "profile": "live-product",
+              "kalshi": {"key_id": "key-123", "private_key_path": "/run/secrets/kalshi_private_key"},
+              "db": {"url": "jdbc:postgresql://db/kalshi", "user": "frontend", "password_present": true},
+              "basic_auth": {"user": "operator", "password_present": true},
+              "release": {"ref": "abcdef123456"}
+            }
+            """;
+
+        JsonNode body = MAPPER.readTree(postJsonWithBasicAuth(
+            "/operator/plan",
+            request,
+            "operator",
+            "secret"
+        ).body());
+
+        assertTrue(body.path("can_deploy").asBoolean());
+        assertEquals("ready", body.path("status").asText());
+        assertTrue(checkPassed(body, "basic_auth"));
+        assertEquals("docker compose --env-file .env --profile live-product up -d",
+            body.path("commands").get(1).asText());
+    }
+
+    @Test
+    void operatorPlanIsProtectedByBasicAuthWhenConfigured() throws Exception {
+        restartWithOperatorControl(true);
+        String request = "{\"profile\":\"long-replay-demo\"}";
+
+        assertEquals(401, postJson("/operator/plan", request).statusCode());
+        assertEquals(200, postJsonWithBasicAuth("/operator/plan", request, "operator", "secret").statusCode());
     }
 
     @Test
@@ -1103,6 +1239,7 @@ class UdfEndpointsTest {
             HttpResponse.BodyHandlers.ofString()
         );
         assertEquals(204, preflight.statusCode());
+        assertTrue(preflight.headers().firstValue("Access-Control-Allow-Methods").orElse("").contains("POST"));
         assertFalse(preflight.headers().firstValue("WWW-Authenticate").isPresent());
     }
 
@@ -1134,6 +1271,16 @@ class UdfEndpointsTest {
         );
     }
 
+    private HttpResponse<String> postJson(String path, String body) throws Exception {
+        return client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
     private HttpResponse<String> getWithBasicAuth(String path, String user, String password) throws Exception {
         String token = Base64.getEncoder()
             .encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
@@ -1141,6 +1288,24 @@ class UdfEndpointsTest {
             HttpRequest.newBuilder(URI.create(baseUrl + path))
                 .header("Authorization", "Basic " + token)
                 .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
+    private HttpResponse<String> postJsonWithBasicAuth(
+        String path,
+        String body,
+        String user,
+        String password
+    ) throws Exception {
+        String token = Base64.getEncoder()
+            .encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
+        return client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .header("Authorization", "Basic " + token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build(),
             HttpResponse.BodyHandlers.ofString()
         );
@@ -1201,6 +1366,36 @@ class UdfEndpointsTest {
         );
         server.start();
         baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
+    private void restartWithOperatorControl(boolean basicAuth) throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        seed(store);
+        java.util.HashMap<String, String> env = new java.util.HashMap<>();
+        env.put("FRONTEND_ADAPTER_PORT", "0");
+        env.put("FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED", "true");
+        if (basicAuth) {
+            env.put("FRONTEND_ADAPTER_BASIC_AUTH_USER", "operator");
+            env.put("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret");
+        }
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(env),
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
+    private static boolean checkPassed(JsonNode body, String id) {
+        for (JsonNode check : body.path("checklist")) {
+            if (id.equals(check.path("id").asText())) {
+                return check.path("passed").asBoolean();
+            }
+        }
+        return false;
     }
 
     private static boolean containsMarket(JsonNode markets, String marketTicker) {

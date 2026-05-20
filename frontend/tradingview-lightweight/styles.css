@@ -351,7 +351,19 @@ main {
     font-size: 12px;
 }
 
+#operator-generate-plan:disabled {
+    background: #3b444b;
+    color: #a8b0b7;
+    cursor: not-allowed;
+}
+
 .operator-warnings {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0;
+}
+
+.operator-checklist {
     display: grid;
     gap: 4px;
     margin: 8px 0;

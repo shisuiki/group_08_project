@@ -96,6 +96,7 @@ assert_frontend_adapter_metadata_env_present() {
         FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS \
         FRONTEND_ADAPTER_METADATA_SOURCE \
         FRONTEND_ADAPTER_METADATA_MAX_ROWS \
+        FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED \
         FRONTEND_ADAPTER_BASIC_AUTH_USER \
         FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD \
         FRONTEND_ADAPTER_STATIC_ROOT; do
@@ -173,6 +174,7 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
         "FRONTEND_ADAPTER_DB_USER: kalshi" \
         "FRONTEND_ADAPTER_DB_PASSWORD: kalshi" \
+        "FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED: \"false\"" \
         "FRONTEND_ADAPTER_BASIC_AUTH_USER: \"\"" \
         "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD: \"\""; do
         if ! printf '%s\n' "$frontend_rendered" | grep -q "^      ${expected}$"; then

@@ -43,6 +43,7 @@
             <button type="button" data-target="market-panel">Product/Market</button>
             <button type="button" data-target="research-features-panel">Research Features</button>
             <button type="button" data-target="runtime-operator-panel">Runtime/Operator</button>
+            <button type="button" data-target="operator-plan-panel">Operator Control</button>
             <button type="button" data-target="latency-freshness-panel">Latency/Freshness</button>
         </nav>
     </header>
@@ -197,15 +198,22 @@
 
             <section id="operator-plan-panel" class="panel">
                 <div class="panel-heading">
-                    <h2>Operator Config</h2>
-                    <span id="operator-plan-state">local</span>
+                    <h2>Operator Control</h2>
+                    <span id="operator-plan-state">disabled</span>
                 </div>
+                <dl>
+                    <dt>Control</dt><dd id="operator-control-enabled">-</dd>
+                    <dt>DB</dt><dd id="operator-db-status">-</dd>
+                    <dt>Kalshi</dt><dd id="operator-kalshi-status">-</dd>
+                    <dt>Basic Auth</dt><dd id="operator-auth-status">-</dd>
+                    <dt>Data source</dt><dd id="operator-data-source">-</dd>
+                </dl>
                 <div class="operator-grid">
                     <label>Deploy profile
                         <select id="operator-deploy-profile">
+                            <option value="long-replay-demo">long-replay-demo</option>
                             <option value="live-product">live-product</option>
                             <option value="live-product-local-db">live-product-local-db</option>
-                            <option value="cluster-live">cluster-live</option>
                         </select>
                     </label>
                     <label>Kalshi key id
@@ -213,6 +221,10 @@
                     </label>
                     <label>Key path
                         <input id="operator-key-path" type="text" value="/run/secrets/kalshi_private_key" />
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="operator-private-key-pem-present" type="checkbox" />
+                        Private key PEM present
                     </label>
                     <label>Market mode
                         <select id="operator-market-mode">
@@ -229,23 +241,44 @@
                     <label>S3 bucket
                         <input id="operator-s3-bucket" type="text" />
                     </label>
+                    <label>S3 region
+                        <input id="operator-s3-region" type="text" value="us-east-1" />
+                    </label>
                     <label>S3 prefix
                         <input id="operator-s3-prefix" type="text" value="kalshi-normalized/" />
+                    </label>
+                    <label>DB URL
+                        <input id="operator-db-url" type="text" autocomplete="off" />
+                    </label>
+                    <label>DB user
+                        <input id="operator-db-user" type="text" autocomplete="off" />
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="operator-db-password-present" type="checkbox" />
+                        DB password present
                     </label>
                     <label class="checkbox-row">
                         <input id="operator-s3-delete-after-upload" type="checkbox" />
                         Delete after upload
                     </label>
                     <label class="checkbox-row">
-                        <input id="operator-basic-auth-enabled" type="checkbox" />
-                        Enable Basic Auth
+                        <input id="operator-basic-auth-password-present" type="checkbox" />
+                        Basic Auth password present
                     </label>
                     <label>Basic Auth user
                         <input id="operator-basic-auth-user" type="text" autocomplete="off" />
                     </label>
+                    <label>Image
+                        <input id="operator-image" type="text" placeholder="kalshi-project:<sha>" />
+                    </label>
+                    <label>Release ref
+                        <input id="operator-ref" type="text" placeholder="git sha" />
+                    </label>
                 </div>
-                <button id="operator-generate-plan" type="button">Generate Plan</button>
+                <button id="operator-generate-plan" type="button">Build Plan</button>
                 <div id="operator-warnings" class="operator-warnings"></div>
+                <div id="operator-checklist" class="operator-checklist"></div>
+                <pre id="operator-command-plan" class="operator-plan-output"></pre>
                 <pre id="operator-env-plan" class="operator-plan-output"></pre>
             </section>
         </aside>

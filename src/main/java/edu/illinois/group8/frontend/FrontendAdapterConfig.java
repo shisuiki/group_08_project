@@ -38,6 +38,7 @@ public record FrontendAdapterConfig(
     boolean dbIncludeReplayEvents,
     String dbReplayId,
     String featurePlantCursorName,
+    boolean operatorControlEnabled,
     String basicAuthUser,
     String basicAuthPassword
 ) {
@@ -200,6 +201,7 @@ public record FrontendAdapterConfig(
             dbIncludeReplayEvents,
             dbReplayId,
             "",
+            false,
             "",
             ""
         );
@@ -263,6 +265,7 @@ public record FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_DB_REPLAY_ID", ""),
             value(env, "FRONTEND_ADAPTER_FEATUREPLANT_CURSOR_NAME",
                 value(env, "FEATUREPLANT_DB_CURSOR_NAME", "")),
+            booleanValue(env, "FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED", false),
             value(env, "FRONTEND_ADAPTER_BASIC_AUTH_USER", ""),
             value(env, "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "")
         );

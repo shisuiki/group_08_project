@@ -67,19 +67,33 @@
         featureplantLagEvents: document.getElementById('featureplant-lag-events'),
         canonicalMaxSeq: document.getElementById('canonical-max-seq'),
         operatorPlanState: document.getElementById('operator-plan-state'),
+        operatorControlEnabled: document.getElementById('operator-control-enabled'),
+        operatorDbStatus: document.getElementById('operator-db-status'),
+        operatorKalshiStatus: document.getElementById('operator-kalshi-status'),
+        operatorAuthStatus: document.getElementById('operator-auth-status'),
+        operatorDataSource: document.getElementById('operator-data-source'),
         operatorDeployProfile: document.getElementById('operator-deploy-profile'),
         operatorKalshiKeyId: document.getElementById('operator-kalshi-key-id'),
         operatorKeyPath: document.getElementById('operator-key-path'),
+        operatorPrivateKeyPemPresent: document.getElementById('operator-private-key-pem-present'),
         operatorMarketMode: document.getElementById('operator-market-mode'),
         operatorMaxMarkets: document.getElementById('operator-max-markets'),
         operatorTickers: document.getElementById('operator-tickers'),
         operatorS3Bucket: document.getElementById('operator-s3-bucket'),
+        operatorS3Region: document.getElementById('operator-s3-region'),
         operatorS3Prefix: document.getElementById('operator-s3-prefix'),
         operatorS3DeleteAfterUpload: document.getElementById('operator-s3-delete-after-upload'),
-        operatorBasicAuthEnabled: document.getElementById('operator-basic-auth-enabled'),
+        operatorDbUrl: document.getElementById('operator-db-url'),
+        operatorDbUser: document.getElementById('operator-db-user'),
+        operatorDbPasswordPresent: document.getElementById('operator-db-password-present'),
         operatorBasicAuthUser: document.getElementById('operator-basic-auth-user'),
+        operatorBasicAuthPasswordPresent: document.getElementById('operator-basic-auth-password-present'),
+        operatorImage: document.getElementById('operator-image'),
+        operatorRef: document.getElementById('operator-ref'),
         operatorGeneratePlan: document.getElementById('operator-generate-plan'),
         operatorWarnings: document.getElementById('operator-warnings'),
+        operatorChecklist: document.getElementById('operator-checklist'),
+        operatorCommandPlan: document.getElementById('operator-command-plan'),
         operatorEnvPlan: document.getElementById('operator-env-plan'),
         live: {
             symbol: document.getElementById('live-symbol'),
@@ -622,6 +636,55 @@
         }
     }
 
+    async function loadOperatorStatus() {
+        try {
+            const body = await fetchJson('/operator/status');
+            renderOperatorStatus(body);
+        } catch (err) {
+            dom.operatorPlanState.textContent = 'unavailable';
+            dom.operatorPlanState.className = 'stale';
+            dom.operatorControlEnabled.textContent = err.message;
+            dom.operatorDbStatus.textContent = '-';
+            dom.operatorKalshiStatus.textContent = '-';
+            dom.operatorAuthStatus.textContent = '-';
+            dom.operatorDataSource.textContent = '-';
+        }
+    }
+
+    function renderOperatorStatus(body) {
+        const control = body.operator_control || {};
+        const config = body.configuration || {};
+        const db = config.db || {};
+        const kalshi = config.kalshi || {};
+        const auth = config.basic_auth || {};
+        const freshness = body.data_freshness || {};
+        const release = body.release || {};
+        const controlText = control.enabled
+            ? control.post_allowed ? 'enabled' : 'enabled / auth required'
+            : 'disabled';
+        dom.operatorPlanState.textContent = controlText;
+        dom.operatorPlanState.className = control.post_allowed ? 'fresh' : 'stale';
+        dom.operatorGeneratePlan.disabled = control.post_allowed !== true;
+        dom.operatorControlEnabled.textContent = controlText;
+        dom.operatorDbStatus.textContent = db.url_configured
+            ? `url yes / user ${yesNo(db.user_configured)} / password ${yesNo(db.password_configured)}`
+            : 'url no';
+        dom.operatorKalshiStatus.textContent =
+            `key ${yesNo(kalshi.key_id_configured)} / path ${yesNo(kalshi.private_key_path_configured)}` +
+            ` / pem ${yesNo(kalshi.private_key_pem_configured)}`;
+        dom.operatorAuthStatus.textContent = auth.enabled
+            ? `enabled / user ${yesNo(auth.user_configured)} / password ${yesNo(auth.password_configured)}`
+            : 'disabled';
+        dom.operatorDataSource.textContent =
+            `${freshness.source_kind || 'unknown'} / live ${yesNo(freshness.live_data_observed)}`;
+        if (!dom.operatorImage.value && release.image) {
+            dom.operatorImage.value = release.image;
+        }
+        if (!dom.operatorRef.value && release.sha) {
+            dom.operatorRef.value = release.sha;
+        }
+    }
+
     function renderProductReadiness(body) {
         const readiness = body.product_readiness || {};
         const freshness = body.data_freshness || {};
@@ -773,67 +836,91 @@
             ` / active ${active}/${max}`;
     }
 
-    function generateOperatorPlan() {
+    function buildOperatorPlanRequest() {
         const profile = dom.operatorDeployProfile.value || 'live-product';
         const marketMode = dom.operatorMarketMode.value || 'configured';
         const maxMarkets = dom.operatorMaxMarkets.value || '0';
-        const tickers = dom.operatorTickers.value.trim();
-        const keyId = dom.operatorKalshiKeyId.value.trim();
-        const keyPath = dom.operatorKeyPath.value.trim() || '/run/secrets/kalshi_private_key';
-        const s3Bucket = dom.operatorS3Bucket.value.trim();
-        const s3Prefix = dom.operatorS3Prefix.value.trim();
-        const basicAuthEnabled = dom.operatorBasicAuthEnabled.checked;
-        const basicAuthUser = dom.operatorBasicAuthUser.value.trim();
-        const warnings = [];
-        if (marketMode === 'configured' && !tickers) {
-            warnings.push('configured market mode needs KALSHI_MARKET_TICKERS before deploy');
-        }
-        if (marketMode === 'open_markets' && Number(maxMarkets) <= 0) {
-            warnings.push('open_markets should set KALSHI_MARKET_DISCOVERY_MAX_MARKETS above zero');
-        }
-        if (!keyId) {
-            warnings.push('Kalshi key id is blank; live websocket auth will fail');
-        }
-        if (basicAuthEnabled && !basicAuthUser) {
-            warnings.push('Basic Auth is enabled but user is blank');
-        }
-        if (s3Bucket && !s3Prefix) {
-            warnings.push('S3 bucket is set without a prefix');
-        }
-        if (lastHealthBody?.product_readiness?.status && lastHealthBody.product_readiness.status !== 'ok') {
-            warnings.push(`current dashboard readiness is ${lastHealthBody.product_readiness.status}`);
-        }
-        const env = [
-            ['KALSHI_DEPLOY_PROFILE', profile],
-            ['KALSHI_KEY_ID', keyId ? '<redacted>' : ''],
-            ['KALSHI_KEY_PATH', keyPath],
-            ['KALSHI_MARKET_SELECTION_MODE', marketMode],
-            ['KALSHI_MARKET_DISCOVERY_MAX_MARKETS', maxMarkets],
-            ['KALSHI_MARKET_TICKERS', tickers],
-            ['S3_RECORDING_BUCKET', s3Bucket],
-            ['S3_RECORDING_PREFIX', s3Prefix],
-            ['S3_DELETE_AFTER_UPLOAD', dom.operatorS3DeleteAfterUpload.checked ? 'true' : 'false'],
-            ['FRONTEND_ADAPTER_BASIC_AUTH_USER', basicAuthEnabled && basicAuthUser ? '<redacted>' : ''],
-            ['FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD', basicAuthEnabled ? '<set via secret>' : '']
-        ];
-        const workflow = {
-            deploy_profile: profile,
-            run_live_product_smoke: profile === 'live-product' || profile === 'live-product-local-db',
-            run_live_product_browser_smoke: true,
-            require_live_product_data: profile === 'live-product',
-            market_selection_mode: marketMode,
-            market_tickers_configured: tickers ? tickers.split(',').map(value => value.trim()).filter(Boolean).length : 0,
-            basic_auth_enabled: basicAuthEnabled,
-            s3_capture_configured: Boolean(s3Bucket)
+        return {
+            profile,
+            market_selection: {
+                mode: marketMode,
+                max_markets: Number(maxMarkets) || 0,
+                tickers: dom.operatorTickers.value.trim()
+            },
+            kalshi: {
+                key_id: dom.operatorKalshiKeyId.value.trim(),
+                private_key_path: dom.operatorKeyPath.value.trim() || '/run/secrets/kalshi_private_key',
+                private_key_pem_present: dom.operatorPrivateKeyPemPresent.checked
+            },
+            s3: {
+                bucket: dom.operatorS3Bucket.value.trim(),
+                region: dom.operatorS3Region.value.trim(),
+                prefix: dom.operatorS3Prefix.value.trim(),
+                delete_after_upload: dom.operatorS3DeleteAfterUpload.checked
+            },
+            db: {
+                url: dom.operatorDbUrl.value.trim(),
+                user: dom.operatorDbUser.value.trim(),
+                password_present: dom.operatorDbPasswordPresent.checked
+            },
+            basic_auth: {
+                user: dom.operatorBasicAuthUser.value.trim(),
+                password_present: dom.operatorBasicAuthPasswordPresent.checked
+            },
+            release: {
+                image: dom.operatorImage.value.trim(),
+                ref: dom.operatorRef.value.trim()
+            }
         };
-        dom.operatorWarnings.innerHTML = warnings.length
-            ? warnings.map(warning => `<div class="operator-plan-warning">${escapeHtml(warning)}</div>`).join('')
-            : '<div class="operator-plan-step">No local warnings from current inputs.</div>';
-        dom.operatorEnvPlan.textContent =
-            env.map(([key, value]) => `${key}=${value}`).join('\n') +
-            '\n\nworkflow_inputs=' + JSON.stringify(workflow, null, 2);
-        dom.operatorPlanState.textContent = warnings.length ? `${warnings.length} warning(s)` : 'ready';
-        dom.operatorPlanState.className = warnings.length ? 'stale' : 'fresh';
+    }
+
+    async function generateOperatorPlan() {
+        dom.operatorGeneratePlan.disabled = true;
+        dom.operatorWarnings.innerHTML = '<div class="operator-plan-step">Building plan...</div>';
+        dom.operatorChecklist.innerHTML = '';
+        dom.operatorCommandPlan.textContent = '';
+        dom.operatorEnvPlan.textContent = '';
+        try {
+            const plan = await fetchJson('/operator/plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildOperatorPlanRequest())
+            });
+            renderOperatorPlanResponse(plan);
+        } catch (err) {
+            dom.operatorPlanState.textContent = 'blocked';
+            dom.operatorPlanState.className = 'stale';
+            dom.operatorWarnings.innerHTML =
+                `<div class="operator-plan-warning">${escapeHtml(err.message)}</div>`;
+        } finally {
+            await loadOperatorStatus();
+        }
+    }
+
+    function renderOperatorPlanResponse(plan) {
+        const checks = Array.isArray(plan.checklist) ? plan.checklist : [];
+        dom.operatorPlanState.textContent = `${plan.status || 'unknown'}`;
+        dom.operatorPlanState.className = plan.can_deploy || plan.can_replay ? 'fresh' : 'stale';
+        dom.operatorWarnings.innerHTML =
+            `<div class="operator-plan-step">can_deploy=${yesNo(plan.can_deploy)} / can_replay=${yesNo(plan.can_replay)}</div>`;
+        dom.operatorChecklist.innerHTML = checks.map(check => {
+            const cls = check.passed ? 'operator-plan-step' : 'operator-plan-warning';
+            const required = check.required ? 'required' : 'optional';
+            return `<div class="${cls}">${escapeHtml(check.label || check.id)}: ` +
+                `${check.passed ? 'pass' : 'blocked'} / ${required}` +
+                `${check.message ? ` / ${escapeHtml(check.message)}` : ''}</div>`;
+        }).join('');
+        const env = plan.redacted_env || {};
+        dom.operatorEnvPlan.textContent = Object.keys(env)
+            .map(key => `${key}=${env[key] == null ? '' : env[key]}`)
+            .join('\n');
+        dom.operatorCommandPlan.textContent = Array.isArray(plan.commands)
+            ? plan.commands.join('\n')
+            : '';
+    }
+
+    function yesNo(value) {
+        return value === true ? 'yes' : 'no';
     }
 
     function renderQuoteUpdateState(message, tone) {
@@ -1084,9 +1171,15 @@
         loadConfig();
         loadSymbols();
         loadHealth();
+        loadOperatorStatus();
     });
 
-    setInterval(loadHealth, HEALTH_POLL_MS);
-    generateOperatorPlan();
-    loadConfig().then(loadSymbols).then(loadHealth);
+    setInterval(() => {
+        loadHealth();
+        loadOperatorStatus();
+    }, HEALTH_POLL_MS);
+    loadConfig().then(loadSymbols).then(() => {
+        loadHealth();
+        loadOperatorStatus();
+    });
 })();
