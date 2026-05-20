@@ -782,18 +782,42 @@ assert_live_product_manual_smoke_contract() {
         "deploy_profile:" \
         "run_live_product_smoke:" \
         "run_live_product_browser_smoke:" \
+        "require_live_product_data:" \
         "DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
-        "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}" \
-        "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_browser_smoke || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}" \
+        "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_smoke) || 'false' }}" \
+        "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_browser_smoke) || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}" \
+        "REQUIRE_LIVE_PRODUCT_DATA: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.require_live_product_data) || 'false' }}" \
+        "LIVE_PRODUCT_REHEARSAL_ARTIFACT_NAME: live-product-rehearsal-\${{ github.sha }}-\${{ github.run_id }}-\${{ github.run_attempt }}" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \
         "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}" \
+        "deployment required configuration missing: %s" \
+        "deployment required configuration present: %s" \
+        "Validate manual live-product rehearsal inputs" \
+        "DEPLOY_PROFILE must be cluster-live or live-product" \
+        "require_live_product_data=true requires deploy_profile=live-product" \
+        "require_live_product_data=true requires run_live_product_smoke=true" \
+        "run_live_product_browser_smoke=true requires run_live_product_smoke=true" \
+        "run_live_product_smoke=true requires deploy_profile=live-product" \
+        "live-product rehearsal required configuration missing: %s" \
         "live-product|db-primary-product" \
         "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
         "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
         "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=\$q_live_product_browser_smoke_enabled" \
-        "LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh" \
+        "LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=\$q_require_live_product_data" \
+        "FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED=true" \
+        "FRONTEND_BROWSER_SMOKE_DOCKER_PREFER=true" \
+        "FRONTEND_BROWSER_SMOKE_DOCKER_SUDO=true" \
+        "FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE=\"\$browser_evidence\"" \
+        "live-product-smoke.stdout.log" \
+        "live-product-smoke.stderr.log" \
+        "live-product-rehearsal-summary.md" \
+        "browser-smoke.json" \
+        "browser_dom_sha256" \
+        "browser_screenshot_sha256" \
+        "Upload live-product rehearsal evidence" \
+        "path: live-product-rehearsal/**" \
         "bash -n scripts/live-product-smoke.sh" \
         "sh -n scripts/live-product-smoke.sh" \
         "bash -n scripts/frontend-product-browser-smoke.sh" \
@@ -877,9 +901,13 @@ assert_live_product_manual_smoke_contract() {
     for expected in \
         'chromium chromium-browser google-chrome google-chrome-stable' \
         'FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED' \
+        'FRONTEND_BROWSER_SMOKE_DOCKER_PREFER' \
+        'FRONTEND_BROWSER_SMOKE_DOCKER_SUDO' \
         'FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE' \
-        'docker image inspect' \
-        'docker run --rm' \
+        'docker_cmd image inspect' \
+        'docker_cmd_with_timeout pull' \
+        'docker_cmd_with_timeout run --rm' \
+        'sudo docker "$@"' \
         'frontend-browser-cdp-smoke.py' \
         'id="chart-container"' \
         '<canvas' \

@@ -5,6 +5,8 @@ FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:8090}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 FRONTEND_BROWSER_SMOKE_VIRTUAL_TIME_MS="${FRONTEND_BROWSER_SMOKE_VIRTUAL_TIME_MS:-8000}"
 FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED="${FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED:-false}"
+FRONTEND_BROWSER_SMOKE_DOCKER_PREFER="${FRONTEND_BROWSER_SMOKE_DOCKER_PREFER:-false}"
+FRONTEND_BROWSER_SMOKE_DOCKER_SUDO="${FRONTEND_BROWSER_SMOKE_DOCKER_SUDO:-false}"
 FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE="${FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE:-mcr.microsoft.com/playwright:v1.49.1-jammy}"
 FRONTEND_BROWSER_SMOKE_DOCKER_NETWORK="${FRONTEND_BROWSER_SMOKE_DOCKER_NETWORK:-host}"
 FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS="${FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS:-60}"
@@ -66,6 +68,40 @@ docker_browser_enabled() {
         1|true|yes|y|on) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+docker_browser_preferred() {
+    case "$(printf '%s' "$FRONTEND_BROWSER_SMOKE_DOCKER_PREFER" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+docker_browser_sudo_enabled() {
+    case "$(printf '%s' "$FRONTEND_BROWSER_SMOKE_DOCKER_SUDO" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+docker_cmd() {
+    if docker_browser_sudo_enabled; then
+        sudo docker "$@"
+    else
+        docker "$@"
+    fi
+}
+
+docker_cmd_with_timeout() {
+    if command -v timeout >/dev/null 2>&1; then
+        if docker_browser_sudo_enabled; then
+            timeout "$FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS" sudo docker "$@"
+        else
+            timeout "$FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS" docker "$@"
+        fi
+    else
+        docker_cmd "$@"
+    fi
 }
 
 write_skip_evidence() {
@@ -181,11 +217,7 @@ run_host_browser() {
 }
 
 run_docker_browser() {
-    runner=""
-    if command -v timeout >/dev/null 2>&1; then
-        runner="timeout $FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS"
-    fi
-    $runner docker run --rm \
+    docker_cmd_with_timeout run --rm \
         --network "$FRONTEND_BROWSER_SMOKE_DOCKER_NETWORK" \
         --user "$(id -u):$(id -g)" \
         -e NO_PROXY="$FRONTEND_NO_PROXY" \
@@ -234,7 +266,10 @@ exec python3 "$cdp_script" \
         "$FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS" > "$tmpdir/cdp-result.json" 2>> "$browser_log"
 }
 
-browser="$(find_browser || true)"
+browser=""
+if ! docker_browser_enabled || ! docker_browser_preferred; then
+    browser="$(find_browser || true)"
+fi
 browser_mode="host"
 if [ -z "$browser" ]; then
     browser_mode="none"
@@ -245,12 +280,8 @@ if [ -z "$browser" ]; then
             printf 'SKIP browser_smoke reason=missing_browser mode=docker detail=docker_unavailable\n'
             exit 2
         fi
-        if ! docker image inspect "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE" >/dev/null 2>&1; then
-            pull_runner=""
-            if command -v timeout >/dev/null 2>&1; then
-                pull_runner="timeout $FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS"
-            fi
-            if ! $pull_runner docker pull "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE" >/dev/null 2> "$browser_log"; then
+        if ! docker_cmd image inspect "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE" >/dev/null 2>&1; then
+            if ! docker_cmd_with_timeout pull "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE" >/dev/null 2> "$browser_log"; then
                 write_skip_evidence "missing_browser" "$browser_mode"
                 printf 'SKIP browser_smoke reason=missing_browser mode=docker detail=image_unavailable image=%s\n' \
                     "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE"
