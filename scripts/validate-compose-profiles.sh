@@ -409,24 +409,62 @@ assert_kalshi_app_image_contract() {
 
     for expected in \
         'KALSHI_APP_IMAGE: kalshi-project:${{ github.sha }}' \
+        'KALSHI_APP_IMAGE_TAR: .deploy-state/images/kalshi-project-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz' \
         'docker save "$KALSHI_APP_IMAGE"' \
         'actions/upload-artifact@v6' \
         'actions/download-artifact@v7' \
+        'mkdir -p '\''$DEPLOY_PATH/.deploy-state/images'\''' \
+        'scp -i ~/.ssh/ec2_key "$image_tar" "$EC2_USER@$EC2_HOST:$DEPLOY_PATH/$KALSHI_APP_IMAGE_TAR"' \
+        'IMAGE_TAR="\$APP_DIR/$KALSHI_APP_IMAGE_TAR"' \
+        'LAST_SUCCESS_ENV="\$STATE_DIR/last_success.env"' \
+        'previous_image="\$(sed -n '\''s/^KALSHI_APP_IMAGE=//p'\'' "\$LAST_SUCCESS_ENV" | tail -n 1)"' \
+        'sudo docker save "\$previous_image" | gzip -1 > "\$previous_tar"' \
+        'printf '\''%s\n'\'' "\$previous_tar_rel" > "\$LAST_SUCCESS_IMAGE_TAR"' \
+        'gzip -t "\$IMAGE_TAR"' \
         'sudo docker load' \
         'sudo docker image inspect "$KALSHI_APP_IMAGE"' \
         'KALSHI_APP_IMAGE=$KALSHI_APP_IMAGE' \
-        'KALSHI_APP_IMAGE=$q_kalshi_app_image'; do
+        'KALSHI_APP_IMAGE_TAR=$KALSHI_APP_IMAGE_TAR' \
+        'printf -v q_candidate_image_tar '\''%q'\'' "$KALSHI_APP_IMAGE_TAR"' \
+        'KALSHI_APP_IMAGE=$q_kalshi_app_image' \
+        'CANDIDATE_IMAGE_TAR=$q_candidate_image_tar'; do
         if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
             printf 'deploy workflow missing immutable app image contract: %s\n' "$expected" >&2
             exit 1
         fi
     done
+    if grep -Fq 'rm -f "\$IMAGE_TAR"' .github/workflows/deploy-ec2.yml; then
+        printf 'deploy workflow must retain EC2 image tar after docker load\n' >&2
+        exit 1
+    fi
 
     for expected in \
         'compose_app_image()' \
         'env_file_value "$env_file" KALSHI_APP_IMAGE' \
+        'compose_app_image_tar()' \
+        'env_file_value "$env_file" KALSHI_APP_IMAGE_TAR' \
+        'CANDIDATE_IMAGE_TAR="${CANDIDATE_IMAGE_TAR:-}"' \
         'build_or_verify_app_image()' \
         'sudo docker image inspect "$app_image"' \
+        'load_app_image_from_tar "$app_image" "$image_tar"' \
+        'last_success.image' \
+        'last_success.image_tar' \
+        'previous_image_file="$DEPLOY_STATE_DIR/last_success.image"' \
+        'previous_image_tar_file="$DEPLOY_STATE_DIR/last_success.image_tar"' \
+        'load_last_success_image_if_needed()' \
+        'load_app_image_from_tar "$previous_image" "$previous_image_tar"' \
+        'tmp_prefix="$DEPLOY_STATE_DIR/.last_success.$$"' \
+        'chmod 600 "$tmp_ref" "$tmp_env" "$tmp_profile"' \
+        'mv "$tmp_ref" "$DEPLOY_STATE_DIR/last_success.ref"' \
+        'mv "$tmp_env" "$DEPLOY_STATE_DIR/last_success.env"' \
+        'mv "$tmp_profile" "$DEPLOY_STATE_DIR/last_success.profile"' \
+        'mv "$tmp_image" "$DEPLOY_STATE_DIR/last_success.image"' \
+        'mv "$tmp_image_tar" "$DEPLOY_STATE_DIR/last_success.image_tar"' \
+        'assert_runtime_container_images()' \
+        'sudo docker inspect -f '\''{{.Config.Image}}'\''' \
+        'expected_image="$app_image"' \
+        'container image mismatch' \
+        'assert_runtime_container_images "$env_file"' \
         'skipping Docker Compose build' \
         'if ! build_or_verify_app_image "$env_file"; then' \
         'if ! compose_profile "$env_file" build; then'; do

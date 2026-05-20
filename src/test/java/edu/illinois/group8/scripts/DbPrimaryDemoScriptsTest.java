@@ -213,8 +213,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("if ! compose_profile \"$env_file\" build; then"));
         assertTrue(script.contains("compose_app_image()"));
         assertTrue(script.contains("env_file_value \"$env_file\" KALSHI_APP_IMAGE"));
+        assertTrue(script.contains("compose_app_image_tar()"));
+        assertTrue(script.contains("env_file_value \"$env_file\" KALSHI_APP_IMAGE_TAR"));
+        assertTrue(script.contains("CANDIDATE_IMAGE_TAR=\"${CANDIDATE_IMAGE_TAR:-}\""));
         assertTrue(script.contains("build_or_verify_app_image()"));
         assertTrue(script.contains("sudo docker image inspect \"$app_image\""));
+        assertTrue(script.contains("load_app_image_from_tar \"$app_image\" \"$image_tar\""));
         assertTrue(script.contains("skipping Docker Compose build"));
         assertTrue(script.contains("if ! build_or_verify_app_image \"$env_file\"; then"));
         assertTrue(script.contains("if ! run_db_release_preflight \"$env_file\"; then"));
@@ -224,8 +228,36 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.indexOf("if ! run_db_release_preflight \"$env_file\"; then")
             < script.indexOf("log \"Stopping existing Compose services for controlled deploy.\""));
         assertTrue(script.contains("if ! profile_health_smoke; then"));
+        assertTrue(script.contains("profile_app_services()"));
+        assertTrue(script.contains("assert_runtime_container_images()"));
+        assertTrue(script.contains("sudo docker inspect -f '{{.Config.Image}}'"));
+        assertTrue(script.contains("expected_image=\"$app_image\""));
+        assertTrue(script.contains("container image mismatch"));
+        assertTrue(script.contains("if ! assert_runtime_container_images \"$env_file\"; then"));
+        assertTrue(script.indexOf("if ! compose_profile \"$env_file\" up -d --no-build --remove-orphans; then")
+            < script.indexOf("if ! assert_runtime_container_images \"$env_file\"; then"));
+        assertTrue(script.indexOf("if ! assert_runtime_container_images \"$env_file\"; then")
+            < script.indexOf("if ! profile_health_smoke; then"));
         assertTrue(script.indexOf("if ! run_live_product_semantic_smoke \"$env_file\"; then")
             < script.indexOf("record_success"));
+        assertTrue(script.contains("last_success.image"));
+        assertTrue(script.contains("last_success.image_tar"));
+        assertTrue(script.contains("success_ref=\"$(git rev-parse HEAD)\""));
+        assertTrue(script.contains("tmp_prefix=\"$DEPLOY_STATE_DIR/.last_success.$$\""));
+        assertTrue(script.contains("printf '%s\\n' \"$app_image\" > \"$tmp_image\""));
+        assertTrue(script.contains("printf '%s\\n' \"$image_tar\" > \"$tmp_image_tar\""));
+        assertTrue(script.contains("chmod 600 \"$tmp_ref\" \"$tmp_env\" \"$tmp_profile\""));
+        assertTrue(script.contains("mv \"$tmp_ref\" \"$DEPLOY_STATE_DIR/last_success.ref\""));
+        assertTrue(script.contains("mv \"$tmp_env\" \"$DEPLOY_STATE_DIR/last_success.env\""));
+        assertTrue(script.contains("mv \"$tmp_profile\" \"$DEPLOY_STATE_DIR/last_success.profile\""));
+        assertTrue(script.contains("mv \"$tmp_image\" \"$DEPLOY_STATE_DIR/last_success.image\""));
+        assertTrue(script.contains("mv \"$tmp_image_tar\" \"$DEPLOY_STATE_DIR/last_success.image_tar\""));
+        assertTrue(script.indexOf("if [ -z \"$image_tar\" ] || [ ! -s \"$image_tar\" ]; then")
+            < script.indexOf("tmp_prefix=\"$DEPLOY_STATE_DIR/.last_success.$$\""));
+        assertTrue(script.contains("previous_image_file=\"$DEPLOY_STATE_DIR/last_success.image\""));
+        assertTrue(script.contains("previous_image_tar_file=\"$DEPLOY_STATE_DIR/last_success.image_tar\""));
+        assertTrue(script.contains("load_last_success_image_if_needed()"));
+        assertTrue(script.contains("load_app_image_from_tar \"$previous_image\" \"$previous_image_tar\""));
         assertFalse(script.contains("Skipping health smoke checks for DEPLOY_PROFILE=live-product"));
     }
 
@@ -257,8 +289,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("s3-recording-sync must not use KALSHI_APP_IMAGE"));
         assertTrue(script.contains("actions/upload-artifact@v6"));
         assertTrue(script.contains("actions/download-artifact@v7"));
+        assertTrue(script.contains("KALSHI_APP_IMAGE_TAR: .deploy-state/images/kalshi-project-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz"));
         assertTrue(script.contains("sudo docker image inspect \"$app_image\""));
         assertTrue(script.contains("skipping Docker Compose build"));
+        assertTrue(script.contains("assert_runtime_container_images()"));
+        assertTrue(script.contains("last_success.image"));
+        assertTrue(script.contains("last_success.image_tar"));
         assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: \\${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}"));
         assertTrue(script.contains("'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE'"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
@@ -333,11 +369,25 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("uses: actions/upload-artifact@v6"));
         assertTrue(workflow.contains("uses: actions/download-artifact@v7"));
         assertTrue(workflow.contains("kalshi-project-image-${{ github.sha }}"));
+        assertTrue(workflow.contains("KALSHI_APP_IMAGE_TAR: .deploy-state/images/kalshi-project-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz"));
+        assertTrue(workflow.contains("mkdir -p '$DEPLOY_PATH/.deploy-state/images'"));
+        assertTrue(workflow.contains("scp -i ~/.ssh/ec2_key \"$image_tar\" \"$EC2_USER@$EC2_HOST:$DEPLOY_PATH/$KALSHI_APP_IMAGE_TAR\""));
+        assertTrue(workflow.contains("IMAGE_TAR=\"\\$APP_DIR/$KALSHI_APP_IMAGE_TAR\""));
+        assertTrue(workflow.contains("LAST_SUCCESS_ENV=\"\\$STATE_DIR/last_success.env\""));
+        assertTrue(workflow.contains("previous_image=\"\\$(sed -n 's/^KALSHI_APP_IMAGE=//p' \"\\$LAST_SUCCESS_ENV\" | tail -n 1)\""));
+        assertTrue(workflow.contains("sudo docker save \"\\$previous_image\" | gzip -1 > \"\\$previous_tar\""));
+        assertTrue(workflow.contains("printf '%s\\n' \"\\$previous_tar_rel\" > \"\\$LAST_SUCCESS_IMAGE_TAR\""));
+        assertTrue(workflow.contains("gzip -t \"\\$IMAGE_TAR\""));
+        assertTrue(workflow.contains("sha256sum \"\\$IMAGE_TAR\" > \"\\$IMAGE_TAR.sha256\""));
         assertTrue(workflow.contains("gzip -dc \"\\$IMAGE_TAR\" | sudo docker load"));
         assertTrue(workflow.contains("sudo docker image inspect \"$KALSHI_APP_IMAGE\" >/dev/null"));
+        assertFalse(workflow.contains("rm -f \"\\$IMAGE_TAR\""));
         assertTrue(workflow.contains("KALSHI_APP_IMAGE=$KALSHI_APP_IMAGE"));
+        assertTrue(workflow.contains("KALSHI_APP_IMAGE_TAR=$KALSHI_APP_IMAGE_TAR"));
         assertTrue(workflow.contains("printf -v q_kalshi_app_image '%q' \"$KALSHI_APP_IMAGE\""));
+        assertTrue(workflow.contains("printf -v q_candidate_image_tar '%q' \"$KALSHI_APP_IMAGE_TAR\""));
         assertTrue(workflow.contains("KALSHI_APP_IMAGE=$q_kalshi_app_image"));
+        assertTrue(workflow.contains("CANDIDATE_IMAGE_TAR=$q_candidate_image_tar"));
 
         for (String service : new String[] {
             "node0", "node0-capture", "node1", "node2", "wsclient", "wsclient-capture",

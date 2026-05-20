@@ -16,6 +16,7 @@ DEPLOY_DB_PREFLIGHT_REQUIRED="${DEPLOY_DB_PREFLIGHT_REQUIRED:-false}"
 LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 KALSHI_APP_IMAGE="${KALSHI_APP_IMAGE:-}"
+CANDIDATE_IMAGE_TAR="${CANDIDATE_IMAGE_TAR:-}"
 
 down_all_profiles() {
     sudo docker compose --env-file "$1" \
@@ -90,14 +91,48 @@ compose_app_image() {
     printf '%s\n' "$app_image"
 }
 
+compose_app_image_tar() {
+    env_file="$1"
+    image_tar="$(env_file_value "$env_file" KALSHI_APP_IMAGE_TAR)"
+    if [ -z "$image_tar" ] && [ "$env_file" = "$CANDIDATE_ENV_FILE" ]; then
+        image_tar="$CANDIDATE_IMAGE_TAR"
+    fi
+    printf '%s\n' "$image_tar"
+}
+
+load_app_image_from_tar() {
+    app_image="$1"
+    image_tar="$2"
+    if [ -z "$image_tar" ]; then
+        log "KALSHI_APP_IMAGE image not found locally and no image tar path is configured: $app_image"
+        return 1
+    fi
+    if [ ! -s "$image_tar" ]; then
+        log "KALSHI_APP_IMAGE image not found locally and image tar is missing or empty: $image_tar"
+        return 1
+    fi
+
+    log "Reloading Docker image $app_image from retained image tar $image_tar."
+    if ! gzip -dc "$image_tar" | sudo docker load >/dev/null; then
+        log "Docker image load failed for retained image tar: $image_tar"
+        return 1
+    fi
+    if ! sudo docker image inspect "$app_image" >/dev/null 2>&1; then
+        log "Docker image tar did not provide expected KALSHI_APP_IMAGE: $app_image"
+        return 1
+    fi
+}
+
 build_or_verify_app_image() {
     env_file="$1"
     app_image="$(compose_app_image "$env_file")"
     if [ -n "$app_image" ]; then
         log "KALSHI_APP_IMAGE=$app_image is set; verifying image exists and skipping Docker Compose build."
         if ! sudo docker image inspect "$app_image" >/dev/null 2>&1; then
-            log "KALSHI_APP_IMAGE image not found locally: $app_image"
-            return 1
+            image_tar="$(compose_app_image_tar "$env_file")"
+            if ! load_app_image_from_tar "$app_image" "$image_tar"; then
+                return 1
+            fi
         fi
         return 0
     fi
@@ -377,6 +412,48 @@ profile_health_smoke() {
     esac
 }
 
+profile_app_services() {
+    case "$DEPLOY_PROFILE" in
+        cluster-live) printf '%s\n' node0 node1 node2 wsclient streamtap ;;
+        recording-capture) printf '%s\n' node0-capture wsclient-capture stream-recorder ;;
+        db-primary-product) printf '%s\n' featureplant-db-follower frontend-adapter-db-primary ;;
+        live-product) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary ;;
+        featureplant) printf '%s\n' featureplant ;;
+        raw-replay) printf '%s\n' raw-ingress-replay ;;
+        historical-backfill) printf '%s\n' historical-backfill ;;
+        *) return 0 ;;
+    esac
+}
+
+assert_runtime_container_images() {
+    env_file="$1"
+    app_image="$(compose_app_image "$env_file")"
+    if [ -z "$app_image" ]; then
+        log "KALSHI_APP_IMAGE is unset; skipping runtime container image assertion."
+        return 0
+    fi
+
+    expected_image="$app_image"
+    for service in $(profile_app_services); do
+        container_ids="$(compose_profile "$env_file" ps -q "$service" 2>/dev/null || true)"
+        if [ -z "$container_ids" ]; then
+            log "container image mismatch service=$service container=<none> expected=$expected_image actual=<missing>"
+            return 1
+        fi
+        for container in $container_ids; do
+            if ! actual_image="$(sudo docker inspect -f '{{.Config.Image}}' "$container")"; then
+                log "container image mismatch service=$service container=$container expected=$expected_image actual=<inspect_failed>"
+                return 1
+            fi
+            if [ "$actual_image" != "$expected_image" ]; then
+                log "container image mismatch service=$service container=$container expected=$expected_image actual=$actual_image"
+                return 1
+            fi
+        done
+    done
+    log "Runtime app containers use expected image $expected_image."
+}
+
 run_live_product_semantic_smoke() {
     env_file="$1"
     if [ "$DEPLOY_PROFILE" != "live-product" ]; then
@@ -444,6 +521,11 @@ deploy_env() {
         return 1
     fi
 
+    if ! assert_runtime_container_images "$env_file"; then
+        diagnose_profile "$env_file"
+        return 1
+    fi
+
     if ! profile_health_smoke; then
         diagnose_profile "$env_file"
         return 1
@@ -459,10 +541,50 @@ deploy_env() {
 
 record_success() {
     mkdir -p "$DEPLOY_STATE_DIR"
-    git rev-parse HEAD > "$DEPLOY_STATE_DIR/last_success.ref"
-    cp "$COMPOSE_ENV_FILE" "$DEPLOY_STATE_DIR/last_success.env"
-    chmod 600 "$DEPLOY_STATE_DIR/last_success.env"
-    printf '%s\n' "$DEPLOY_PROFILE" > "$DEPLOY_STATE_DIR/last_success.profile"
+    chmod 700 "$DEPLOY_STATE_DIR"
+    success_ref="$(git rev-parse HEAD)"
+    app_image="$(compose_app_image "$COMPOSE_ENV_FILE")"
+    image_tar=""
+    if [ -n "$app_image" ]; then
+        image_tar="$(compose_app_image_tar "$COMPOSE_ENV_FILE")"
+        if ! sudo docker image inspect "$app_image" >/dev/null 2>&1; then
+            log "Cannot record success; KALSHI_APP_IMAGE is missing locally: $app_image"
+            return 1
+        fi
+        if [ -z "$image_tar" ] || [ ! -s "$image_tar" ]; then
+            log "Cannot record success; retained image tar is missing for KALSHI_APP_IMAGE=$app_image: ${image_tar:-<unset>}"
+            return 1
+        fi
+    fi
+
+    tmp_prefix="$DEPLOY_STATE_DIR/.last_success.$$"
+    tmp_ref="$tmp_prefix.ref"
+    tmp_env="$tmp_prefix.env"
+    tmp_profile="$tmp_prefix.profile"
+    tmp_image="$tmp_prefix.image"
+    tmp_image_tar="$tmp_prefix.image_tar"
+    rm -f "$tmp_ref" "$tmp_env" "$tmp_profile" "$tmp_image" "$tmp_image_tar"
+    printf '%s\n' "$success_ref" > "$tmp_ref"
+    cp "$COMPOSE_ENV_FILE" "$tmp_env"
+    printf '%s\n' "$DEPLOY_PROFILE" > "$tmp_profile"
+    chmod 600 "$tmp_ref" "$tmp_env" "$tmp_profile"
+    if [ -n "$app_image" ]; then
+        printf '%s\n' "$app_image" > "$tmp_image"
+        printf '%s\n' "$image_tar" > "$tmp_image_tar"
+        chmod 600 "$tmp_image" "$tmp_image_tar"
+    else
+        rm -f "$tmp_image" "$tmp_image_tar"
+    fi
+
+    mv "$tmp_ref" "$DEPLOY_STATE_DIR/last_success.ref"
+    mv "$tmp_env" "$DEPLOY_STATE_DIR/last_success.env"
+    mv "$tmp_profile" "$DEPLOY_STATE_DIR/last_success.profile"
+    if [ -n "$app_image" ]; then
+        mv "$tmp_image" "$DEPLOY_STATE_DIR/last_success.image"
+        mv "$tmp_image_tar" "$DEPLOY_STATE_DIR/last_success.image_tar"
+    else
+        rm -f "$DEPLOY_STATE_DIR/last_success.image" "$DEPLOY_STATE_DIR/last_success.image_tar"
+    fi
     rm -f "$CANDIDATE_ENV_FILE"
     log "Recorded last-success deploy state in $DEPLOY_STATE_DIR."
 }
@@ -474,6 +596,34 @@ restore_last_success_checkout() {
     fi
     git checkout --detach "$previous_ref"
     git reset --hard "$previous_ref"
+}
+
+load_last_success_image_if_needed() {
+    previous_image_file="$DEPLOY_STATE_DIR/last_success.image"
+    previous_image_tar_file="$DEPLOY_STATE_DIR/last_success.image_tar"
+
+    if [ ! -s "$previous_image_file" ]; then
+        log "No last-success image is recorded; rollback will use the local Compose build path."
+        return 0
+    fi
+
+    previous_image="$(sed -n '1p' "$previous_image_file")"
+    previous_image_tar="$(sed -n '1p' "$previous_image_tar_file" 2>/dev/null || true)"
+    if [ -z "$previous_image" ]; then
+        log "Last-success image is empty; cannot rollback."
+        return 1
+    fi
+    if sudo docker image inspect "$previous_image" >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ -z "$previous_image_tar" ] || [ ! -s "$previous_image_tar" ]; then
+        log "Last-success Docker image is missing locally and last_success.image_tar is unavailable for $previous_image."
+        return 1
+    fi
+
+    if ! load_app_image_from_tar "$previous_image" "$previous_image_tar"; then
+        return 1
+    fi
 }
 
 rollback_to_last_success() {
@@ -498,6 +648,11 @@ rollback_to_last_success() {
     fi
 
     log "Rolling back to previous successful ref $previous_ref with DEPLOY_PROFILE=$DEPLOY_PROFILE."
+    if ! load_last_success_image_if_needed; then
+        log "Rollback image reload failed."
+        return 1
+    fi
+
     if ! restore_last_success_checkout "$previous_ref"; then
         log "Rollback checkout failed."
         return 1
@@ -524,12 +679,15 @@ candidate_ref="$(git rev-parse HEAD)"
 log "Deploying candidate ref $candidate_ref with DEPLOY_PROFILE=$DEPLOY_PROFILE."
 
 if deploy_env "$CANDIDATE_ENV_FILE" true; then
-    record_success
-    log "Candidate deploy succeeded."
-    exit 0
+    if record_success; then
+        log "Candidate deploy succeeded."
+        exit 0
+    fi
+    log "Candidate deploy succeeded but last-success state recording failed; attempting rollback if possible."
+else
+    log "Candidate deploy failed; attempting rollback if last-success state exists."
 fi
 
-log "Candidate deploy failed; attempting rollback if last-success state exists."
 if rollback_to_last_success; then
     exit 1
 fi
