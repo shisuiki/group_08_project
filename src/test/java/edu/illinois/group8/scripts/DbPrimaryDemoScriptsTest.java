@@ -181,19 +181,24 @@ class DbPrimaryDemoScriptsTest {
 
         assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_ENABLED=\"${SEMANTIC_METADATA_REAL_SMOKE_ENABLED:-false}\""));
         assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_REQUIRED=\"${SEMANTIC_METADATA_REAL_SMOKE_REQUIRED:-false}\""));
+        assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_STATUS=\"${SEMANTIC_METADATA_REAL_SMOKE_STATUS:-active}\""));
         assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_MAX_TOKENS=\"${SEMANTIC_METADATA_REAL_SMOKE_MAX_TOKENS:-2200}\""));
+        assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_OVERWRITE=\"${SEMANTIC_METADATA_REAL_SMOKE_OVERWRITE:-true}\""));
+        assertTrue(script.contains("KALSHI_APP_JAR_BUILD=\"${KALSHI_APP_JAR_BUILD:-true}\""));
         assertTrue(script.contains("skip_or_fail \"disabled\""));
         assertTrue(script.contains("OPENROUTER_API_KEY_FILE"));
         assertTrue(script.contains("env -u OPENROUTER_API_KEY"));
         assertTrue(script.contains("edu.illinois.group8.semantic.SemanticMetadataCli"));
         assertTrue(script.contains("--limit=1"));
         assertTrue(script.contains("--max-tokens=$SEMANTIC_METADATA_REAL_SMOKE_MAX_TOKENS"));
+        assertTrue(script.contains("args=\"$args --overwrite\""));
         assertTrue(script.contains("generated + review_required"));
         assertTrue(script.contains("rate_limited != 0"));
         assertTrue(script.contains("failed != 0"));
         assertTrue(script.contains("reason=secret_leaked"));
         assertTrue(script.contains("if len(secret) >= 8"));
         assertTrue(script.contains("review_required_inspect_market_semantic_metadata_error_or_raw_response"));
+        assertTrue(script.contains("if truthy \"$KALSHI_APP_JAR_BUILD\" || [ ! -f \"$KALSHI_APP_JAR\" ]; then"));
         assertFalse(script.contains("OPENROUTER_API_KEY=\"$"));
         assertFalse(script.contains("cat \"$OPENROUTER_API_KEY_FILE\""));
         assertFalse(script.contains("docker compose up"));

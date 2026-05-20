@@ -1531,13 +1531,18 @@
             dom.semanticRunSeriesTicker.value = config.series_ticker;
         }
         if (config.market_status != null) {
-            dom.semanticRunMarketStatus.value = config.market_status || '';
+            dom.semanticRunMarketStatus.value = semanticStatusFromCatalogStatus(config.market_status);
         }
         const selected = Number(summary?.rows_upserted || summary?.markets_selected || config.max_tickers || 0);
         if (selected > 0) {
             dom.semanticRunMaxMarkets.value = String(Math.max(1, Math.min(5, selected)));
         }
         dom.semanticRunMarketTicker.value = '';
+    }
+
+    function semanticStatusFromCatalogStatus(status) {
+        const normalized = String(status || '').trim().toLowerCase();
+        return normalized === 'open' ? 'active' : normalized;
     }
 
     function renderSemanticRunStatus(body) {

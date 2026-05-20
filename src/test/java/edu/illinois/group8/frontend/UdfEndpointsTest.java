@@ -352,6 +352,8 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"semantic-run-max-tokens\""));
         assertTrue(root.body().contains("id=\"semantic-run-max-retries\""));
         assertTrue(root.body().contains("id=\"semantic-run-overwrite\""));
+        assertTrue(root.body().contains("id=\"semantic-run-dry-run\" type=\"checkbox\" checked"));
+        assertTrue(root.body().contains("<option value=\"active\">active</option>"));
         assertTrue(root.body().contains("id=\"semantic-run-openrouter-key\""));
         assertTrue(root.body().contains("id=\"catalog-sync-panel\""));
         assertTrue(root.body().contains("id=\"catalog-sync-series\""));
@@ -433,6 +435,7 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("layoutSemanticLeafTreemap"));
         assertTrue(js.body().contains("semanticRenderableLeaves"));
         assertTrue(js.body().contains("SEMANTIC_RENDER_LEAF_LIMIT"));
+        assertTrue(js.body().contains("semanticStatusFromCatalogStatus"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("buildCatalogSyncRequest"));
