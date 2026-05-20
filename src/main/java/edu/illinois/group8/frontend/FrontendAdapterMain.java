@@ -22,11 +22,13 @@ import edu.illinois.group8.storage.db.JdbcLatestMarketStateReader;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.JdbcOperatorLatencyReader;
 import edu.illinois.group8.storage.db.JdbcOperatorPipelineStatusReader;
+import edu.illinois.group8.storage.db.JdbcOperatorSemanticMetadataStatusReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.MarketMetadataReader;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
+import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +67,7 @@ public final class FrontendAdapterMain {
                 refreshService::status,
                 buildOperatorPipelineStatusSupplier(config),
                 buildOperatorLatencyStatusFunction(config),
+                buildOperatorSemanticMetadataStatusSupplier(config),
                 FrontendReleaseInfo.fromEnvironment()
             );
             server.start();
@@ -185,6 +188,40 @@ public final class FrontendAdapterMain {
                 return OperatorLatencyStatus.missing(sourceEventId, e.getMessage());
             } catch (RuntimeException e) {
                 return OperatorLatencyStatus.unavailable(sourceEventId, e.getMessage());
+            }
+        };
+    }
+
+    static java.util.function.Supplier<OperatorSemanticMetadataStatus> buildOperatorSemanticMetadataStatusSupplier(
+        FrontendAdapterConfig config
+    ) {
+        if (config.semanticMetadataStatusSource() == FrontendAdapterConfig.SemanticMetadataStatusSource.DISABLED
+            || config.dbUrl().isBlank()) {
+            return () -> OperatorSemanticMetadataStatus.disabled(
+                config.llmMetadataModel(),
+                config.llmMetadataFallbackModel(),
+                config.llmMetadataTaxonomyVersion()
+            );
+        }
+        JdbcOperatorSemanticMetadataStatusReader reader =
+            JdbcOperatorSemanticMetadataStatusReader.fromDriverManager(
+                config.dbUrl(),
+                config.dbUser(),
+                config.dbPassword(),
+                config.llmMetadataModel(),
+                config.llmMetadataFallbackModel(),
+                config.llmMetadataTaxonomyVersion()
+            );
+        return () -> {
+            try {
+                return reader.read();
+            } catch (RuntimeException e) {
+                return OperatorSemanticMetadataStatus.unavailable(
+                    config.llmMetadataModel(),
+                    config.llmMetadataFallbackModel(),
+                    config.llmMetadataTaxonomyVersion(),
+                    e.getMessage()
+                );
             }
         };
     }

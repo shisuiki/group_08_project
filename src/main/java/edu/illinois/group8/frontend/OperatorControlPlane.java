@@ -40,6 +40,7 @@ final class OperatorControlPlane {
         body.put("db", dbStatus());
         body.put("s3", s3Status());
         body.put("basic_auth", basicAuthStatus());
+        body.put("semantic_metadata", semanticMetadataConfigStatus());
         body.put("release", releaseInfo.toBody());
         return body;
     }
@@ -67,6 +68,7 @@ final class OperatorControlPlane {
         boolean kalshiConfigured = input.kalshiKeyIdConfigured() && input.privateKeyConfigured();
         boolean basicAuthConfigured = input.basicAuthUserConfigured() && input.basicAuthPasswordPresent();
         boolean imageOrRefConfigured = input.imageConfigured() || input.refConfigured();
+        boolean semanticRuntimeDisabled = !input.semanticRuntimeExecutionRequested();
 
         List<Map<String, Object>> checklist = new ArrayList<>();
         checklist.add(check(
@@ -111,13 +113,35 @@ final class OperatorControlPlane {
             input.s3BucketConfigured(),
             input.s3BucketConfigured() ? "recording capture can upload" : "optional; local capture/debug remains local"
         ));
+        checklist.add(check(
+            "semantic_metadata_source",
+            "Semantic metadata source is offline DB/batch",
+            false,
+            input.semanticSourceSupported(),
+            input.semanticSourceSupported() ? input.semanticSource() : "supported sources: disabled, db, market_metadata"
+        ));
+        checklist.add(check(
+            "semantic_metadata_corpus",
+            "Semantic metadata corpus is present",
+            false,
+            input.semanticCorpusPresent(),
+            input.semanticCorpusPresent() ? "semantic corpus declared present" : "optional; run offline metadata CLI first"
+        ));
+        checklist.add(check(
+            "semantic_runtime_execution_disabled",
+            "Semantic metadata runtime execution is disabled",
+            true,
+            semanticRuntimeDisabled,
+            semanticRuntimeDisabled ? "LLM metadata is offline/batch only" : "LLM calls cannot run in live product request paths"
+        ));
 
         boolean canDeploy = supportedProfile
             && liveProfile
             && kalshiConfigured
             && (!externalLive || dbConfigured)
             && basicAuthConfigured
-            && imageOrRefConfigured;
+            && imageOrRefConfigured
+            && semanticRuntimeDisabled;
         boolean canReplay = supportedProfile && "long-replay-demo".equals(input.profile());
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -175,6 +199,27 @@ final class OperatorControlPlane {
         return body;
     }
 
+    private Map<String, Object> semanticMetadataConfigStatus() {
+        boolean apiKey = configured(firstEnv("OPENROUTER_API_KEY"));
+        boolean apiKeyFile = configured(firstEnv("OPENROUTER_API_KEY_FILE"));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status_source", config.semanticMetadataStatusSource().name().toLowerCase(Locale.ROOT));
+        body.put("model", config.llmMetadataModel());
+        body.put("fallback_model", config.llmMetadataFallbackModel());
+        body.put("taxonomy_version", config.llmMetadataTaxonomyVersion());
+        body.put("budget_usd", firstEnv("LLM_METADATA_BUDGET_USD").isBlank()
+            ? "10.00"
+            : firstEnv("LLM_METADATA_BUDGET_USD"));
+        body.put("estimated_paid_request_cost_usd", firstEnv("LLM_METADATA_ESTIMATED_PAID_REQUEST_COST_USD").isBlank()
+            ? "0.01"
+            : firstEnv("LLM_METADATA_ESTIMATED_PAID_REQUEST_COST_USD"));
+        body.put("openrouter_api_key_configured", apiKey || apiKeyFile);
+        body.put("openrouter_api_key_file_configured", apiKeyFile);
+        body.put("execution_mode", "offline_batch");
+        body.put("runtime_execution_enabled", false);
+        return body;
+    }
+
     private Map<String, Object> redactedEnv(PlanInput input) {
         Map<String, Object> envPlan = new LinkedHashMap<>();
         envPlan.put("KALSHI_DEPLOY_PROFILE", input.profile());
@@ -191,6 +236,11 @@ final class OperatorControlPlane {
         envPlan.put("S3_RECORDING_BUCKET", input.s3Bucket());
         envPlan.put("AWS_REGION", input.s3Region());
         envPlan.put("S3_RECORDING_PREFIX", input.s3Prefix());
+        envPlan.put("OPENROUTER_API_KEY", OperatorRedactor.secretPresence(input.openRouterApiKeyPresent()));
+        envPlan.put("OPENROUTER_API_KEY_FILE", input.openRouterApiKeyFile());
+        envPlan.put("LLM_METADATA_MODEL", input.semanticModel());
+        envPlan.put("LLM_METADATA_FALLBACK_MODEL", input.semanticFallbackModel());
+        envPlan.put("LLM_METADATA_TAXONOMY_VERSION", input.semanticTaxonomyVersion());
         envPlan.put("KALSHI_APP_IMAGE", input.image());
         envPlan.put("KALSHI_RELEASE_SHA", input.ref());
         return envPlan;
@@ -271,6 +321,14 @@ final class OperatorControlPlane {
         boolean dbPasswordPresent,
         String basicAuthUser,
         boolean basicAuthPasswordPresent,
+        String semanticSource,
+        boolean semanticCorpusPresent,
+        boolean semanticRuntimeExecutionRequested,
+        boolean openRouterApiKeyPresent,
+        String openRouterApiKeyFile,
+        String semanticModel,
+        String semanticFallbackModel,
+        String semanticTaxonomyVersion,
         String image,
         String ref
     ) {
@@ -279,6 +337,7 @@ final class OperatorControlPlane {
             JsonNode s3 = root.path("s3");
             JsonNode db = root.path("db");
             JsonNode basicAuth = root.path("basic_auth");
+            JsonNode semanticMetadata = root.path("semantic_metadata");
             JsonNode release = root.path("release");
             String privateKeyPem = firstNonBlank(
                 text(kalshi, "private_key_pem", "KALSHI_PRIVATE_KEY", "pem"),
@@ -291,6 +350,10 @@ final class OperatorControlPlane {
             String basicAuthPassword = firstNonBlank(
                 text(basicAuth, "password", "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD"),
                 text(root, "basic_auth_password", "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD")
+            );
+            String openRouterApiKey = firstNonBlank(
+                text(semanticMetadata, "openrouter_api_key", "OPENROUTER_API_KEY"),
+                text(root, "openrouter_api_key", "OPENROUTER_API_KEY")
             );
             return new PlanInput(
                 lower(text(root, "profile", "deploy_profile", "KALSHI_DEPLOY_PROFILE", "live-product")),
@@ -313,6 +376,20 @@ final class OperatorControlPlane {
                 bool(basicAuth, "password_present", "basic_auth_password_present")
                     || bool(root, "basic_auth_password_present")
                     || configured(basicAuthPassword),
+                lower(text(semanticMetadata, "source", "LLM_METADATA_SOURCE", "db")),
+                bool(semanticMetadata, "corpus_present", "generated_present"),
+                bool(semanticMetadata, "runtime_execution_requested", "execution_requested"),
+                bool(semanticMetadata, "openrouter_api_key_present")
+                    || bool(root, "openrouter_api_key_present")
+                    || configured(openRouterApiKey),
+                firstNonBlank(text(semanticMetadata, "openrouter_api_key_file", "OPENROUTER_API_KEY_FILE"),
+                    text(root, "openrouter_api_key_file", "OPENROUTER_API_KEY_FILE")),
+                firstNonBlank(text(semanticMetadata, "model", "LLM_METADATA_MODEL"),
+                    text(root, "llm_metadata_model", "LLM_METADATA_MODEL")),
+                firstNonBlank(text(semanticMetadata, "fallback_model", "LLM_METADATA_FALLBACK_MODEL"),
+                    text(root, "llm_metadata_fallback_model", "LLM_METADATA_FALLBACK_MODEL")),
+                firstNonBlank(text(semanticMetadata, "taxonomy_version", "LLM_METADATA_TAXONOMY_VERSION"),
+                    text(root, "llm_metadata_taxonomy_version", "LLM_METADATA_TAXONOMY_VERSION")),
                 firstNonBlank(text(release, "image", "KALSHI_APP_IMAGE"), text(root, "image", "app_image")),
                 firstNonBlank(text(release, "ref", "sha", "KALSHI_RELEASE_SHA"), text(root, "ref", "release_sha"))
             );
@@ -348,6 +425,13 @@ final class OperatorControlPlane {
 
         private boolean refConfigured() {
             return configured(ref);
+        }
+
+        private boolean semanticSourceSupported() {
+            return switch (semanticSource) {
+                case "", "disabled", "db", "market_metadata", "offline_batch" -> true;
+                default -> false;
+            };
         }
     }
 

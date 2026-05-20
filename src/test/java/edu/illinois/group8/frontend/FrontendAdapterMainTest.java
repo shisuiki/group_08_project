@@ -9,6 +9,7 @@ import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
+import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -105,6 +106,40 @@ class FrontendAdapterMainTest {
         );
 
         assertTrue(thrown.getMessage().contains("FRONTEND_ADAPTER_FEATURE_SOURCE=latest_market_state"));
+    }
+
+    @Test
+    void semanticMetadataStatusSupplierIsDisabledWithoutDatabase() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db",
+            "LLM_METADATA_MODEL", "m",
+            "LLM_METADATA_FALLBACK_MODEL", "f",
+            "LLM_METADATA_TAXONOMY_VERSION", "tax"
+        ));
+
+        OperatorSemanticMetadataStatus status =
+            FrontendAdapterMain.buildOperatorSemanticMetadataStatusSupplier(config).get();
+
+        assertEquals("disabled", status.status());
+        assertFalse(status.configured());
+        assertEquals("m", status.model());
+        assertEquals("f", status.fallbackModel());
+        assertEquals("tax", status.taxonomyVersion());
+    }
+
+    @Test
+    void semanticMetadataStatusSupplierBuildsReaderWithoutOpeningConnection() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi",
+            "FRONTEND_ADAPTER_DB_USER", "frontend",
+            "FRONTEND_ADAPTER_DB_PASSWORD", "secret",
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db"
+        ));
+
+        java.util.function.Supplier<OperatorSemanticMetadataStatus> supplier =
+            FrontendAdapterMain.buildOperatorSemanticMetadataStatusSupplier(config);
+
+        assertTrue(supplier != null);
     }
 
     @Test

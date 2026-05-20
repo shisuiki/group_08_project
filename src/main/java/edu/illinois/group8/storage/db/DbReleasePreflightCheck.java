@@ -46,6 +46,7 @@ public final class DbReleasePreflightCheck {
             requireFlywayMigration(connection, "007");
             requireFlywayMigration(connection, "008");
             requireFlywayMigration(connection, "010");
+            requireFlywayMigration(connection, "012");
             String indexDefinition = canonicalReplayIndexDefinition(connection);
             if (!validCanonicalReplayIndex(indexDefinition)) {
                 throw new IllegalStateException(

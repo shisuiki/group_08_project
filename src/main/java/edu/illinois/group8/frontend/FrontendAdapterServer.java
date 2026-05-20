@@ -11,6 +11,7 @@ import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
+import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -69,6 +70,7 @@ public class FrontendAdapterServer {
     private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
     private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
     private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
+    private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
     private final FrontendReleaseInfo releaseInfo;
     private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -126,6 +128,7 @@ public class FrontendAdapterServer {
             featureOutputRefreshStatus,
             OperatorPipelineStatus::disabled,
             sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("", "", ""),
             FrontendReleaseInfo.fromEnvironment()
         );
     }
@@ -147,6 +150,7 @@ public class FrontendAdapterServer {
             featureOutputRefreshStatus,
             operatorPipelineStatus,
             sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("", "", ""),
             releaseInfo
         );
     }
@@ -159,6 +163,30 @@ public class FrontendAdapterServer {
         Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
         Supplier<OperatorPipelineStatus> operatorPipelineStatus,
         Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        FrontendReleaseInfo releaseInfo
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            () -> OperatorSemanticMetadataStatus.disabled("", "", ""),
+            releaseInfo
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
         FrontendReleaseInfo releaseInfo
     ) {
         this.config = config;
@@ -176,6 +204,9 @@ public class FrontendAdapterServer {
         this.operatorLatencyStatus = operatorLatencyStatus == null
             ? sourceEventId -> OperatorLatencyStatus.disabled()
             : operatorLatencyStatus;
+        this.operatorSemanticMetadataStatus = operatorSemanticMetadataStatus == null
+            ? () -> OperatorSemanticMetadataStatus.disabled("", "", "")
+            : operatorSemanticMetadataStatus;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
     }
@@ -687,6 +718,7 @@ public class FrontendAdapterServer {
         health.put("feature_plant", fp);
         health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
         health.put("operator_pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
+        health.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
         writeJson(exchange, 200, health);
     }
 
@@ -747,6 +779,7 @@ public class FrontendAdapterServer {
         body.put("runtime", runtimeStatusBody());
         body.put("configuration", operatorControlPlane.configurationStatus());
         body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
+        body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
         body.put("data_freshness", dataFreshnessBody(freshness));
         body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
         body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
@@ -975,6 +1008,31 @@ public class FrontendAdapterServer {
         body.put("feature_to_latest_state_ms", view.featureToLatestStateMs());
         body.put("canonical_to_latest_state_ms", view.canonicalToLatestStateMs());
         body.put("reason", view.reason());
+        if (view.error() != null) {
+            body.put("error", operatorVisibleError(view.error()));
+        }
+        return body;
+    }
+
+    private static Map<String, Object> semanticMetadataStatusBody(OperatorSemanticMetadataStatus status) {
+        OperatorSemanticMetadataStatus view = status == null
+            ? OperatorSemanticMetadataStatus.disabled("", "", "")
+            : status;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", view.status());
+        body.put("configured", view.configured());
+        body.put("model", view.model());
+        body.put("fallback_model", view.fallbackModel());
+        body.put("taxonomy_version", view.taxonomyVersion());
+        body.put("generated_count", view.generatedCount());
+        body.put("review_required_count", view.reviewRequiredCount());
+        body.put("failed_count", view.failedCount());
+        body.put("rate_limited_count", view.rateLimitedCount());
+        body.put("last_generated_at", view.lastGeneratedAt() == null ? null : view.lastGeneratedAt().toString());
+        body.put("last_generated_age_ms", view.lastGeneratedAgeMs());
+        body.put("runtime_status", "offline_batch_only");
+        body.put("runtime_supported", false);
+        body.put("execution_enabled", false);
         if (view.error() != null) {
             body.put("error", operatorVisibleError(view.error()));
         }

@@ -18,6 +18,13 @@ class FrontendAdapterConfigTest {
         assertEquals(FrontendAdapterConfig.SourceMode.DB, config.sourceMode());
         assertEquals(FrontendAdapterConfig.FeatureSource.MODULES, config.featureSource());
         assertEquals(FrontendAdapterConfig.MetadataSource.AUTO, config.metadataSource());
+        assertEquals(
+            FrontendAdapterConfig.SemanticMetadataStatusSource.AUTO,
+            config.semanticMetadataStatusSource()
+        );
+        assertEquals("deepseek/deepseek-v4-flash:free", config.llmMetadataModel());
+        assertEquals("deepseek/deepseek-v4-flash", config.llmMetadataFallbackModel());
+        assertEquals("v1", config.llmMetadataTaxonomyVersion());
         assertEquals(10_000, config.featureOutputMaxRows());
         assertFalse(config.featureOutputRefreshEnabled());
         assertEquals(1_000, config.featureOutputRefreshIntervalMs());
@@ -115,6 +122,37 @@ class FrontendAdapterConfigTest {
     }
 
     @Test
+    void semanticMetadataStatusSourceAliasesParse() {
+        assertEquals(
+            FrontendAdapterConfig.SemanticMetadataStatusSource.AUTO,
+            FrontendAdapterConfig.SemanticMetadataStatusSource.parse(null)
+        );
+        assertEquals(
+            FrontendAdapterConfig.SemanticMetadataStatusSource.AUTO,
+            FrontendAdapterConfig.SemanticMetadataStatusSource.parse("auto")
+        );
+        assertEquals(
+            FrontendAdapterConfig.SemanticMetadataStatusSource.DB,
+            FrontendAdapterConfig.SemanticMetadataStatusSource.parse("semantic-metadata")
+        );
+        assertEquals(
+            FrontendAdapterConfig.SemanticMetadataStatusSource.DISABLED,
+            FrontendAdapterConfig.SemanticMetadataStatusSource.parse("off")
+        );
+
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db",
+            "LLM_METADATA_MODEL", "m",
+            "LLM_METADATA_FALLBACK_MODEL", "f",
+            "LLM_METADATA_TAXONOMY_VERSION", "tax"
+        ));
+        assertEquals(FrontendAdapterConfig.SemanticMetadataStatusSource.DB, config.semanticMetadataStatusSource());
+        assertEquals("m", config.llmMetadataModel());
+        assertEquals("f", config.llmMetadataFallbackModel());
+        assertEquals("tax", config.llmMetadataTaxonomyVersion());
+    }
+
+    @Test
     void invalidFeatureSourceAndMaxRowsAreRejected() {
         assertThrows(
             IllegalArgumentException.class,
@@ -139,6 +177,10 @@ class FrontendAdapterConfigTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_METADATA_MAX_ROWS", "0"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "runtime"))
         );
     }
 

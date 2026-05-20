@@ -31,6 +31,10 @@ public record FrontendAdapterConfig(
     int featureOutputRefreshMaxRows,
     MetadataSource metadataSource,
     int metadataMaxRows,
+    SemanticMetadataStatusSource semanticMetadataStatusSource,
+    String llmMetadataModel,
+    String llmMetadataFallbackModel,
+    String llmMetadataTaxonomyVersion,
     boolean includeSmokeMarkets,
     String dbUrl,
     String dbUser,
@@ -99,6 +103,24 @@ public record FrontendAdapterConfig(
         }
     }
 
+    public enum SemanticMetadataStatusSource {
+        AUTO, DB, DISABLED;
+
+        public static SemanticMetadataStatusSource parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return AUTO;
+            }
+            return switch (raw.trim().toLowerCase(Locale.ROOT).replace('-', '_')) {
+                case "auto", "automatic" -> AUTO;
+                case "db", "postgres", "postgresql", "timescale", "timescaledb", "semantic_metadata" -> DB;
+                case "disabled", "off", "none" -> DISABLED;
+                default -> throw new IllegalArgumentException(
+                    "Unknown FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE: " + raw
+                );
+            };
+        }
+    }
+
     public FrontendAdapterConfig {
         host = host == null || host.isBlank() ? "127.0.0.1" : host;
         if (port < 0 || port > 65535) {
@@ -112,6 +134,9 @@ public record FrontendAdapterConfig(
         }
         if (metadataSource == null) {
             throw new IllegalArgumentException("metadataSource is required");
+        }
+        if (semanticMetadataStatusSource == null) {
+            throw new IllegalArgumentException("semanticMetadataStatusSource is required");
         }
         recordingRoot = recordingRoot == null ? Path.of("recordings") : recordingRoot;
         staticRoot = staticRoot == null ? Path.of("frontend/tradingview-lightweight") : staticRoot;
@@ -141,6 +166,9 @@ public record FrontendAdapterConfig(
         if (metadataMaxRows < 1) {
             throw new IllegalArgumentException("metadataMaxRows must be positive");
         }
+        llmMetadataModel = normalize(llmMetadataModel);
+        llmMetadataFallbackModel = normalize(llmMetadataFallbackModel);
+        llmMetadataTaxonomyVersion = normalize(llmMetadataTaxonomyVersion);
         dbUrl = normalize(dbUrl);
         dbUser = normalize(dbUser);
         dbPassword = dbPassword == null ? "" : dbPassword;
@@ -194,6 +222,10 @@ public record FrontendAdapterConfig(
             DEFAULT_FEATURE_OUTPUT_MAX_ROWS,
             MetadataSource.AUTO,
             DEFAULT_METADATA_MAX_ROWS,
+            SemanticMetadataStatusSource.AUTO,
+            "",
+            "",
+            "",
             false,
             dbUrl,
             dbUser,
@@ -257,6 +289,10 @@ public record FrontendAdapterConfig(
             ),
             MetadataSource.parse(value(env, "FRONTEND_ADAPTER_METADATA_SOURCE", "auto")),
             intValue(env, "FRONTEND_ADAPTER_METADATA_MAX_ROWS", DEFAULT_METADATA_MAX_ROWS),
+            SemanticMetadataStatusSource.parse(value(env, "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "auto")),
+            value(env, "LLM_METADATA_MODEL", "deepseek/deepseek-v4-flash:free"),
+            value(env, "LLM_METADATA_FALLBACK_MODEL", "deepseek/deepseek-v4-flash"),
+            value(env, "LLM_METADATA_TAXONOMY_VERSION", "v1"),
             booleanValue(env, "FRONTEND_ADAPTER_INCLUDE_SMOKE_MARKETS", false),
             value(env, "FRONTEND_ADAPTER_DB_URL", value(env, "DB_WRITER_DATABASE_URL", "")),
             value(env, "FRONTEND_ADAPTER_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),

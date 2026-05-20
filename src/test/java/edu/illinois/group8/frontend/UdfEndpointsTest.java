@@ -7,6 +7,7 @@ import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
+import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -672,6 +673,8 @@ class UdfEndpointsTest {
         assertEquals(0L, body.path("quote_streams").path("rejected").asLong());
         assertEquals(2, body.path("quote_streams").path("max_streams").asInt());
         assertEquals("disabled", body.path("operator_pipeline").path("status").asText());
+        assertEquals("disabled", body.path("semantic_metadata").path("status").asText());
+        assertFalse(body.path("semantic_metadata").path("runtime_supported").asBoolean());
     }
 
     @Test
@@ -762,6 +765,59 @@ class UdfEndpointsTest {
         assertEquals("missing", latency.path("status").asText());
         assertEquals("missing_source_event_id", latency.path("reason").asText());
         assertTrue(latency.path("canonical_commit_seq").isNull());
+    }
+
+    @Test
+    void healthAndOperatorStatusExposeSemanticMetadataStatus() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi",
+            "LLM_METADATA_MODEL", "deepseek/deepseek-v4-flash:free",
+            "LLM_METADATA_FALLBACK_MODEL", "deepseek/deepseek-v4-flash",
+            "LLM_METADATA_TAXONOMY_VERSION", "tax-v1"
+        ));
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> new OperatorSemanticMetadataStatus(
+                "ok",
+                true,
+                "deepseek/deepseek-v4-flash:free",
+                "deepseek/deepseek-v4-flash",
+                "tax-v1",
+                7L,
+                1L,
+                2L,
+                3L,
+                Instant.parse("2026-05-20T00:00:00Z"),
+                25L,
+                null
+            ),
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode health = getJson("/health").path("semantic_metadata");
+        JsonNode status = getJson("/operator/status");
+        JsonNode operatorSemantic = status.path("semantic_metadata");
+        JsonNode configSemantic = status.path("configuration").path("semantic_metadata");
+
+        assertEquals("ok", health.path("status").asText());
+        assertEquals(7L, health.path("generated_count").asLong());
+        assertEquals(3L, health.path("rate_limited_count").asLong());
+        assertEquals("offline_batch_only", health.path("runtime_status").asText());
+        assertFalse(health.path("execution_enabled").asBoolean());
+        assertEquals("tax-v1", operatorSemantic.path("taxonomy_version").asText());
+        assertEquals("offline_batch", configSemantic.path("execution_mode").asText());
+        assertFalse(configSemantic.path("runtime_execution_enabled").asBoolean());
+        assertFalse(status.toString().contains("OPENROUTER_API_KEY"));
     }
 
     @Test
@@ -915,6 +971,36 @@ class UdfEndpointsTest {
         assertEquals("ready", body.path("status").asText());
         assertTrue(checkPassed(body, "basic_auth"));
         assertEquals("docker compose --env-file .env --profile live-product up -d",
+            body.path("commands").get(1).asText());
+        assertTrue(checkPassed(body, "semantic_runtime_execution_disabled"));
+    }
+
+    @Test
+    void operatorPlanBlocksSemanticRuntimeExecution() throws Exception {
+        restartWithOperatorControl(true);
+        String request = """
+            {
+              "profile": "live-product",
+              "kalshi": {"key_id": "key-123", "private_key_path": "/run/secrets/kalshi_private_key"},
+              "db": {"url": "jdbc:postgresql://db/kalshi", "user": "frontend", "password_present": true},
+              "basic_auth": {"user": "operator", "password_present": true},
+              "semantic_metadata": {"source": "db", "corpus_present": true, "runtime_execution_requested": true},
+              "release": {"ref": "abcdef123456"}
+            }
+            """;
+
+        JsonNode body = MAPPER.readTree(postJsonWithBasicAuth(
+            "/operator/plan",
+            request,
+            "operator",
+            "secret"
+        ).body());
+
+        assertFalse(body.path("can_deploy").asBoolean());
+        assertFalse(checkPassed(body, "semantic_runtime_execution_disabled"));
+        assertTrue(checkPassed(body, "semantic_metadata_source"));
+        assertTrue(checkPassed(body, "semantic_metadata_corpus"));
+        assertEquals("fix blocked checklist items before compose up",
             body.path("commands").get(1).asText());
     }
 
