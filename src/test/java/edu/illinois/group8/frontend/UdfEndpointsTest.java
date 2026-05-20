@@ -14,7 +14,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -188,7 +190,10 @@ class UdfEndpointsTest {
         assertEquals(200, root.statusCode());
         assertEquals(200, index.statusCode());
         assertTrue(root.headers().firstValue("content-type").orElse("").contains("text/html"));
-        assertTrue(root.body().contains("Kalshi Frontend Adapter Demo"));
+        assertTrue(root.body().contains("Kalshi Product Dashboard"));
+        assertTrue(root.body().contains("market-list"));
+        assertTrue(root.body().contains("feature-list"));
+        assertTrue(root.body().contains("Runtime Health"));
         assertTrue(root.body().contains("placeholder=\"same origin\""));
         assertTrue(index.body().contains("<script src=\"app.js\"></script>"));
     }
@@ -203,6 +208,10 @@ class UdfEndpointsTest {
         assertTrue(js.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(css.headers().firstValue("content-type").orElse("").contains("text/css"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
+        assertTrue(js.body().contains("/markets?limit=100"));
+        assertTrue(js.body().contains("/features?symbol="));
+        assertTrue(js.body().contains("/health"));
+        assertTrue(js.body().contains("nextSequence < quoteSequence"));
         assertTrue(js.body().contains("window.location.origin"));
         assertTrue(css.body().contains("chart-container"));
     }
@@ -289,6 +298,40 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void quoteUpdateLongPollsDoNotStarveHealthEndpoint() throws Exception {
+        long sequence = getJson("/quotes?symbols=MKT-1").path("sequence").asLong();
+        List<CompletableFuture<HttpResponse<String>>> pending = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            pending.add(client.sendAsync(
+                HttpRequest.newBuilder(URI.create(baseUrl
+                    + "/quotes/updates?symbols=MKT-1&after=" + sequence + "&timeout_ms=750"))
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString()
+            ));
+        }
+
+        JsonNode health = null;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            HttpResponse<String> response = getWithTimeout("/health", 500L);
+            assertEquals(200, response.statusCode());
+            health = MAPPER.readTree(response.body());
+            if (health.path("quote_updates").path("active_waits").asLong() > 0L) {
+                break;
+            }
+            Thread.sleep(25L);
+        }
+
+        assertNotNull(health);
+        assertEquals("ok", health.path("status").asText());
+        assertTrue(health.path("quote_updates").path("active_waits").asLong() > 0L);
+        assertEquals(4, health.path("quote_updates").path("max_waits").asInt());
+        for (CompletableFuture<HttpResponse<String>> future : pending) {
+            assertEquals(200, future.get(2, TimeUnit.SECONDS).statusCode());
+        }
+    }
+
+    @Test
     void featuresEndpointReturnsSeededOutputsWithLimit() throws Exception {
         JsonNode body = getJson("/features?symbol=MKT-1&feature=feature.bbo&limit=2");
 
@@ -329,6 +372,8 @@ class UdfEndpointsTest {
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
         assertTrue(body.path("store").path("sequence").asLong() > 0L);
         assertEquals(0L, body.path("quote_updates").path("timeouts").asLong());
+        assertEquals(0L, body.path("quote_updates").path("rejected").asLong());
+        assertEquals(4, body.path("quote_updates").path("max_waits").asInt());
     }
 
     @Test
@@ -410,6 +455,44 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void quotesIgnoreOlderFeatureOutputRowsAcceptedAfterNewerRows() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "10"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        AtomicInteger reads = new AtomicInteger();
+        FeatureOutputRefreshService refresh = new FeatureOutputRefreshService(config, store, request -> {
+            return switch (reads.getAndIncrement()) {
+                case 0 -> List.of(row("feature-2", "2026-05-20T00:00:01Z", 2_000L, "seed-new", 600_000L));
+                case 1 -> List.of(row("feature-1", "2026-05-20T00:00:02Z", 1_000L, "replay-old", 500_000L));
+                default -> List.of();
+            };
+        });
+        refresh.seedOnce();
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            refresh::status
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        refresh.refreshOnce();
+
+        JsonNode quote = getJson("/quotes?symbols=MKT-1").path("quotes").get(0);
+        assertEquals(600_000L, quote.path("midpoint_micros").asLong());
+        assertEquals(2_000L, quote.path("event_ts_ms").asLong());
+        assertEquals("seed-new", quote.path("source_event_id").asText());
+        assertEquals(2L, getJson("/health").path("feature_output_refresh").path("total_loaded").asLong());
+    }
+
+    @Test
     void quoteUpdatesWakeWhenFeatureOutputRefreshAcceptsRows() throws Exception {
         server.stop();
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
@@ -460,6 +543,56 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void quoteUpdatesWakeOnOlderFeatureOutputButReturnCurrentLatestQuote() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "feature_outputs",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi",
+            "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS", "10"
+        ));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        AtomicInteger reads = new AtomicInteger();
+        FeatureOutputRefreshService refresh = new FeatureOutputRefreshService(config, store, request -> {
+            return switch (reads.getAndIncrement()) {
+                case 0 -> List.of(row("feature-2", "2026-05-20T00:00:01Z", 2_000L, "seed-new", 600_000L));
+                case 1 -> List.of(row("feature-1", "2026-05-20T00:00:02Z", 1_000L, "replay-old", 500_000L));
+                default -> List.of();
+            };
+        });
+        refresh.seedOnce();
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            refresh::status
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+        long sequence = getJson("/quotes?symbols=MKT-1").path("sequence").asLong();
+
+        CompletableFuture<HttpResponse<String>> pending = client.sendAsync(
+            HttpRequest.newBuilder(URI.create(baseUrl
+                + "/quotes/updates?symbols=MKT-1&after=" + sequence + "&timeout_ms=1000")).GET().build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+        Thread.sleep(25L);
+        assertFalse(pending.isDone());
+
+        refresh.refreshOnce();
+
+        HttpResponse<String> response = pending.get(2, TimeUnit.SECONDS);
+        assertEquals(200, response.statusCode());
+        JsonNode body = MAPPER.readTree(response.body());
+        assertTrue(body.path("changed").asBoolean());
+        JsonNode quote = body.path("quotes").get(0);
+        assertEquals(600_000L, quote.path("midpoint_micros").asLong());
+        assertEquals(2_000L, quote.path("event_ts_ms").asLong());
+        assertEquals("seed-new", quote.path("source_event_id").asText());
+    }
+
+    @Test
     void metricsExposesRequiredKeys() throws Exception {
         getJson("/symbols");
         HttpResponse<String> metrics = get("/metrics");
@@ -469,6 +602,8 @@ class UdfEndpointsTest {
         assertTrue(body.contains("frontend_adapter_store_sequence"));
         assertTrue(body.contains("frontend_adapter_quote_update_requests_total"));
         assertTrue(body.contains("frontend_adapter_quote_update_timeouts_total"));
+        assertTrue(body.contains("frontend_adapter_quote_update_rejected_total"));
+        assertTrue(body.contains("frontend_adapter_quote_update_active"));
         assertTrue(body.contains("frontend_adapter_http_requests_total{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_sum{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_count{path=\"/symbols\"}"));
@@ -498,6 +633,16 @@ class UdfEndpointsTest {
     private HttpResponse<String> get(String path) throws Exception {
         return client.send(
             HttpRequest.newBuilder(URI.create(baseUrl + path)).GET().build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
+    private HttpResponse<String> getWithTimeout(String path, long timeoutMs) throws Exception {
+        return client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .timeout(Duration.ofMillis(timeoutMs))
+                .GET()
+                .build(),
             HttpResponse.BodyHandlers.ofString()
         );
     }

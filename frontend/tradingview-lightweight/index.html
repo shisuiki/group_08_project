@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kalshi Frontend Adapter — TradingView Demo</title>
+    <title>Kalshi Product Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
     <header>
-        <h1>Kalshi Frontend Adapter Demo</h1>
+        <h1>Kalshi Product Dashboard</h1>
         <div class="controls">
             <label>
                 Adapter URL
@@ -36,24 +36,89 @@
                     <option value="86400">24 h</option>
                 </select>
             </label>
-            <button id="refresh-symbols" type="button">Reload Symbols</button>
-            <button id="load-history" type="button">Load</button>
+            <button id="refresh-symbols" type="button">Reload</button>
+            <button id="load-history" type="button">Load Chart</button>
         </div>
     </header>
 
     <main>
-        <section id="chart-container" aria-label="candlestick chart"></section>
+        <section id="market-panel" class="panel" aria-label="market catalog">
+            <div class="panel-heading">
+                <h2>Market Catalog</h2>
+                <span id="market-count">0</span>
+            </div>
+            <div id="market-list" class="market-list"></div>
+        </section>
+
+        <section id="chart-panel" aria-label="chart and quote">
+            <div id="chart-container" aria-label="candlestick chart"></div>
+            <div id="quote-strip">
+                <div>
+                    <span class="label">Bid</span>
+                    <strong id="live-bid">-</strong>
+                </div>
+                <div>
+                    <span class="label">Ask</span>
+                    <strong id="live-ask">-</strong>
+                </div>
+                <div>
+                    <span class="label">Mid</span>
+                    <strong id="live-midpoint">-</strong>
+                </div>
+                <div>
+                    <span class="label">Freshness</span>
+                    <strong id="freshness-state">-</strong>
+                </div>
+            </div>
+        </section>
 
         <aside id="live-panel">
-            <h2>Live BBO</h2>
-            <dl>
-                <dt>Symbol</dt><dd id="live-symbol">—</dd>
-                <dt>Bid</dt><dd id="live-bid">—</dd>
-                <dt>Ask</dt><dd id="live-ask">—</dd>
-                <dt>Midpoint</dt><dd id="live-midpoint">—</dd>
-                <dt>Event ts</dt><dd id="live-ts">—</dd>
-                <dt>Last update</dt><dd id="live-updated">—</dd>
-            </dl>
+            <section class="panel">
+                <div class="panel-heading">
+                    <h2>Current Quote</h2>
+                    <span id="live-symbol">-</span>
+                </div>
+                <dl>
+                    <dt>Event ts</dt><dd id="live-ts">-</dd>
+                    <dt>Quote age</dt><dd id="live-age">-</dd>
+                    <dt>Source event</dt><dd id="source-event">-</dd>
+                    <dt>Last poll</dt><dd id="live-updated">-</dd>
+                </dl>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <h2>Selected Market</h2>
+                    <span id="market-status">-</span>
+                </div>
+                <dl id="market-summary">
+                    <dt>Event</dt><dd id="market-event">-</dd>
+                    <dt>Series</dt><dd id="market-series">-</dd>
+                    <dt>Open</dt><dd id="market-open">-</dd>
+                    <dt>Close</dt><dd id="market-close">-</dd>
+                </dl>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <h2>Recent Features</h2>
+                    <span id="feature-count">0</span>
+                </div>
+                <div id="feature-list" class="feature-list"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <h2>Runtime Health</h2>
+                    <span id="adapter-health">-</span>
+                </div>
+                <dl id="health-grid">
+                    <dt>Store seq</dt><dd id="health-sequence">-</dd>
+                    <dt>Refresh</dt><dd id="refresh-health">-</dd>
+                    <dt>Metadata</dt><dd id="metadata-health">-</dd>
+                    <dt>FeaturePlant</dt><dd id="featureplant-health">-</dd>
+                </dl>
+            </section>
         </aside>
     </main>
 

@@ -1,8 +1,10 @@
 package edu.illinois.group8.frontend;
 
 import edu.illinois.group8.feature.FeatureOutput;
+import edu.illinois.group8.storage.db.FeatureOutputRow;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,6 +78,36 @@ class FrontendFeatureStoreTest {
     }
 
     @Test
+    void latestIgnoresOlderEventTimestampAcceptedLater() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(row("feature-new", "2026-05-20T00:00:01Z", bbo("MKT-1", 2_000L, 600_000L)));
+        store.accept(row("feature-old", "2026-05-20T00:00:02Z", bbo("MKT-1", 1_000L, 500_000L)));
+
+        Optional<FeatureOutput> latest = store.latest("MKT-1", FrontendFeatureStore.BBO_FEATURE);
+
+        assertTrue(latest.isPresent());
+        assertEquals(2_000L, latest.get().eventTsMs());
+        assertEquals(600_000L, latest.get().values().get("midpoint_micros"));
+        assertEquals(2L, store.sequence());
+        assertEquals(List.of(1_000L, 2_000L), store.snapshot("MKT-1", FrontendFeatureStore.BBO_FEATURE).stream()
+            .map(FeatureOutput::eventTsMs)
+            .toList());
+    }
+
+    @Test
+    void latestUsesCreatedAtAndFeatureEventIdWhenEventTimestampsTie() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(row("feature-1", "2026-05-20T00:00:01Z", bbo("MKT-1", 2_000L, 500_000L)));
+        store.accept(row("feature-2", "2026-05-20T00:00:02Z", bbo("MKT-1", 2_000L, 600_000L)));
+        store.accept(row("feature-0", "2026-05-20T00:00:02Z", bbo("MKT-1", 2_000L, 550_000L)));
+
+        Optional<FeatureOutput> latest = store.latest("MKT-1", FrontendFeatureStore.BBO_FEATURE);
+
+        assertTrue(latest.isPresent());
+        assertEquals(600_000L, latest.get().values().get("midpoint_micros"));
+    }
+
+    @Test
     void blankMarketTickerIsIgnored() {
         FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
         store.accept(bbo("", 100L, 5_000_000L));
@@ -90,7 +122,7 @@ class FrontendFeatureStoreTest {
         FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
 
         assertEquals(0L, store.sequence());
-        store.accept(null);
+        store.accept((FeatureOutput) null);
         store.accept(bbo("", 100L, 5_000_000L));
         assertEquals(0L, store.sequence());
 
@@ -153,5 +185,9 @@ class FrontendFeatureStoreTest {
             "evt-t-" + ts,
             Map.of("trade_id", tradeId)
         );
+    }
+
+    private static FeatureOutputRow row(String featureEventId, String createdAt, FeatureOutput output) {
+        return new FeatureOutputRow(featureEventId, Instant.parse(createdAt), output);
     }
 }

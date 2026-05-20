@@ -1,7 +1,9 @@
 package edu.illinois.group8.frontend;
 
 import edu.illinois.group8.feature.FeatureOutput;
+import edu.illinois.group8.storage.db.FeatureOutputRow;
 
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -23,7 +25,7 @@ public class FrontendFeatureStore {
     private final int maxFeaturesPerMarket;
     private final int maxSymbolsIndexed;
     private final Map<String, Deque<FeatureOutput>> byMarket = new LinkedHashMap<>();
-    private final Map<String, Map<String, FeatureOutput>> latestByMarket = new HashMap<>();
+    private final Map<String, Map<String, LatestFeature>> latestByMarket = new HashMap<>();
     private final AtomicLong totalAccepted = new AtomicLong();
     private long sequence;
 
@@ -39,6 +41,17 @@ public class FrontendFeatureStore {
     }
 
     public synchronized void accept(FeatureOutput out) {
+        accept(out, null, null);
+    }
+
+    public synchronized void accept(FeatureOutputRow row) {
+        if (row == null) {
+            return;
+        }
+        accept(row.output(), row.createdAt(), row.featureEventId());
+    }
+
+    private void accept(FeatureOutput out, Instant createdAt, String featureEventId) {
         if (out == null) {
             return;
         }
@@ -63,11 +76,16 @@ public class FrontendFeatureStore {
         while (deque.size() > maxFeaturesPerMarket) {
             deque.removeFirst();
         }
-        latestByMarket
-            .computeIfAbsent(market, ignored -> new HashMap<>())
-            .put(out.featureName(), out);
+        long acceptedSequence = sequence + 1L;
+        LatestKey key = LatestKey.of(out, createdAt, featureEventId, acceptedSequence);
+        Map<String, LatestFeature> latestByFeature = latestByMarket
+            .computeIfAbsent(market, ignored -> new HashMap<>());
+        LatestFeature current = latestByFeature.get(out.featureName());
+        if (current == null || key.compareTo(current.key()) >= 0) {
+            latestByFeature.put(out.featureName(), new LatestFeature(out, key));
+        }
         totalAccepted.incrementAndGet();
-        sequence++;
+        sequence = acceptedSequence;
         notifyAll();
     }
 
@@ -96,11 +114,12 @@ public class FrontendFeatureStore {
     }
 
     public synchronized Optional<FeatureOutput> latest(String marketTicker, String featureName) {
-        Map<String, FeatureOutput> byFeature = latestByMarket.get(marketTicker);
+        Map<String, LatestFeature> byFeature = latestByMarket.get(marketTicker);
         if (byFeature == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(byFeature.get(featureName));
+        LatestFeature latest = byFeature.get(featureName);
+        return latest == null ? Optional.empty() : Optional.of(latest.output());
     }
 
     public long totalAccepted() {
@@ -197,6 +216,47 @@ public class FrontendFeatureStore {
 
         Bar toBar() {
             return new Bar(openTimeMs, closeTimeMs, open, high, low, close, count);
+        }
+    }
+
+    private record LatestFeature(FeatureOutput output, LatestKey key) {
+    }
+
+    private record LatestKey(long eventTsMs, Instant createdAt, String featureEventId, long acceptedSequence)
+        implements Comparable<LatestKey> {
+        private static LatestKey of(
+            FeatureOutput output,
+            Instant createdAt,
+            String featureEventId,
+            long acceptedSequence
+        ) {
+            long eventTsMs = output.eventTsMs() == null ? Long.MIN_VALUE : output.eventTsMs();
+            Instant cursorCreatedAt = createdAt == null ? Instant.EPOCH : createdAt;
+            String cursorEventId = featureEventId;
+            if (cursorEventId == null || cursorEventId.isBlank()) {
+                cursorEventId = output.sourceEventId();
+            }
+            if (cursorEventId == null) {
+                cursorEventId = "";
+            }
+            return new LatestKey(eventTsMs, cursorCreatedAt, cursorEventId, acceptedSequence);
+        }
+
+        @Override
+        public int compareTo(LatestKey other) {
+            int eventTsCompare = Long.compare(eventTsMs, other.eventTsMs);
+            if (eventTsCompare != 0) {
+                return eventTsCompare;
+            }
+            int createdAtCompare = createdAt.compareTo(other.createdAt);
+            if (createdAtCompare != 0) {
+                return createdAtCompare;
+            }
+            int eventIdCompare = featureEventId.compareTo(other.featureEventId);
+            if (eventIdCompare != 0) {
+                return eventIdCompare;
+            }
+            return Long.compare(acceptedSequence, other.acceptedSequence);
         }
     }
 }

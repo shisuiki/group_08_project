@@ -62,9 +62,15 @@ check_product_static_ui() {
     curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
     curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
     curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
-    grep -q 'Kalshi Frontend Adapter Demo' "$index_file"
+    grep -q 'Kalshi Product Dashboard' "$index_file"
+    grep -q 'market-list' "$index_file"
+    grep -q 'feature-list' "$index_file"
+    grep -q 'Runtime Health' "$index_file"
     grep -q 'same origin' "$index_file"
     grep -q '/quotes/updates' "$app_file"
+    grep -q '/markets?limit=100' "$app_file"
+    grep -q '/features?symbol=' "$app_file"
+    grep -q '/health' "$app_file"
     grep -q 'chart-container' "$css_file"
     printf 'PASS frontend_static_ui url=%s/\n' "$FRONTEND_BASE_URL"
 }
@@ -338,7 +344,8 @@ fi
 
 features_json="$tmpdir/features.json"
 fetch_json "/features?symbol=${encoded_symbol}&feature=${encoded_feature}&limit=${encoded_limit}" "$features_json"
-feature_count="$(python3 - "$features_json" "$selected_symbol" "$DEMO_FEATURE" <<'PY'
+feature_selection="$tmpdir/feature-selection.txt"
+python3 - "$features_json" "$selected_symbol" "$DEMO_FEATURE" > "$feature_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -358,16 +365,42 @@ if not isinstance(outputs, list) or not outputs:
 for index, output in enumerate(outputs):
     if not isinstance(output, dict):
         raise SystemExit(f"features check failed: output {index} is not an object")
-    if "values" not in output or output["values"] is None:
+    if output.get("feature_name") != expected_feature:
+        raise SystemExit(f"features check failed: output {index} feature_name mismatch")
+    if output.get("market_ticker") != expected_symbol:
+        raise SystemExit(f"features check failed: output {index} market_ticker mismatch")
+    if not output.get("source_event_id"):
+        raise SystemExit(f"features check failed: output {index} source_event_id is missing")
+    if not isinstance(output.get("event_ts_ms"), int):
+        raise SystemExit(f"features check failed: output {index} event_ts_ms is not an integer")
+    if "values" not in output or output["values"] is None or not isinstance(output["values"], dict):
         raise SystemExit(f"features check failed: output {index} has no values")
+    values = output["values"]
+    for key in ("bid_price_micros", "ask_price_micros", "midpoint_micros"):
+        value = values.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise SystemExit(f"features check failed: output {index} {key} is not an integer")
+latest = outputs[-1]
+values = latest["values"]
 print(count)
+print(latest["source_event_id"])
+print(latest["event_ts_ms"])
+print(values["midpoint_micros"])
+print(values["bid_price_micros"])
+print(values["ask_price_micros"])
 PY
-)"
-printf 'PASS features symbol=%s feature=%s count=%s\n' "$selected_symbol" "$DEMO_FEATURE" "$feature_count"
+feature_count="$(sed -n '1p' "$feature_selection")"
+feature_source_event_id="$(sed -n '2p' "$feature_selection")"
+feature_event_ts_ms="$(sed -n '3p' "$feature_selection")"
+feature_midpoint_micros="$(sed -n '4p' "$feature_selection")"
+feature_bid_micros="$(sed -n '5p' "$feature_selection")"
+feature_ask_micros="$(sed -n '6p' "$feature_selection")"
+printf 'PASS features symbol=%s feature=%s count=%s latest_source_event_id=%s event_ts_ms=%s midpoint_micros=%s\n' \
+    "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$feature_source_event_id" "$feature_event_ts_ms" "$feature_midpoint_micros"
 
 quotes_json="$tmpdir/quotes.json"
 fetch_json "/quotes?symbols=${encoded_symbol}" "$quotes_json"
-python3 - "$quotes_json" "$selected_symbol" <<'PY'
+python3 - "$quotes_json" "$selected_symbol" "$feature_source_event_id" "$feature_event_ts_ms" "$feature_midpoint_micros" "$feature_bid_micros" "$feature_ask_micros" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -375,10 +408,30 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 quotes = body.get("quotes")
 if not isinstance(quotes, list) or not quotes:
     raise SystemExit("quotes check failed: quotes are empty")
-if quotes[0].get("symbol") != sys.argv[2]:
+quote = quotes[0]
+if quote.get("symbol") != sys.argv[2]:
     raise SystemExit("quotes check failed: selected symbol is missing")
+expected_source = sys.argv[3]
+expected_event_ts = int(sys.argv[4])
+expected_midpoint = int(sys.argv[5])
+expected_bid = int(sys.argv[6])
+expected_ask = int(sys.argv[7])
+if quote.get("source_event_id") != expected_source:
+    raise SystemExit(
+        f"quotes check failed: source_event_id is {quote.get('source_event_id')!r}, expected {expected_source!r}"
+    )
+for key, expected in (
+    ("event_ts_ms", expected_event_ts),
+    ("midpoint_micros", expected_midpoint),
+    ("bid_micros", expected_bid),
+    ("ask_micros", expected_ask),
+):
+    value = quote.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value != expected:
+        raise SystemExit(f"quotes check failed: {key} is {value!r}, expected {expected!r}")
 PY
-printf 'PASS quotes symbol=%s\n' "$selected_symbol"
+printf 'PASS quotes symbol=%s midpoint_micros=%s source_event_id=%s event_ts_ms=%s\n' \
+    "$selected_symbol" "$feature_midpoint_micros" "$feature_source_event_id" "$feature_event_ts_ms"
 
 history_window="$tmpdir/history-window.txt"
 python3 - "$latest_event_ts_ms" > "$history_window" <<'PY'

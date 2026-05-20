@@ -1,6 +1,5 @@
 package edu.illinois.group8.frontend;
 
-import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.storage.db.FeatureOutputCursor;
 import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
@@ -80,7 +79,7 @@ final class FeatureOutputRefreshService implements AutoCloseable {
                 config.featureOutputRefreshMaxRows()
             ));
             for (FeatureOutputRow row : rows) {
-                store.accept(row.output());
+                store.accept(row);
             }
             updateCursor(rows);
             recordSuccess(rows.size());
@@ -142,8 +141,7 @@ final class FeatureOutputRefreshService implements AutoCloseable {
 
     private void acceptRowsOldestFirst(List<FeatureOutputRow> rows) {
         for (int index = rows.size() - 1; index >= 0; index--) {
-            FeatureOutput output = rows.get(index).output();
-            store.accept(output);
+            store.accept(rows.get(index));
         }
     }
 

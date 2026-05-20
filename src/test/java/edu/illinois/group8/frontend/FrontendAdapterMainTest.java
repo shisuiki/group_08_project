@@ -310,6 +310,10 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("QUOTES_UPDATE_ERROR_LIMIT"));
         assertTrue(app.contains("window.location.origin"));
         assertTrue(app.contains("/quotes?symbols="));
+        assertTrue(app.contains("nextSequence < quoteSequence"));
+        assertTrue(app.contains("/markets?limit=100"));
+        assertTrue(app.contains("/features?symbol="));
+        assertTrue(app.contains("/health"));
     }
 
     @Test

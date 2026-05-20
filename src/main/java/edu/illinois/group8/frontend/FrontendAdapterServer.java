@@ -25,7 +25,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
@@ -35,6 +38,8 @@ public class FrontendAdapterServer {
     private static final int MAX_FEATURE_LIMIT = 500;
     private static final int DEFAULT_MARKET_LIMIT = 100;
     private static final int MAX_MARKET_LIMIT = 500;
+    private static final int HTTP_WORKER_THREADS = 8;
+    private static final int QUOTE_UPDATE_MAX_WAITERS = 4;
     private static final long DEFAULT_QUOTE_UPDATE_TIMEOUT_MS = 15_000L;
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
     private static final Set<String> STATIC_ASSETS = Set.of("index.html", "app.js", "styles.css");
@@ -57,8 +62,12 @@ public class FrontendAdapterServer {
     private final LongAdder quoteUpdateChanged = new LongAdder();
     private final LongAdder quoteUpdateTimeouts = new LongAdder();
     private final LongAdder quoteUpdateClientDisconnects = new LongAdder();
+    private final LongAdder quoteUpdateRejected = new LongAdder();
+    private final AtomicLong quoteUpdateActiveWaits = new AtomicLong();
+    private final Semaphore quoteUpdateWaitSlots = new Semaphore(QUOTE_UPDATE_MAX_WAITERS);
     private final long startedAtMs = System.currentTimeMillis();
     private HttpServer httpServer;
+    private ExecutorService httpExecutor;
 
     public FrontendAdapterServer(
         FrontendAdapterConfig config,
@@ -110,7 +119,11 @@ public class FrontendAdapterServer {
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
         bind("/", this::handleStaticAsset);
-        httpServer.setExecutor(Executors.newFixedThreadPool(4));
+        httpExecutor = Executors.newFixedThreadPool(
+            HTTP_WORKER_THREADS,
+            daemonThreadFactory("frontend-adapter-http")
+        );
+        httpServer.setExecutor(httpExecutor);
         httpServer.start();
     }
 
@@ -122,6 +135,10 @@ public class FrontendAdapterServer {
         if (httpServer != null) {
             httpServer.stop(1);
             httpServer = null;
+        }
+        if (httpExecutor != null) {
+            httpExecutor.shutdownNow();
+            httpExecutor = null;
         }
     }
 
@@ -320,12 +337,21 @@ public class FrontendAdapterServer {
         long sequence = store.sequence();
         boolean changed = sequence > after;
         if (afterProvided && !changed) {
+            if (!quoteUpdateWaitSlots.tryAcquire()) {
+                quoteUpdateRejected.increment();
+                writeError(exchange, 429, "too many pending quote update requests");
+                return;
+            }
+            quoteUpdateActiveWaits.incrementAndGet();
             try {
                 sequence = store.waitForSequenceAfter(after, timeoutMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 writeError(exchange, 503, "interrupted while waiting for quote updates");
                 return;
+            } finally {
+                quoteUpdateActiveWaits.decrementAndGet();
+                quoteUpdateWaitSlots.release();
             }
             changed = sequence > after;
         }
@@ -450,6 +476,9 @@ public class FrontendAdapterServer {
         quoteUpdatesView.put("changed", quoteUpdateChanged.sum());
         quoteUpdatesView.put("timeouts", quoteUpdateTimeouts.sum());
         quoteUpdatesView.put("client_disconnects", quoteUpdateClientDisconnects.sum());
+        quoteUpdatesView.put("rejected", quoteUpdateRejected.sum());
+        quoteUpdatesView.put("active_waits", quoteUpdateActiveWaits.get());
+        quoteUpdatesView.put("max_waits", QUOTE_UPDATE_MAX_WAITERS);
         health.put("quote_updates", quoteUpdatesView);
         Map<String, Object> metadataView = new LinkedHashMap<>();
         metadataView.put("source", metadataCatalog.source());
@@ -485,6 +514,12 @@ public class FrontendAdapterServer {
             .append('\n');
         body.append("frontend_adapter_quote_update_client_disconnects_total ")
             .append(quoteUpdateClientDisconnects.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_update_rejected_total ")
+            .append(quoteUpdateRejected.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_update_active ")
+            .append(quoteUpdateActiveWaits.get())
             .append('\n');
         requestCounters.forEach((path, counter) -> body
             .append("frontend_adapter_http_requests_total{path=\"")
@@ -720,6 +755,15 @@ public class FrontendAdapterServer {
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
             .replace("\n", "\\n");
+    }
+
+    private static ThreadFactory daemonThreadFactory(String prefix) {
+        AtomicLong sequence = new AtomicLong();
+        return runnable -> {
+            Thread thread = new Thread(runnable, prefix + "-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 
     private void applyCors(HttpExchange exchange) {
