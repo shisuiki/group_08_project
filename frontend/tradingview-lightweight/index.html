@@ -43,6 +43,7 @@
             <button id="viewer-tab" type="button" data-role="viewer" data-target="market-panel" role="tab" aria-selected="true">Viewer</button>
             <button id="trader-tab" type="button" data-role="trader" data-target="trader-monitor-panel" role="tab" aria-selected="false">Trader</button>
             <button id="research-tab" type="button" data-role="research" data-target="research-features-panel" role="tab" aria-selected="false">Research</button>
+            <button id="semantic-tab" type="button" data-role="semantic" data-target="semantic-map-panel" role="tab" aria-selected="false">Semantic</button>
             <button id="operator-tab" type="button" data-role="operator" data-target="runtime-operator-panel" role="tab" aria-selected="false">Operator</button>
         </nav>
     </header>
@@ -177,6 +178,56 @@
                 </div>
                 <a id="research-export-link" class="export-link" href="#" download="feature-outputs.csv">CSV ready</a>
                 <div id="feature-list" class="feature-list"></div>
+            </section>
+
+            <section id="semantic-map-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Semantic Map</h2>
+                    <span id="semantic-map-count">0</span>
+                </div>
+                <div class="semantic-controls">
+                    <label class="compact-field">
+                        Group
+                        <select id="semantic-group-by" aria-label="Semantic map grouping">
+                            <option value="sector">Sector</option>
+                            <option value="subsector">Subsector</option>
+                            <option value="event_type">Event type</option>
+                            <option value="tag">Tag</option>
+                        </select>
+                    </label>
+                    <label class="compact-field">
+                        Status
+                        <select id="semantic-status-filter" aria-label="Semantic metadata status">
+                            <option value="">Any status</option>
+                            <option value="generated">Generated</option>
+                            <option value="review_required">Review</option>
+                            <option value="failed">Failed</option>
+                            <option value="rate_limited">Rate limited</option>
+                        </select>
+                    </label>
+                    <label class="compact-field">
+                        Limit
+                        <input id="semantic-limit" type="number" min="1" max="500" value="200" />
+                    </label>
+                    <label class="compact-field">
+                        Tag
+                        <input id="semantic-tag-filter" type="search" autocomplete="off" />
+                    </label>
+                    <label class="compact-field semantic-search-field">
+                        Search
+                        <input id="semantic-search" type="search" autocomplete="off" />
+                    </label>
+                    <button id="semantic-refresh" type="button">Refresh</button>
+                </div>
+                <div id="semantic-map-state" class="semantic-map-state">Loading semantic metadata...</div>
+                <div id="semantic-group-summary" class="semantic-group-summary"></div>
+                <div id="semantic-treemap" class="semantic-treemap" aria-label="semantic metadata treemap"></div>
+                <dl id="semantic-market-detail" class="semantic-market-detail">
+                    <dt>Market</dt><dd id="semantic-detail-market">-</dd>
+                    <dt>Group</dt><dd id="semantic-detail-group">-</dd>
+                    <dt>Confidence</dt><dd id="semantic-detail-confidence">-</dd>
+                    <dt>Quote</dt><dd id="semantic-detail-quote">-</dd>
+                </dl>
             </section>
 
             <section class="panel">

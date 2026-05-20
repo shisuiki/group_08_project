@@ -9,8 +9,15 @@
     const HEALTH_POLL_MS = 5000;
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
     const MARKET_CATALOG_LIMIT = 200;
+    const SEMANTIC_MAP_DEFAULT_LIMIT = 200;
+    const SEMANTIC_MAP_MAX_LIMIT = 500;
+    const SEMANTIC_SEARCH_DEBOUNCE_MS = 300;
     const OPERATOR_LATENCY_BUDGET_MS = 30000;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
+    const COMPACT_NUMBER_FORMAT = new Intl.NumberFormat(undefined, {
+        notation: 'compact',
+        maximumFractionDigits: 1
+    });
 
     const dom = {
         adapterUrl: document.getElementById('adapter-url'),
@@ -53,6 +60,21 @@
         researchExportLink: document.getElementById('research-export-link'),
         featureCount: document.getElementById('feature-count'),
         featureList: document.getElementById('feature-list'),
+        semanticTab: document.getElementById('semantic-tab'),
+        semanticMapCount: document.getElementById('semantic-map-count'),
+        semanticGroupBy: document.getElementById('semantic-group-by'),
+        semanticStatusFilter: document.getElementById('semantic-status-filter'),
+        semanticLimit: document.getElementById('semantic-limit'),
+        semanticTagFilter: document.getElementById('semantic-tag-filter'),
+        semanticSearch: document.getElementById('semantic-search'),
+        semanticRefresh: document.getElementById('semantic-refresh'),
+        semanticMapState: document.getElementById('semantic-map-state'),
+        semanticGroupSummary: document.getElementById('semantic-group-summary'),
+        semanticTreemap: document.getElementById('semantic-treemap'),
+        semanticDetailMarket: document.getElementById('semantic-detail-market'),
+        semanticDetailGroup: document.getElementById('semantic-detail-group'),
+        semanticDetailConfidence: document.getElementById('semantic-detail-confidence'),
+        semanticDetailQuote: document.getElementById('semantic-detail-quote'),
         adapterHealth: document.getElementById('adapter-health'),
         releaseIdentity: document.getElementById('release-identity'),
         healthDataAge: document.getElementById('health-data-age'),
@@ -177,6 +199,8 @@
     let quoteUpdateErrors = 0;
     let marketEntries = [];
     let marketSearchTimer = null;
+    let semanticSearchTimer = null;
+    let semanticMapGeneration = 0;
     let lastHealthBody = null;
     let lastOpsPipeline = null;
     let lastOpsLatency = null;
@@ -522,6 +546,344 @@
     function escapeCsv(value) {
         const text = value == null ? '' : String(value);
         return `"${text.replaceAll('"', '""')}"`;
+    }
+
+    async function loadSemanticMap() {
+        const generation = ++semanticMapGeneration;
+        const base = adapterBase();
+        const params = semanticMapParams();
+        dom.semanticMapState.textContent = 'Loading semantic metadata...';
+        dom.semanticMapState.className = 'semantic-map-state';
+        dom.semanticTreemap.innerHTML = '';
+        try {
+            const body = await fetchJsonFromBase(base, `/api/semantic-metadata/treemap?${params.join('&')}`);
+            if (generation !== semanticMapGeneration || base !== adapterBase()) {
+                return;
+            }
+            renderSemanticMap(body);
+        } catch (err) {
+            if (generation !== semanticMapGeneration || base !== adapterBase()) {
+                return;
+            }
+            renderSemanticMapError(err.message);
+        }
+    }
+
+    function semanticMapParams() {
+        const limit = Math.max(
+            1,
+            Math.min(SEMANTIC_MAP_MAX_LIMIT, Number(dom.semanticLimit.value || SEMANTIC_MAP_DEFAULT_LIMIT) || 1)
+        );
+        dom.semanticLimit.value = String(limit);
+        const params = [
+            `group_by=${encodeURIComponent(dom.semanticGroupBy.value || 'sector')}`,
+            `limit=${limit}`
+        ];
+        const status = dom.semanticStatusFilter.value.trim();
+        const tag = dom.semanticTagFilter.value.trim();
+        const search = dom.semanticSearch.value.trim();
+        if (status) {
+            params.push(`status=${encodeURIComponent(status)}`);
+        }
+        if (tag) {
+            params.push(`tag=${encodeURIComponent(tag)}`);
+        }
+        if (search) {
+            params.push(`q=${encodeURIComponent(search)}`);
+        }
+        return params;
+    }
+
+    function renderSemanticMap(body) {
+        const groups = Array.isArray(body?.groups) ? body.groups : [];
+        const leaves = semanticLeaves(groups);
+        dom.semanticMapCount.textContent = String(body?.count ?? leaves.length);
+        dom.semanticTreemap.innerHTML = '';
+        dom.semanticGroupSummary.innerHTML = '';
+        if (body?.status === 'disabled') {
+            dom.semanticMapState.textContent = 'Semantic metadata disabled';
+            renderSemanticDetail(null);
+            return;
+        }
+        if (body?.status === 'unavailable') {
+            dom.semanticMapState.textContent = `Semantic metadata unavailable: ${body.error || 'unknown'}`;
+            dom.semanticMapState.className = 'semantic-map-state stale';
+            renderSemanticDetail(null);
+            return;
+        }
+        if (leaves.length === 0) {
+            dom.semanticMapState.textContent = 'No semantic metadata rows';
+            renderSemanticDetail(null);
+            return;
+        }
+        dom.semanticMapState.textContent =
+            `${leaves.length} market(s) grouped by ${body.group_by || dom.semanticGroupBy.value || 'sector'}`;
+        renderSemanticGroupSummary(groups);
+        for (const rect of layoutSemanticTreemap(groups)) {
+            const tile = document.createElement('button');
+            tile.type = 'button';
+            tile.className = `semantic-tile semantic-${semanticStatusClass(rect.leaf.semantic_status)}`;
+            tile.dataset.market = rect.leaf.market_ticker || '';
+            tile.style.left = `${rect.x}%`;
+            tile.style.top = `${rect.y}%`;
+            tile.style.width = `${rect.width}%`;
+            tile.style.height = `${rect.height}%`;
+            tile.style.background = semanticTileColor(rect.leaf);
+            tile.innerHTML =
+                `<strong>${escapeHtml(rect.leaf.market_ticker || '-')}</strong>` +
+                `<span>${escapeHtml(rect.leaf.label || rect.leaf.market_ticker || '-')}</span>` +
+                `<small>${escapeHtml(rect.groupKey)} / ${escapeHtml(confidenceText(rect.leaf.metadata_confidence))}</small>` +
+                `<em>${escapeHtml(semanticQuoteText(rect.leaf.quote))}</em>`;
+            tile.addEventListener('click', () => selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey));
+            dom.semanticTreemap.appendChild(tile);
+        }
+        const first = leaves[0];
+        if (first) {
+            renderSemanticDetailFromLeaf(first);
+        }
+    }
+
+    function semanticLeaves(groups) {
+        const leaves = [];
+        for (const group of groups) {
+            for (const leaf of Array.isArray(group.leaves) ? group.leaves : []) {
+                leaves.push(Object.assign({ group_key: group.key || 'unknown' }, leaf));
+            }
+        }
+        return leaves;
+    }
+
+    function renderSemanticGroupSummary(groups) {
+        const ordered = groups.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0)).slice(0, 6);
+        for (const group of ordered) {
+            const chip = document.createElement('div');
+            chip.className = 'semantic-group-chip';
+            chip.innerHTML =
+                `<strong>${escapeHtml(group.label || group.key || 'unknown')}</strong>` +
+                `<span>${Number(group.count || 0)} / ${formatCompactNumber(group.value || 0)}</span>`;
+            dom.semanticGroupSummary.appendChild(chip);
+        }
+    }
+
+    function layoutSemanticTreemap(groups) {
+        const sourceGroups = groups
+            .map(group => ({
+                key: group.key || 'unknown',
+                value: Math.max(1, Number(group.value || 0)),
+                leaves: (Array.isArray(group.leaves) ? group.leaves : [])
+                    .filter(leaf => leaf && leaf.market_ticker)
+                    .map(leaf => Object.assign({}, leaf, {
+                        value: Math.max(1, Number(leaf.value || 0))
+                    }))
+            }))
+            .filter(group => group.leaves.length > 0);
+        const groupRects = sliceDice(
+            sourceGroups.map(group => ({ item: group, value: group.value })),
+            { x: 0, y: 0, width: 100, height: 100 },
+            true
+        );
+        const rects = [];
+        for (const groupRect of groupRects) {
+            const group = groupRect.item;
+            const leafRects = sliceDice(
+                group.leaves.map(leaf => ({ item: leaf, value: leaf.value })),
+                insetRect(groupRect, 0.25),
+                groupRect.height > groupRect.width
+            );
+            for (const leafRect of leafRects) {
+                rects.push({
+                    groupKey: group.key,
+                    leaf: leafRect.item,
+                    x: leafRect.x,
+                    y: leafRect.y,
+                    width: leafRect.width,
+                    height: leafRect.height
+                });
+            }
+        }
+        return rects;
+    }
+
+    function sliceDice(items, rect, horizontal) {
+        if (items.length === 0) {
+            return [];
+        }
+        const total = items.reduce((sum, item) => sum + Math.max(1, Number(item.value || 0)), 0);
+        let cursor = horizontal ? rect.x : rect.y;
+        const output = [];
+        for (let index = 0; index < items.length; index++) {
+            const item = items[index];
+            const remaining = horizontal
+                ? rect.x + rect.width - cursor
+                : rect.y + rect.height - cursor;
+            const size = index === items.length - 1
+                ? Math.max(0, remaining)
+                : (horizontal ? rect.width : rect.height) * (Math.max(1, Number(item.value || 0)) / total);
+            const next = horizontal
+                ? { item: item.item, x: cursor, y: rect.y, width: size, height: rect.height }
+                : { item: item.item, x: rect.x, y: cursor, width: rect.width, height: size };
+            output.push(next);
+            cursor += size;
+        }
+        return output;
+    }
+
+    function insetRect(rect, padding) {
+        const xPadding = Math.min(padding, rect.width / 4);
+        const yPadding = Math.min(padding, rect.height / 4);
+        return {
+            x: rect.x + xPadding,
+            y: rect.y + yPadding,
+            width: Math.max(0, rect.width - xPadding * 2),
+            height: Math.max(0, rect.height - yPadding * 2)
+        };
+    }
+
+    async function selectSemanticMarket(marketTicker, groupKey) {
+        if (!marketTicker) {
+            return;
+        }
+        ensureSymbolOption(marketTicker);
+        dom.symbolSelect.value = marketTicker;
+        renderSemanticDetail({ market: marketTicker, group: groupKey });
+        onSelectedSymbolChanged();
+        await loadSemanticMarketDetails(marketTicker, groupKey);
+    }
+
+    function ensureSymbolOption(symbol) {
+        if (!Array.from(dom.symbolSelect.options).some(option => option.value === symbol)) {
+            const opt = document.createElement('option');
+            opt.value = symbol;
+            opt.textContent = symbol;
+            dom.symbolSelect.appendChild(opt);
+        }
+    }
+
+    async function loadSemanticMarketDetails(marketTicker, groupKey) {
+        const base = adapterBase();
+        const params = [
+            `market_ticker=${encodeURIComponent(marketTicker)}`,
+            'limit=1'
+        ];
+        const status = dom.semanticStatusFilter.value.trim();
+        if (status) {
+            params.push(`status=${encodeURIComponent(status)}`);
+        }
+        try {
+            const body = await fetchJsonFromBase(base, `/api/semantic-metadata/markets?${params.join('&')}`);
+            if (marketTicker !== dom.symbolSelect.value || base !== adapterBase()) {
+                return;
+            }
+            const row = Array.isArray(body.markets) ? body.markets[0] : null;
+            renderSemanticDetailFromMarket(row, groupKey);
+        } catch (err) {
+            if (marketTicker !== dom.symbolSelect.value || base !== adapterBase()) {
+                return;
+            }
+            dom.semanticDetailMarket.textContent = marketTicker;
+            dom.semanticDetailGroup.textContent = groupKey || '-';
+            dom.semanticDetailConfidence.textContent = `unavailable: ${err.message}`;
+            dom.semanticDetailQuote.textContent = '-';
+        }
+    }
+
+    function renderSemanticDetailFromLeaf(leaf) {
+        renderSemanticDetail({
+            market: leaf.market_ticker,
+            group: leaf.group_key || '-',
+            confidence: confidenceText(leaf.metadata_confidence),
+            quote: semanticQuoteText(leaf.quote)
+        });
+    }
+
+    function renderSemanticDetailFromMarket(row, groupKey) {
+        if (!row) {
+            renderSemanticDetail(null);
+            return;
+        }
+        const metadata = row.semantic_metadata || {};
+        renderSemanticDetail({
+            market: row.market_ticker,
+            group: groupKey || metadata.sector || metadata.event_type || '-',
+            confidence: `${confidenceText(metadata.confidence)} / ${metadata.status || '-'}`,
+            quote: semanticQuoteText(row.quote)
+        });
+    }
+
+    function renderSemanticDetail(detail) {
+        dom.semanticDetailMarket.textContent = detail?.market || '-';
+        dom.semanticDetailGroup.textContent = detail?.group || '-';
+        dom.semanticDetailConfidence.textContent = detail?.confidence || '-';
+        dom.semanticDetailQuote.textContent = detail?.quote || '-';
+    }
+
+    function renderSemanticMapError(message) {
+        dom.semanticMapCount.textContent = '0';
+        dom.semanticMapState.textContent = `Semantic metadata unavailable: ${message}`;
+        dom.semanticMapState.className = 'semantic-map-state stale';
+        dom.semanticGroupSummary.innerHTML = '';
+        dom.semanticTreemap.innerHTML = '<div class="semantic-empty">semantic metadata unavailable</div>';
+        renderSemanticDetail(null);
+    }
+
+    function scheduleSemanticMapLoad() {
+        if (semanticSearchTimer != null) {
+            clearTimeout(semanticSearchTimer);
+        }
+        semanticSearchTimer = setTimeout(() => {
+            semanticSearchTimer = null;
+            loadSemanticMap();
+        }, SEMANTIC_SEARCH_DEBOUNCE_MS);
+    }
+
+    function semanticStatusClass(status) {
+        return String(status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    }
+
+    function semanticTileColor(leaf) {
+        const status = String(leaf.semantic_status || '').toLowerCase();
+        const confidence = Number(leaf.metadata_confidence);
+        const alpha = Number.isFinite(confidence) ? 0.64 + Math.max(0, Math.min(1, confidence)) * 0.24 : 0.58;
+        const stale = leaf.quote && leaf.quote.freshness_status && leaf.quote.freshness_status !== 'available';
+        if (status === 'failed') {
+            return `rgba(142, 63, 63, ${alpha})`;
+        }
+        if (status === 'review_required') {
+            return `rgba(165, 118, 46, ${alpha})`;
+        }
+        if (status === 'rate_limited') {
+            return `rgba(92, 103, 94, ${alpha})`;
+        }
+        if (stale) {
+            return `rgba(101, 105, 84, ${alpha})`;
+        }
+        return `rgba(47, 137, 101, ${alpha})`;
+    }
+
+    function confidenceText(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return 'confidence -';
+        }
+        return `${Math.round(number * 100)}%`;
+    }
+
+    function semanticQuoteText(quote) {
+        if (!quote) {
+            return 'quote -';
+        }
+        const mid = formatMicros(quote.midpoint_micros);
+        const openInterest = quote.open_interest == null ? '-' : formatCompactNumber(quote.open_interest);
+        const age = quote.latest_state_age_ms == null ? '-' : formatAge(Number(quote.latest_state_age_ms));
+        return `mid ${mid} / oi ${openInterest} / ${age}`;
+    }
+
+    function formatCompactNumber(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return '-';
+        }
+        return COMPACT_NUMBER_FORMAT.format(number);
     }
 
     async function loadHistory() {
@@ -1297,6 +1659,9 @@
             width: dom.chartContainer.clientWidth,
             height: dom.chartContainer.clientHeight
         });
+        if (role === 'semantic') {
+            loadSemanticMap();
+        }
     }
 
     dom.refreshSymbols.addEventListener('click', () => {
@@ -1312,6 +1677,12 @@
     dom.researchFeatureLimit.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
     dom.researchFeatureWindow.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
     dom.researchExportCsv.addEventListener('click', exportResearchCsv);
+    dom.semanticGroupBy.addEventListener('change', loadSemanticMap);
+    dom.semanticStatusFilter.addEventListener('change', loadSemanticMap);
+    dom.semanticLimit.addEventListener('change', loadSemanticMap);
+    dom.semanticTagFilter.addEventListener('input', scheduleSemanticMapLoad);
+    dom.semanticSearch.addEventListener('input', scheduleSemanticMapLoad);
+    dom.semanticRefresh.addEventListener('click', loadSemanticMap);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
     for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
         button.addEventListener('click', () => setActiveRole(button.dataset.role));
@@ -1324,6 +1695,7 @@
         loadHealth();
         loadOpsTelemetry();
         loadOperatorStatus();
+        loadSemanticMap();
     });
 
     setInterval(() => {
@@ -1335,5 +1707,6 @@
         loadHealth();
         loadOpsTelemetry();
         loadOperatorStatus();
+        loadSemanticMap();
     });
 })();

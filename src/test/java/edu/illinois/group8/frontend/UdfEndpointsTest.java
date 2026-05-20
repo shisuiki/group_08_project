@@ -317,6 +317,7 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"viewer-tab\""));
         assertTrue(root.body().contains("id=\"trader-tab\""));
         assertTrue(root.body().contains("id=\"research-tab\""));
+        assertTrue(root.body().contains("id=\"semantic-tab\""));
         assertTrue(root.body().contains("id=\"operator-tab\""));
         assertTrue(root.body().contains("id=\"trader-monitor-panel\""));
         assertTrue(root.body().contains("id=\"trader-bid\""));
@@ -324,6 +325,9 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"research-feature-limit\""));
         assertTrue(root.body().contains("id=\"research-feature-window\""));
         assertTrue(root.body().contains("id=\"research-export-csv\""));
+        assertTrue(root.body().contains("id=\"semantic-map-panel\""));
+        assertTrue(root.body().contains("id=\"semantic-group-by\""));
+        assertTrue(root.body().contains("id=\"semantic-treemap\""));
         assertTrue(root.body().contains("id=\"operator-e2e-latency\""));
         assertTrue(root.body().contains("id=\"operator-pipeline-counts\""));
         assertTrue(root.body().contains("Operator Control"));
@@ -377,6 +381,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
         assertTrue(js.body().contains("document.getElementById('trader-bid')"));
         assertTrue(js.body().contains("document.getElementById('research-feature-limit')"));
+        assertTrue(js.body().contains("document.getElementById('semantic-group-by')"));
+        assertTrue(js.body().contains("document.getElementById('semantic-treemap')"));
         assertTrue(js.body().contains("document.getElementById('operator-e2e-latency')"));
         assertTrue(js.body().contains("body.release"));
         assertTrue(js.body().contains("body.data_freshness"));
@@ -385,6 +391,10 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/operator/plan"));
         assertTrue(js.body().contains("/ops/pipeline"));
         assertTrue(js.body().contains("/ops/latency"));
+        assertTrue(js.body().contains("/api/semantic-metadata/treemap?"));
+        assertTrue(js.body().contains("/api/semantic-metadata/markets?"));
+        assertTrue(js.body().contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
+        assertTrue(js.body().contains("layoutSemanticTreemap"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("quote_updates"));
@@ -397,6 +407,7 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("nextSequence < quoteSequence"));
         assertTrue(js.body().contains("window.location.origin"));
         assertTrue(css.body().contains("chart-container"));
+        assertTrue(css.body().contains("semantic-treemap"));
         assertTrue(chart.body().contains("LightweightCharts"));
     }
 

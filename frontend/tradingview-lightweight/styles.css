@@ -346,6 +346,150 @@ main {
     font-size: 12px;
 }
 
+.semantic-controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    align-items: end;
+    margin-bottom: 8px;
+}
+
+.semantic-controls .compact-field {
+    margin-bottom: 0;
+}
+
+.semantic-search-field {
+    grid-column: span 2;
+}
+
+.semantic-controls button {
+    background: #2b6d5d;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    padding: 7px 8px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.semantic-controls button:hover { background: #236052; }
+.semantic-controls button:active { background: #1d5146; }
+
+.semantic-map-state {
+    min-height: 16px;
+    color: #a8b0b7;
+    font-size: 11px;
+    margin-bottom: 8px;
+    overflow-wrap: anywhere;
+}
+
+.semantic-group-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-bottom: 8px;
+}
+
+.semantic-group-chip {
+    min-width: 0;
+    background: #151719;
+    border: 1px solid #30373c;
+    border-radius: 4px;
+    padding: 6px 7px;
+}
+
+.semantic-group-chip strong,
+.semantic-group-chip span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.semantic-group-chip strong {
+    color: #f4f7f9;
+    font-size: 12px;
+}
+
+.semantic-group-chip span {
+    color: #d5a64f;
+    font-size: 11px;
+}
+
+.semantic-treemap {
+    position: relative;
+    min-height: 340px;
+    height: 340px;
+    overflow: hidden;
+    background: #111315;
+    border: 1px solid #30373c;
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+
+.semantic-tile {
+    position: absolute;
+    min-width: 0;
+    border: 1px solid rgba(244, 247, 249, 0.16);
+    border-radius: 4px;
+    color: #f4f7f9;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    gap: 2px;
+    padding: 6px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.semantic-tile:hover,
+.semantic-tile:focus-visible {
+    border-color: #f4f7f9;
+    outline: none;
+}
+
+.semantic-tile strong,
+.semantic-tile span,
+.semantic-tile small,
+.semantic-tile em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.semantic-tile strong,
+.semantic-tile span {
+    white-space: nowrap;
+}
+
+.semantic-tile strong {
+    font-size: 12px;
+}
+
+.semantic-tile span {
+    color: rgba(244, 247, 249, 0.92);
+}
+
+.semantic-tile small,
+.semantic-tile em {
+    color: rgba(244, 247, 249, 0.78);
+    font-style: normal;
+    white-space: nowrap;
+}
+
+.semantic-empty {
+    color: #a8b0b7;
+    font-size: 12px;
+    padding: 10px;
+}
+
+.semantic-market-detail {
+    border-top: 1px solid #30373c;
+    padding-top: 8px;
+}
+
 .operator-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -497,5 +641,19 @@ footer.ok { color: #2fbf71; }
 
     .research-controls {
         grid-template-columns: 1fr;
+    }
+
+    .semantic-controls,
+    .semantic-group-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .semantic-search-field {
+        grid-column: auto;
+    }
+
+    .semantic-treemap {
+        height: 300px;
+        min-height: 300px;
     }
 }
