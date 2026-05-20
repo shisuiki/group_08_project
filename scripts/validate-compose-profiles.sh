@@ -911,7 +911,9 @@ assert_release_gate_defaults_aligned() {
         'frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"' \
         'timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary' \
         'FEATUREPLANT_DB_URL FRONTEND_ADAPTER_DB_URL DB_WRITER_DATABASE_URL' \
-        'DB_PREFLIGHT_DATABASE_URL="$db_url"'; do
+        'DB_PREFLIGHT_DATABASE_URL="$db_url"' \
+        'run_db_preflight_cli "$env_file" "$db_url" "$db_user" "$db_password" "$required"' \
+        'sudo docker run --rm --network "$network"'; do
         if ! grep -Fq -- "$expected" scripts/ec2-compose-rollback-gate.sh; then
             printf 'rollback gate missing db-primary-product behavior: %s\n' "$expected" >&2
             exit 1

@@ -580,6 +580,58 @@ db_preflight_product_value() {
     printf '%s\n' "$value"
 }
 
+compose_service_network() {
+    env_file="$1"
+    service="$2"
+    container_id="$(compose_profile "$env_file" ps -q "$service" 2>/dev/null | sed -n '1p' || true)"
+    if [ -z "$container_id" ]; then
+        return 1
+    fi
+    sudo docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" 2>/dev/null | sed -n '1p'
+}
+
+db_preflight_network() {
+    env_file="$1"
+    db_url="$2"
+    case "$db_url" in
+        jdbc:postgresql://timescaledb:*|postgresql://timescaledb:*)
+            compose_service_network "$env_file" timescaledb
+            ;;
+        *)
+            printf '%s\n' ""
+            ;;
+    esac
+}
+
+run_db_preflight_cli() {
+    env_file="$1"
+    db_url="$2"
+    db_user="$3"
+    db_password="$4"
+    required="$5"
+    app_image="$(compose_app_image "$env_file")"
+    if [ -z "$app_image" ]; then
+        app_image="${KALSHI_APP_IMAGE:-kalshi-project:local}"
+    fi
+    network="$(db_preflight_network "$env_file" "$db_url" || true)"
+
+    if [ -n "$network" ]; then
+        sudo docker run --rm --network "$network" \
+            -e DEPLOY_DB_PREFLIGHT_REQUIRED="$required" \
+            -e DB_PREFLIGHT_DATABASE_URL="$db_url" \
+            -e DB_PREFLIGHT_DATABASE_USER="$db_user" \
+            -e DB_PREFLIGHT_DATABASE_PASSWORD="$db_password" \
+            "$app_image" java -cp /app/app.jar edu.illinois.group8.storage.db.DbReleasePreflightCli
+    else
+        sudo docker run --rm \
+            -e DEPLOY_DB_PREFLIGHT_REQUIRED="$required" \
+            -e DB_PREFLIGHT_DATABASE_URL="$db_url" \
+            -e DB_PREFLIGHT_DATABASE_USER="$db_user" \
+            -e DB_PREFLIGHT_DATABASE_PASSWORD="$db_password" \
+            "$app_image" java -cp /app/app.jar edu.illinois.group8.storage.db.DbReleasePreflightCli
+    fi
+}
+
 local_db_url() {
     env_file="$1"
     db_name="$(env_file_value "$env_file" LOCAL_DB_NAME)"
@@ -786,13 +838,8 @@ run_db_release_preflight() {
     fi
 
     DB_PREFLIGHT_STATUS="running"
-    log "Running DB release preflight with candidate service $service before stopping current services."
-    if ! compose_profile "$env_file" run --rm --no-deps -T \
-        -e DEPLOY_DB_PREFLIGHT_REQUIRED="$required" \
-        -e DB_PREFLIGHT_DATABASE_URL="$db_url" \
-        -e DB_PREFLIGHT_DATABASE_USER="$db_user" \
-        -e DB_PREFLIGHT_DATABASE_PASSWORD="$db_password" \
-        "$service" java -cp /app/app.jar edu.illinois.group8.storage.db.DbReleasePreflightCli; then
+    log "Running DB release preflight with candidate image from service $service before stopping current services."
+    if ! run_db_preflight_cli "$env_file" "$db_url" "$db_user" "$db_password" "$required"; then
         DB_PREFLIGHT_STATUS="failed"
         log "DB release preflight failed."
         return 1

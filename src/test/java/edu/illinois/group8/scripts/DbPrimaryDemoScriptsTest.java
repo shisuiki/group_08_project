@@ -338,6 +338,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("db-primary-product) printf '%s\\n' featureplant-db-follower"));
         assertTrue(script.contains("FEATUREPLANT_DB_URL FRONTEND_ADAPTER_DB_URL DB_WRITER_DATABASE_URL"));
         assertTrue(script.contains("DB_PREFLIGHT_DATABASE_URL=\"$db_url\""));
+        assertTrue(script.contains("run_db_preflight_cli()"));
+        assertTrue(script.contains("sudo docker run --rm --network \"$network\""));
+        assertTrue(script.contains("run_db_preflight_cli \"$env_file\" \"$db_url\" \"$db_user\" \"$db_password\" \"$required\""));
+        assertFalse(script.contains("compose_profile \"$env_file\" run --rm --no-deps -T \\\n        -e DEPLOY_DB_PREFLIGHT_REQUIRED=\"$required\""));
     }
 
     @Test
@@ -367,6 +371,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("compose_profile \"$env_file\" run --rm --no-deps -T db-migrate-live"));
         assertTrue(script.contains("Running live-product-local-db Flyway migration against local Timescale before release preflight."));
         assertTrue(script.contains("compose_profile \"$env_file\" run --rm -T db-migrate"));
+        assertTrue(script.contains("Running DB release preflight with candidate image from service $service before stopping current services."));
+        assertTrue(script.contains("db_preflight_network()"));
+        assertTrue(script.contains("compose_service_network \"$env_file\" timescaledb"));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
         assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
         assertTrue(script.contains("live-product semantic smoke must be enabled before recording a live-product deploy success."));
