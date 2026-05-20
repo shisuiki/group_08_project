@@ -170,6 +170,9 @@ STATE_EXPR = r"""
     runtimeOperatorPanel: !!document.getElementById('runtime-operator-panel'),
     latencyFreshnessPanel: !!document.getElementById('latency-freshness-panel'),
     operatorPlanPanel: !!document.getElementById('operator-plan-panel'),
+    operatorControlState: text('operator-control-enabled'),
+    operatorProfileSelector: !!document.getElementById('operator-deploy-profile'),
+    operatorGeneratePlan: !!document.getElementById('operator-generate-plan'),
     operatorPlanOutput: text('operator-env-plan'),
     noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
     quoteFeedVisible: /(SSE (connected|snapshot|changed)|long-poll (changed|timeout|fallback)|fallback polling)/.test(quoteStatus) ||
@@ -244,7 +247,9 @@ def wait_for_state(cdp, timeout_seconds):
             and last.get("runtimeOperatorPanel")
             and last.get("latencyFreshnessPanel")
             and last.get("operatorPlanPanel")
-            and last.get("operatorPlanOutput") not in ("", "-")
+            and last.get("operatorControlState") not in ("", "-")
+            and last.get("operatorProfileSelector")
+            and last.get("operatorGeneratePlan")
             and last.get("noHorizontalOverflow")
             and last.get("freshnessState") in ("waiting", "fresh", "stale")
             and last.get("quoteFeedVisible")
