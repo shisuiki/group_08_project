@@ -1,0 +1,341 @@
+package edu.illinois.group8.storage.db;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import edu.illinois.group8.canonical.JsonCanonicalSerializer;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.util.List;
+import java.util.Objects;
+
+public final class LiveProductSmokeDbProbe {
+    static final String CURSOR_COMMIT_SEQ_SQL = """
+        select coalesce((
+            select last_commit_seq
+            from featureplant_cursors
+            where cursor_name = ?
+        ), 0)
+        """;
+    static final String MAX_CANONICAL_COMMIT_SEQ_SQL = """
+        select coalesce(max(canonical_commit_seq), 0)
+        from canonical_events
+        """;
+    static final String FEATURE_OUTPUTS_FOR_PREFIX_SQL = """
+        select count(*)
+        from feature_outputs
+        where source_event_id like ?
+        """;
+    static final String RECENT_NON_SMOKE_CANONICAL_EVENTS_SQL = """
+        select count(*)
+        from canonical_events
+        where event_id not like 'live-product-smoke-%'
+          and created_at >= now() - interval '15 minutes'
+        """;
+    static final String UPSERT_MARKET_METADATA_SQL = """
+        insert into market_metadata (
+            market_ticker,
+            event_ticker,
+            series_ticker,
+            status,
+            market_payload
+        ) values (?, ?, ?, ?, ?::jsonb)
+        on conflict (market_ticker) do update set
+            updated_at = now(),
+            market_payload = excluded.market_payload
+        """;
+    static final String INSERT_CANONICAL_EVENT_SQL = """
+        insert into canonical_events (
+            event_id,
+            raw_event_id,
+            replay_id,
+            stream_name,
+            event_type,
+            schema_version,
+            market_ticker,
+            event_ts_ms,
+            ingest_ts_ns,
+            publish_ts_ns,
+            payload
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+        on conflict do nothing
+        returning canonical_commit_seq
+        """;
+
+    private static final String SMOKE_SOURCE = "live_product_smoke";
+    private static final String EVENT_TICKER = "LIVE-PRODUCT-SMOKE";
+    private static final String SERIES_TICKER = "LIVE-PRODUCT-SMOKE";
+
+    private final JdbcConnectionFactory connectionFactory;
+    private final ObjectMapper mapper;
+    private final LongSupplier eventClockMs;
+
+    public LiveProductSmokeDbProbe(JdbcConnectionFactory connectionFactory) {
+        this(connectionFactory, new JsonCanonicalSerializer().mapper(), System::currentTimeMillis);
+    }
+
+    LiveProductSmokeDbProbe(JdbcConnectionFactory connectionFactory, ObjectMapper mapper, LongSupplier eventClockMs) {
+        this.connectionFactory = Objects.requireNonNull(connectionFactory, "connectionFactory");
+        this.mapper = Objects.requireNonNull(mapper, "mapper");
+        this.eventClockMs = Objects.requireNonNull(eventClockMs, "eventClockMs");
+    }
+
+    public long cursorCommitSeq(String cursorName) {
+        String normalizedCursorName = normalize(cursorName, "cursorName");
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(CURSOR_COMMIT_SEQ_SQL)) {
+            statement.setString(1, normalizedCursorName);
+            return singleLong(statement, "featureplant cursor");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read featureplant cursor", e);
+        }
+    }
+
+    public long maxCanonicalCommitSeq() {
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(MAX_CANONICAL_COMMIT_SEQ_SQL)) {
+            return singleLong(statement, "max canonical commit sequence");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read max canonical commit sequence", e);
+        }
+    }
+
+    public SeedResult seedCanonicalEvents(String runId, String marketTicker, String prefix) {
+        String normalizedRunId = normalize(runId, "runId");
+        String normalizedMarketTicker = normalize(marketTicker, "marketTicker");
+        String normalizedPrefix = normalize(prefix, "prefix");
+        long baseTsMs = eventClockMs.getAsLong();
+        List<SeedEvent> events = List.of(
+            bboEvent(normalizedRunId, normalizedMarketTicker, normalizedPrefix, baseTsMs + 1),
+            tickerEvent(normalizedRunId, normalizedMarketTicker, normalizedPrefix, baseTsMs + 2),
+            tradeEvent(normalizedRunId, normalizedMarketTicker, normalizedPrefix, baseTsMs + 3)
+        );
+
+        try (Connection connection = connectionFactory.openConnection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            Exception failure = null;
+            try {
+                upsertMarketMetadata(connection, normalizedRunId, normalizedMarketTicker);
+                SeedResult result = insertCanonicalEvents(connection, events);
+                connection.commit();
+                return result;
+            } catch (Exception e) {
+                failure = e;
+                rollback(connection, e);
+                throw e;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException e) {
+                    if (failure == null) {
+                        throw e;
+                    }
+                    failure.addSuppressed(e);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to seed live-product smoke canonical events", e);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to seed live-product smoke canonical events", e);
+        }
+    }
+
+    public FeatureOutputProgress featureOutputsForPrefix(String prefix, String cursorName) {
+        String normalizedPrefix = normalize(prefix, "prefix");
+        long outputCount;
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(FEATURE_OUTPUTS_FOR_PREFIX_SQL)) {
+            statement.setString(1, normalizedPrefix + "-%");
+            outputCount = singleLong(statement, "feature output count");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count feature outputs", e);
+        }
+        return new FeatureOutputProgress(outputCount, cursorCommitSeq(cursorName));
+    }
+
+    public long recentNonSmokeCanonicalEvents() {
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(RECENT_NON_SMOKE_CANONICAL_EVENTS_SQL)) {
+            return singleLong(statement, "recent non-smoke canonical event count");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count recent non-smoke canonical events", e);
+        }
+    }
+
+    private void upsertMarketMetadata(Connection connection, String runId, String marketTicker) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(UPSERT_MARKET_METADATA_SQL)) {
+            ObjectNode payload = mapper.createObjectNode();
+            payload.put("market_ticker", marketTicker);
+            payload.put("event_ticker", EVENT_TICKER);
+            payload.put("series_ticker", SERIES_TICKER);
+            payload.put("status", "open");
+            payload.put("smoke_run_id", runId);
+            statement.setString(1, marketTicker);
+            statement.setString(2, EVENT_TICKER);
+            statement.setString(3, SERIES_TICKER);
+            statement.setString(4, "open");
+            statement.setString(5, toJson(payload));
+            statement.executeUpdate();
+        }
+    }
+
+    private SeedResult insertCanonicalEvents(Connection connection, List<SeedEvent> events) throws SQLException {
+        long inserted = 0;
+        long maxCommitSeq = 0;
+        try (PreparedStatement statement = connection.prepareStatement(INSERT_CANONICAL_EVENT_SQL)) {
+            for (SeedEvent event : events) {
+                statement.setString(1, event.eventId());
+                statement.setNull(2, Types.VARCHAR);
+                statement.setNull(3, Types.VARCHAR);
+                statement.setString(4, event.streamName());
+                statement.setString(5, event.eventType());
+                statement.setInt(6, 1);
+                statement.setString(7, event.marketTicker());
+                statement.setLong(8, event.eventTsMs());
+                statement.setNull(9, Types.BIGINT);
+                statement.setNull(10, Types.BIGINT);
+                statement.setString(11, event.payload());
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        inserted++;
+                        maxCommitSeq = Math.max(maxCommitSeq, resultSet.getLong(1));
+                    }
+                }
+            }
+        }
+        return new SeedResult(inserted, maxCommitSeq);
+    }
+
+    private SeedEvent bboEvent(String runId, String marketTicker, String prefix, long eventTsMs) {
+        ObjectNode payload = basePayload(prefix + "-bbo-001", "top_of_book_update", "derived.top_of_book",
+            marketTicker, eventTsMs, runId);
+        payload.put("bid_price_micros", 451_000);
+        payload.put("ask_price_micros", 472_000);
+        payload.put("bid_quantity_micros", 1_200_000);
+        payload.put("ask_quantity_micros", 1_000_000);
+        payload.put("crossed", false);
+        return new SeedEvent(
+            prefix + "-bbo-001",
+            "derived.top_of_book",
+            "top_of_book_update",
+            marketTicker,
+            eventTsMs,
+            toJson(payload)
+        );
+    }
+
+    private SeedEvent tickerEvent(String runId, String marketTicker, String prefix, long eventTsMs) {
+        ObjectNode payload = basePayload(prefix + "-ticker-001", "ticker_update", "canonical.ticker",
+            marketTicker, eventTsMs, runId);
+        payload.put("price_micros", 462_000);
+        payload.put("yes_bid_micros", 451_000);
+        payload.put("yes_ask_micros", 472_000);
+        payload.put("volume_micros", 31_000_000);
+        return new SeedEvent(
+            prefix + "-ticker-001",
+            "canonical.ticker",
+            "ticker_update",
+            marketTicker,
+            eventTsMs,
+            toJson(payload)
+        );
+    }
+
+    private SeedEvent tradeEvent(String runId, String marketTicker, String prefix, long eventTsMs) {
+        ObjectNode payload = basePayload(prefix + "-trade-001", "market_trade", "canonical.trade",
+            marketTicker, eventTsMs, runId);
+        payload.put("trade_id", prefix + "-trade-001");
+        payload.put("yes_price_micros", 462_000);
+        payload.put("no_price_micros", 538_000);
+        payload.put("quantity_micros", 2_100_000);
+        payload.put("taker_side", "yes");
+        return new SeedEvent(
+            prefix + "-trade-001",
+            "canonical.trade",
+            "market_trade",
+            marketTicker,
+            eventTsMs,
+            toJson(payload)
+        );
+    }
+
+    private ObjectNode basePayload(
+        String eventId,
+        String eventType,
+        String streamName,
+        String marketTicker,
+        long eventTsMs,
+        String runId
+    ) {
+        ObjectNode payload = mapper.createObjectNode();
+        payload.put("event_id", eventId);
+        payload.put("event_type", eventType);
+        payload.put("schema_version", 1);
+        payload.put("stream_name", streamName);
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("source", SMOKE_SOURCE);
+        metadata.put("market_ticker", marketTicker);
+        metadata.put("event_ts_ms", eventTsMs);
+        payload.put("smoke_run_id", runId);
+        return payload;
+    }
+
+    private String toJson(ObjectNode payload) {
+        try {
+            return mapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialize smoke payload", e);
+        }
+    }
+
+    private static long singleLong(PreparedStatement statement, String label) throws SQLException {
+        try (ResultSet resultSet = statement.executeQuery()) {
+            if (!resultSet.next()) {
+                throw new IllegalStateException(label + " query returned no rows");
+            }
+            return resultSet.getLong(1);
+        }
+    }
+
+    private static void rollback(Connection connection, Exception cause) {
+        try {
+            connection.rollback();
+        } catch (SQLException rollbackException) {
+            cause.addSuppressed(rollbackException);
+        }
+    }
+
+    private static String normalize(String value, String label) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(label + " must be non-blank");
+        }
+        return value.trim();
+    }
+
+    public record SeedResult(long seededCount, long targetCommitSeq) {
+    }
+
+    public record FeatureOutputProgress(long featureOutputCount, long cursorCommitSeq) {
+    }
+
+    private record SeedEvent(
+        String eventId,
+        String streamName,
+        String eventType,
+        String marketTicker,
+        long eventTsMs,
+        String payload
+    ) {
+    }
+
+    @FunctionalInterface
+    interface LongSupplier {
+        long getAsLong();
+    }
+}

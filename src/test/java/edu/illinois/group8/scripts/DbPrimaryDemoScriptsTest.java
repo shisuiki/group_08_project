@@ -101,6 +101,7 @@ class DbPrimaryDemoScriptsTest {
     @Test
     void liveProductSmokeAssumesRunningStackAndChecksFeatureOutputsPath() throws Exception {
         String script = read("scripts/live-product-smoke.sh");
+        String probe = read("src/main/java/edu/illinois/group8/storage/db/LiveProductSmokeDbProbe.java");
 
         assertTrue(script.contains("COMPOSE_PROFILE=\"${COMPOSE_PROFILE:-live-product}\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=\"${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}\""));
@@ -115,11 +116,23 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FRONTEND_HEALTH_URL"));
         assertTrue(script.contains("FRONTEND_NO_PROXY=\"${FRONTEND_NO_PROXY:-127.0.0.1,localhost}\""));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
-        assertTrue(script.contains("insert into canonical_events"));
-        assertTrue(script.contains("on conflict do nothing"));
-        assertTrue(script.contains("featureplant_cursors"));
-        assertTrue(script.contains("feature_outputs"));
-        assertTrue(script.contains("source_event_id like"));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DB_URL"));
+        assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
+        assertTrue(script.contains("FEATUREPLANT_DB_URL"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_DB_URL"));
+        assertTrue(script.contains("LiveProductSmokeDbProbeCli"));
+        assertTrue(script.contains("db_probe_output=\"$tmpdir/db-probe.out\""));
+        assertTrue(script.contains("if ! compose run --rm --no-deps -T"));
+        assertTrue(script.contains("tr -d '\\r' < \"$db_probe_output\""));
+        assertTrue(script.contains("cursorCommitSeq"));
+        assertTrue(script.contains("seedCanonicalEvents"));
+        assertTrue(script.contains("featureOutputsForPrefix"));
+        assertTrue(script.contains("recentNonSmokeCanonicalEvents"));
+        assertTrue(probe.contains("insert into canonical_events"));
+        assertTrue(probe.contains("on conflict do nothing"));
+        assertTrue(probe.contains("featureplant_cursors"));
+        assertTrue(probe.contains("feature_outputs"));
+        assertTrue(probe.contains("source_event_id like ?"));
         assertTrue(script.contains("if [ \"$cursor_before\" -gt \"$max_commit_before\" ]; then"));
         assertTrue(script.contains("if [ \"$seeded_count\" -ne 3 ] || [ \"$target_commit_seq\" -le \"$cursor_before\" ]; then"));
         assertTrue(script.contains("wait_featureplant_followed_seed \"$seed_prefix\" \"$target_commit_seq\""));
@@ -128,7 +141,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("wait_frontend_feature_output \"$market_ticker\" \"$bbo_event_id\""));
         assertTrue(script.contains("wait_frontend_quote \"$market_ticker\""));
         assertTrue(script.contains("check_optional_live_data"));
-        assertTrue(script.contains("event_id not like 'live-product-smoke-%'"));
+        assertTrue(probe.contains("event_id not like 'live-product-smoke-%'"));
         assertTrue(script.contains("/features?symbol=${encoded_market}&feature=${encoded_feature}&limit=20"));
         assertTrue(script.contains("/quotes?symbols=${encoded_market}"));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"));
@@ -138,11 +151,14 @@ class DbPrimaryDemoScriptsTest {
         assertFalse(script.contains("compose up"));
         assertFalse(script.contains("compose stop"));
         assertFalse(script.contains("compose rm"));
-        assertFalse(script.contains("compose run"));
         assertFalse(script.contains("docker compose up"));
         assertFalse(script.contains("docker compose stop"));
         assertFalse(script.contains("docker compose rm"));
         assertFalse(script.contains("docker compose run"));
+        assertFalse(script.contains("psql_scalar()"));
+        assertFalse(script.contains("compose exec -T -e PGPASSWORD"));
+        assertFalse(script.contains("LOCAL_DB_NAME"));
+        assertFalse(script.contains("timescaledb"));
     }
 
     @Test
@@ -167,7 +183,7 @@ class DbPrimaryDemoScriptsTest {
         String script = read("scripts/ec2-compose-rollback-gate.sh");
 
         assertTrue(script.contains("--profile live-product"));
-        assertTrue(script.contains("timescaledb db-migrate node0 node1 node2 wsclient streamtap"));
+        assertTrue(script.contains("node0 node1 node2 wsclient streamtap"));
         assertTrue(script.contains("live-product) printf '%s\\n' wsclient"));
         assertTrue(script.contains("validate_live_product_db_writer()"));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
@@ -179,10 +195,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB users to match."));
         assertTrue(script.contains("live-product requires DB writer, FeaturePlant, and frontend DB passwords to match."));
         assertTrue(script.contains("live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"));
-        assertTrue(script.contains("Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup."));
+        assertTrue(script.contains("Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight."));
+        assertTrue(script.contains("compose_profile \"$env_file\" run --rm --no-deps -T db-migrate-live"));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
         assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
-        assertTrue(script.contains("WARNING: live-product semantic smoke is disabled"));
+        assertTrue(script.contains("live-product semantic smoke must be enabled before recording a live-product deploy success."));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true"));
         assertTrue(script.contains("sh scripts/live-product-smoke.sh"));
         assertTrue(script.contains("wsclient \"http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health\""));
@@ -217,7 +234,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("validate_config \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_services_absent \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_live_product_services_present"));
-        assertTrue(script.contains("node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary"));
+        assertTrue(script.contains("node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower frontend-adapter-db-primary"));
         assertTrue(script.contains("assert_cluster_live_db_writer_stays_opt_in"));
         assertTrue(script.contains("'DB_WRITER_ENABLED: \"\"'"));
         assertTrue(script.contains("\"LOCAL_DB_PASSWORD: \\${{ secrets.LOCAL_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD || 'kalshi' }}\""));
@@ -225,7 +242,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("'LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD'"));
         assertTrue(script.contains("'FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD'"));
         assertTrue(script.contains("assert_live_product_db_writer_expectations"));
-        assertTrue(script.contains("DB_WRITER_DATABASE_URL=jdbc:postgresql://timescaledb:5432/kalshi_test"));
+        assertTrue(script.contains("live_db_url=\"jdbc:postgresql://live-db.example.internal:5432/kalshi_live\""));
+        assertTrue(script.contains("FLYWAY_URL: $live_db_url"));
+        assertTrue(script.contains("live-product must not include local DB service"));
         assertTrue(script.contains("assert_published_ports_loopback \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_live_product_manual_smoke_contract"));

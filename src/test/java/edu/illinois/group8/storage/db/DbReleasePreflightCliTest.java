@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -86,6 +87,10 @@ class DbReleasePreflightCliTest {
         assertEquals(1, jdbc.openConnections);
         assertTrue(output.stdout().contains("PASS db_release_preflight"));
         assertTrue(output.stdout().contains("postgres_version_num=150000"));
+        assertTrue(output.stdout().contains("flyway_v006=success"));
+        assertTrue(output.stdout().contains("flyway_v007=success"));
+        assertTrue(output.stdout().contains("flyway_v008=success"));
+        assertTrue(output.stdout().contains("flyway_v010=success"));
         assertTrue(output.stdout().contains("canonical_replay_index=ok"));
     }
 
@@ -107,10 +112,7 @@ class DbReleasePreflightCliTest {
     @Test
     void rejectsMissingSuccessfulV008Migration() {
         Output output = new Output();
-        RecordingJdbc jdbc = RecordingJdbc.pass().withRows(
-            DbReleasePreflightCheck.FLYWAY_V008_SQL,
-            List.of()
-        );
+        RecordingJdbc jdbc = RecordingJdbc.pass().withMigrationRows("008", List.of());
 
         int exitCode = DbReleasePreflightCli.run(config(), jdbc::openConnection, output.out(), output.err());
 
@@ -181,12 +183,16 @@ class DbReleasePreflightCliTest {
 
     private static final class RecordingJdbc {
         private final Map<String, List<Object[]>> rowsBySql = new HashMap<>();
+        private final Map<String, List<Object[]>> flywayRowsByVersion = new HashMap<>();
         private int openConnections;
 
         private static RecordingJdbc pass() {
             RecordingJdbc jdbc = new RecordingJdbc();
             jdbc.withRows(DbReleasePreflightCheck.POSTGRES_VERSION_SQL, List.<Object[]>of(row("150000")));
-            jdbc.withRows(DbReleasePreflightCheck.FLYWAY_V008_SQL, List.<Object[]>of(row(true)));
+            jdbc.withMigrationRows("006", List.<Object[]>of(row(true)));
+            jdbc.withMigrationRows("007", List.<Object[]>of(row(true)));
+            jdbc.withMigrationRows("008", List.<Object[]>of(row(true)));
+            jdbc.withMigrationRows("010", List.<Object[]>of(row(true)));
             jdbc.withRows(
                 DbReleasePreflightCheck.CANONICAL_REPLAY_INDEX_SQL,
                 List.<Object[]>of(row("""
@@ -199,6 +205,11 @@ class DbReleasePreflightCliTest {
 
         private RecordingJdbc withRows(String sql, List<Object[]> rows) {
             rowsBySql.put(normalizeSql(sql), List.copyOf(rows));
+            return this;
+        }
+
+        private RecordingJdbc withMigrationRows(String version, List<Object[]> rows) {
+            flywayRowsByVersion.put(version, List.copyOf(rows));
             return this;
         }
 
@@ -215,10 +226,20 @@ class DbReleasePreflightCliTest {
         private Object handleConnectionInvocation(Object proxy, Method method, Object[] args) {
             return switch (method.getName()) {
                 case "createStatement" -> statement();
+                case "prepareStatement" -> preparedStatement((String) args[0]);
                 case "close" -> null;
                 case "isClosed" -> false;
                 default -> defaultValue(method.getReturnType());
             };
+        }
+
+        private PreparedStatement preparedStatement(String sql) {
+            InvocationHandler handler = new PreparedStatementHandler(sql, this);
+            return (PreparedStatement) Proxy.newProxyInstance(
+                PreparedStatement.class.getClassLoader(),
+                new Class<?>[] {PreparedStatement.class},
+                handler
+            );
         }
 
         private Statement statement() {
@@ -256,6 +277,42 @@ class DbReleasePreflightCliTest {
 
         private static String normalizeSql(String sql) {
             return sql.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+        }
+    }
+
+    private static final class PreparedStatementHandler implements InvocationHandler {
+        private final String sql;
+        private final RecordingJdbc jdbc;
+        private final Map<Integer, Object> parameters = new HashMap<>();
+
+        private PreparedStatementHandler(String sql, RecordingJdbc jdbc) {
+            this.sql = sql;
+            this.jdbc = jdbc;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws SQLException {
+            return switch (method.getName()) {
+                case "setString" -> {
+                    parameters.put((Integer) args[0], args[1]);
+                    yield null;
+                }
+                case "executeQuery" -> {
+                    String normalizedSql = RecordingJdbc.normalizeSql(sql);
+                    List<Object[]> rows;
+                    if (normalizedSql.equals(RecordingJdbc.normalizeSql(DbReleasePreflightCheck.FLYWAY_MIGRATION_SQL))) {
+                        rows = jdbc.flywayRowsByVersion.get((String) parameters.get(2));
+                    } else {
+                        rows = jdbc.rowsBySql.get(normalizedSql);
+                    }
+                    if (rows == null) {
+                        throw new SQLException("unexpected SQL: " + sql);
+                    }
+                    yield jdbc.resultSet(rows);
+                }
+                case "close" -> null;
+                default -> defaultValue(method.getReturnType());
+            };
         }
     }
 

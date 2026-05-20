@@ -115,7 +115,7 @@ assert_db_primary_product_services_present() {
 assert_live_product_services_present() {
     assert_exact_services \
         "live-product" \
-        "node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary" \
+        "node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower frontend-adapter-db-primary" \
         --profile live-product
 }
 
@@ -227,7 +227,7 @@ assert_frontend_adapter_db_primary_static_root() {
 
 assert_cluster_live_db_writer_stays_opt_in() {
     services="$(services_for --profile cluster-live)"
-    for service in timescaledb db-migrate featureplant-db-follower frontend-adapter-db-primary; do
+    for service in timescaledb db-migrate db-migrate-live featureplant-db-follower frontend-adapter-db-primary; do
         if printf '%s\n' "$services" | grep -qx "$service"; then
             printf 'cluster-live unexpectedly includes %s\n' "$service" >&2
             exit 1
@@ -248,23 +248,83 @@ assert_cluster_live_db_writer_stays_opt_in() {
 }
 
 assert_live_product_db_writer_expectations() {
-    rendered="$(
+    live_db_url="jdbc:postgresql://live-db.example.internal:5432/kalshi_live"
+    live_db_user="kalshi_live_user"
+    live_db_password="kalshi-live-password"
+    rendered_wsclient="$(
         DB_WRITER_ENABLED=true \
-        DB_WRITER_DATABASE_URL=jdbc:postgresql://timescaledb:5432/kalshi_test \
-        DB_WRITER_DATABASE_USER=kalshi \
-        DB_WRITER_DATABASE_PASSWORD=kalshi \
+        DB_WRITER_DATABASE_URL="$live_db_url" \
+        DB_WRITER_DATABASE_USER="$live_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$live_db_password" \
         service_config_for wsclient --profile live-product
     )"
     for expected in \
         'DB_WRITER_ENABLED: "true"' \
-        'DB_WRITER_DATABASE_URL: jdbc:postgresql://timescaledb:5432/kalshi_test' \
-        'DB_WRITER_DATABASE_USER: kalshi' \
-        'DB_WRITER_DATABASE_PASSWORD: kalshi'; do
-        if ! printf '%s\n' "$rendered" | grep -q "^      ${expected}$"; then
+        "DB_WRITER_DATABASE_URL: $live_db_url" \
+        "DB_WRITER_DATABASE_USER: $live_db_user" \
+        "DB_WRITER_DATABASE_PASSWORD: $live_db_password"; do
+        if ! printf '%s\n' "$rendered_wsclient" | grep -q "^      ${expected}$"; then
             printf 'live-product wsclient missing DB writer setting %s\n' "$expected" >&2
             exit 1
         fi
     done
+
+    rendered_featureplant="$(
+        DB_WRITER_DATABASE_URL="$live_db_url" \
+        DB_WRITER_DATABASE_USER="$live_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$live_db_password" \
+        service_config_for featureplant-db-follower --profile live-product
+    )"
+    for expected in \
+        "FEATUREPLANT_DB_URL: $live_db_url" \
+        "FEATUREPLANT_DB_USER: $live_db_user" \
+        "FEATUREPLANT_DB_PASSWORD: $live_db_password"; do
+        if ! printf '%s\n' "$rendered_featureplant" | grep -q "^      ${expected}$"; then
+            printf 'live-product featureplant-db-follower missing external DB setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    rendered_frontend="$(
+        DB_WRITER_DATABASE_URL="$live_db_url" \
+        DB_WRITER_DATABASE_USER="$live_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$live_db_password" \
+        service_config_for frontend-adapter-db-primary --profile live-product
+    )"
+    for expected in \
+        "FRONTEND_ADAPTER_DB_URL: $live_db_url" \
+        "FRONTEND_ADAPTER_DB_USER: $live_db_user" \
+        "FRONTEND_ADAPTER_DB_PASSWORD: $live_db_password"; do
+        if ! printf '%s\n' "$rendered_frontend" | grep -q "^      ${expected}$"; then
+            printf 'live-product frontend-adapter-db-primary missing external DB setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    rendered_migration="$(
+        DB_WRITER_DATABASE_URL="$live_db_url" \
+        DB_WRITER_DATABASE_USER="$live_db_user" \
+        DB_WRITER_DATABASE_PASSWORD="$live_db_password" \
+        service_config_for db-migrate-live --profile live-product
+    )"
+    for expected in \
+        "FLYWAY_URL: $live_db_url" \
+        "FLYWAY_USER: $live_db_user" \
+        "FLYWAY_PASSWORD: $live_db_password"; do
+        if ! printf '%s\n' "$rendered_migration" | grep -q "^      ${expected}$"; then
+            printf 'live-product db-migrate-live missing external DB setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    live_services="$(services_for --profile live-product)"
+    for service in timescaledb db-migrate; do
+        if printf '%s\n' "$live_services" | grep -qx "$service"; then
+            printf 'live-product must not include local DB service %s\n' "$service" >&2
+            exit 1
+        fi
+    done
+
     for expected in \
         'live-product requires DB_WRITER_ENABLED=true.' \
         'live-product requires DB_WRITER_DATABASE_URL, DB_WRITER_DATABASE_USER, and DB_WRITER_DATABASE_PASSWORD.' \
@@ -272,13 +332,14 @@ assert_live_product_db_writer_expectations() {
         'live-product requires DB writer, FeaturePlant, and frontend DB users to match.' \
         'live-product requires DB writer, FeaturePlant, and frontend DB passwords to match.' \
         'live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs' \
-        'Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup.' \
+        'Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight.' \
+        'compose_profile "$env_file" run --rm --no-deps -T db-migrate-live' \
         'validate_live_product_frontend_feature_source()' \
         'FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"' \
         'curl -fsS --noproxy "$FRONTEND_NO_PROXY"' \
         'LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"' \
         'run_live_product_semantic_smoke "$env_file"' \
-        'WARNING: live-product semantic smoke is disabled' \
+        'live-product semantic smoke must be enabled before recording a live-product deploy success.' \
         'LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true' \
         'sh scripts/live-product-smoke.sh' \
         "live-product) printf '%s\\n' wsclient" \
@@ -286,7 +347,7 @@ assert_live_product_db_writer_expectations() {
         'streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"' \
         'featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health"' \
         'frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"' \
-        'timescaledb db-migrate node0 node1 node2 wsclient streamtap'; do
+        'node0 node1 node2 wsclient streamtap'; do
         if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
             printf 'rollback gate missing live-product behavior: %s\n' "$expected" >&2
             exit 1
@@ -573,6 +634,7 @@ assert_featureplant_cursor_config_propagated() {
 assert_live_product_manual_smoke_contract() {
     workflow=".github/workflows/deploy-ec2.yml"
     smoke_script="scripts/live-product-smoke.sh"
+    smoke_probe="src/main/java/edu/illinois/group8/storage/db/LiveProductSmokeDbProbe.java"
     for expected in \
         "deploy_profile:" \
         "run_live_product_smoke:" \
@@ -605,10 +667,15 @@ assert_live_product_manual_smoke_contract() {
         'featureplant_db_output_events_total{result="accepted",service="featureplant"}' \
         'featureplant_db_output_events_total{result="written",service="featureplant"}' \
         'featureplant_db_output_queue_depth{service="featureplant"}' \
-        'insert into canonical_events' \
-        'featureplant_cursors' \
-        'feature_outputs' \
-        'source_event_id like' \
+        'LIVE_PRODUCT_SMOKE_DB_URL' \
+        'DB_WRITER_DATABASE_URL' \
+        'FEATUREPLANT_DB_URL' \
+        'FRONTEND_ADAPTER_DB_URL' \
+        'LiveProductSmokeDbProbeCli' \
+        'cursorCommitSeq' \
+        'seedCanonicalEvents' \
+        'featureOutputsForPrefix' \
+        'recentNonSmokeCanonicalEvents' \
         'FEATUREPLANT_DB_CURSOR_NAME' \
         'frontend_static_ui' \
         'LIVE_PRODUCT_SMOKE_DOCKER_SUDO="${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}"' \
@@ -624,17 +691,32 @@ assert_live_product_manual_smoke_contract() {
         fi
     done
 
+    for expected in \
+        'insert into canonical_events' \
+        'featureplant_cursors' \
+        'feature_outputs' \
+        "event_id not like 'live-product-smoke-%'" \
+        'source_event_id like ?'; do
+        if ! grep -Fq "$expected" "$smoke_probe"; then
+            printf 'live-product smoke DB probe missing contract fragment: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
     for forbidden in \
         'db-primary-demo-seed.sh' \
         '--force-recreate' \
         'compose up' \
         'compose stop' \
         'compose rm' \
-        'compose run' \
         'docker compose up' \
         'docker compose stop' \
         'docker compose rm' \
-        'docker compose run'; do
+        'docker compose run' \
+        'psql_scalar()' \
+        'compose exec -T -e PGPASSWORD' \
+        'LOCAL_DB_NAME' \
+        'timescaledb'; do
         if grep -Fq -- "$forbidden" "$smoke_script"; then
             printf 'live-product smoke script must not mutate services: %s\n' "$forbidden" >&2
             exit 1

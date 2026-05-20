@@ -52,14 +52,23 @@ env_or_file() {
     fi
 }
 
-LOCAL_DB_NAME="$(env_or_file LOCAL_DB_NAME kalshi_test)"
-LOCAL_DB_USER="$(env_or_file LOCAL_DB_USER kalshi)"
-LOCAL_DB_PASSWORD="$(env_or_file LOCAL_DB_PASSWORD kalshi)"
 FEATUREPLANT_DB_CURSOR_NAME="$(env_or_file FEATUREPLANT_DB_CURSOR_NAME db-primary-product-featureplant)"
 WSCLIENT_METRICS_HOST_PORT="$(env_or_file WSCLIENT_METRICS_HOST_PORT 8091)"
 STREAM_TAP_HOST_PORT="$(env_or_file STREAM_TAP_HOST_PORT 8080)"
 FEATUREPLANT_METRICS_HOST_PORT="$(env_or_file FEATUREPLANT_METRICS_HOST_PORT 8094)"
 DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="$(env_or_file DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT 8090)"
+DB_WRITER_DATABASE_URL="$(env_or_file DB_WRITER_DATABASE_URL "")"
+DB_WRITER_DATABASE_USER="$(env_or_file DB_WRITER_DATABASE_USER "")"
+DB_WRITER_DATABASE_PASSWORD="$(env_or_file DB_WRITER_DATABASE_PASSWORD "")"
+FEATUREPLANT_DB_URL="$(env_or_file FEATUREPLANT_DB_URL "$DB_WRITER_DATABASE_URL")"
+FEATUREPLANT_DB_USER="$(env_or_file FEATUREPLANT_DB_USER "$DB_WRITER_DATABASE_USER")"
+FEATUREPLANT_DB_PASSWORD="$(env_or_file FEATUREPLANT_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
+FRONTEND_ADAPTER_DB_URL="$(env_or_file FRONTEND_ADAPTER_DB_URL "$DB_WRITER_DATABASE_URL")"
+FRONTEND_ADAPTER_DB_USER="$(env_or_file FRONTEND_ADAPTER_DB_USER "$DB_WRITER_DATABASE_USER")"
+FRONTEND_ADAPTER_DB_PASSWORD="$(env_or_file FRONTEND_ADAPTER_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
+LIVE_PRODUCT_SMOKE_DB_URL="$(env_or_file LIVE_PRODUCT_SMOKE_DB_URL "$DB_WRITER_DATABASE_URL")"
+LIVE_PRODUCT_SMOKE_DB_USER="$(env_or_file LIVE_PRODUCT_SMOKE_DB_USER "$DB_WRITER_DATABASE_USER")"
+LIVE_PRODUCT_SMOKE_DB_PASSWORD="$(env_or_file LIVE_PRODUCT_SMOKE_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
 
 WSCLIENT_HEALTH_URL="${WSCLIENT_HEALTH_URL:-http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health}"
 STREAM_TAP_HEALTH_URL="${STREAM_TAP_HEALTH_URL:-http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health}"
@@ -102,22 +111,56 @@ print_diagnostics() {
         wsclient streamtap featureplant-db-follower frontend-adapter-db-primary >&2 || true
 }
 
-sql_literal() {
-    printf '%s' "$1" | sed "s/'/''/g"
-}
-
-psql_scalar() {
-    compose exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
-        psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 -c "$1" \
-        | tr -d '\r'
-}
-
 urlencode() {
     python3 - "$1" <<'PY'
 import sys
 from urllib.parse import quote
 print(quote(sys.argv[1], safe=""))
 PY
+}
+
+require_same_db_value() {
+    label="$1"
+    expected="$2"
+    actual="$3"
+    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
+        if [ "$label" = "password" ]; then
+            printf 'live-product smoke DB password does not match deployed service DB password\n' >&2
+        else
+            printf 'live-product smoke DB %s mismatch: smoke=%s service=%s\n' "$label" "$expected" "$actual" >&2
+        fi
+        exit 1
+    fi
+}
+
+validate_live_db_config() {
+    if [ -z "$LIVE_PRODUCT_SMOKE_DB_URL" ]; then
+        printf 'LIVE_PRODUCT_SMOKE_DB_URL/DB_WRITER_DATABASE_URL must point at the live DB\n' >&2
+        exit 1
+    fi
+    require_same_db_value "url" "$LIVE_PRODUCT_SMOKE_DB_URL" "$DB_WRITER_DATABASE_URL"
+    require_same_db_value "url" "$LIVE_PRODUCT_SMOKE_DB_URL" "$FEATUREPLANT_DB_URL"
+    require_same_db_value "url" "$LIVE_PRODUCT_SMOKE_DB_URL" "$FRONTEND_ADAPTER_DB_URL"
+    require_same_db_value "user" "$LIVE_PRODUCT_SMOKE_DB_USER" "$DB_WRITER_DATABASE_USER"
+    require_same_db_value "user" "$LIVE_PRODUCT_SMOKE_DB_USER" "$FEATUREPLANT_DB_USER"
+    require_same_db_value "user" "$LIVE_PRODUCT_SMOKE_DB_USER" "$FRONTEND_ADAPTER_DB_USER"
+    require_same_db_value "password" "$LIVE_PRODUCT_SMOKE_DB_PASSWORD" "$DB_WRITER_DATABASE_PASSWORD"
+    require_same_db_value "password" "$LIVE_PRODUCT_SMOKE_DB_PASSWORD" "$FEATUREPLANT_DB_PASSWORD"
+    require_same_db_value "password" "$LIVE_PRODUCT_SMOKE_DB_PASSWORD" "$FRONTEND_ADAPTER_DB_PASSWORD"
+}
+
+db_probe() {
+    db_probe_output="$tmpdir/db-probe.out"
+    if ! compose run --rm --no-deps -T \
+        -e "LIVE_PRODUCT_SMOKE_DB_URL=$LIVE_PRODUCT_SMOKE_DB_URL" \
+        -e "LIVE_PRODUCT_SMOKE_DB_USER=$LIVE_PRODUCT_SMOKE_DB_USER" \
+        -e "LIVE_PRODUCT_SMOKE_DB_PASSWORD=$LIVE_PRODUCT_SMOKE_DB_PASSWORD" \
+        wsclient java -cp /app/app.jar edu.illinois.group8.storage.db.LiveProductSmokeDbProbeCli "$@" \
+        > "$db_probe_output"; then
+        cat "$db_probe_output" >&2
+        return 1
+    fi
+    tr -d '\r' < "$db_probe_output"
 }
 
 wait_plain_health() {
@@ -269,147 +312,20 @@ PY
 }
 
 cursor_commit_seq() {
-    cursor_name="$(sql_literal "$FEATUREPLANT_DB_CURSOR_NAME")"
-    psql_scalar "select coalesce((select last_commit_seq from featureplant_cursors where cursor_name = '${cursor_name}'), 0)"
+    db_probe cursorCommitSeq --cursor-name="$FEATUREPLANT_DB_CURSOR_NAME"
 }
 
 seed_canonical_events() {
-    run_id_sql="$(sql_literal "$1")"
-    market_sql="$(sql_literal "$2")"
-    prefix_sql="$(sql_literal "$3")"
-    psql_scalar "
-with seed_clock as (
-    select floor(extract(epoch from now()) * 1000)::bigint as base_ts_ms
-),
-seed_rows(stream_name, event_type, event_id, offset_ms, payload) as (
-    values
-    (
-        'derived.top_of_book',
-        'top_of_book_update',
-        '${prefix_sql}-bbo-001',
-        1,
-        jsonb_build_object(
-            'event_id', '${prefix_sql}-bbo-001',
-            'event_type', 'top_of_book_update',
-            'schema_version', 1,
-            'stream_name', 'derived.top_of_book',
-            'metadata', jsonb_build_object(
-                'source', 'live_product_smoke',
-                'market_ticker', '${market_sql}',
-                'event_ts_ms', (select base_ts_ms + 1 from seed_clock)
-            ),
-            'bid_price_micros', 451000,
-            'ask_price_micros', 472000,
-            'bid_quantity_micros', 1200000,
-            'ask_quantity_micros', 1000000,
-            'crossed', false,
-            'smoke_run_id', '${run_id_sql}'
-        )
-    ),
-    (
-        'canonical.ticker',
-        'ticker_update',
-        '${prefix_sql}-ticker-001',
-        2,
-        jsonb_build_object(
-            'event_id', '${prefix_sql}-ticker-001',
-            'event_type', 'ticker_update',
-            'schema_version', 1,
-            'stream_name', 'canonical.ticker',
-            'metadata', jsonb_build_object(
-                'source', 'live_product_smoke',
-                'market_ticker', '${market_sql}',
-                'event_ts_ms', (select base_ts_ms + 2 from seed_clock)
-            ),
-            'price_micros', 462000,
-            'yes_bid_micros', 451000,
-            'yes_ask_micros', 472000,
-            'volume_micros', 31000000,
-            'smoke_run_id', '${run_id_sql}'
-        )
-    ),
-    (
-        'canonical.trade',
-        'market_trade',
-        '${prefix_sql}-trade-001',
-        3,
-        jsonb_build_object(
-            'event_id', '${prefix_sql}-trade-001',
-            'event_type', 'market_trade',
-            'schema_version', 1,
-            'stream_name', 'canonical.trade',
-            'metadata', jsonb_build_object(
-                'source', 'live_product_smoke',
-                'market_ticker', '${market_sql}',
-                'event_ts_ms', (select base_ts_ms + 3 from seed_clock)
-            ),
-            'trade_id', '${prefix_sql}-trade-001',
-            'yes_price_micros', 462000,
-            'no_price_micros', 538000,
-            'quantity_micros', 2100000,
-            'taker_side', 'yes',
-            'smoke_run_id', '${run_id_sql}'
-        )
-    )
-),
-metadata_insert as (
-    insert into market_metadata (
-        market_ticker,
-        event_ticker,
-        series_ticker,
-        status,
-        market_payload
-    )
-    values (
-        '${market_sql}',
-        'LIVE-PRODUCT-SMOKE',
-        'LIVE-PRODUCT-SMOKE',
-        'open',
-        jsonb_build_object(
-            'market_ticker', '${market_sql}',
-            'event_ticker', 'LIVE-PRODUCT-SMOKE',
-            'series_ticker', 'LIVE-PRODUCT-SMOKE',
-            'status', 'open',
-            'smoke_run_id', '${run_id_sql}'
-        )
-    )
-    on conflict (market_ticker) do update
-        set updated_at = now(),
-            market_payload = excluded.market_payload
-),
-inserted as (
-    insert into canonical_events (
-        event_id,
-        stream_name,
-        event_type,
-        schema_version,
-        market_ticker,
-        event_ts_ms,
-        payload
-    )
-    select
-        seed_rows.event_id,
-        seed_rows.stream_name,
-        seed_rows.event_type,
-        1,
-        '${market_sql}',
-        seed_clock.base_ts_ms + seed_rows.offset_ms,
-        seed_rows.payload
-    from seed_rows
-    cross join seed_clock
-    on conflict do nothing
-    returning canonical_commit_seq
-)
-select count(*), coalesce(max(canonical_commit_seq), 0) from inserted;"
+    db_probe seedCanonicalEvents --run-id="$1" --market-ticker="$2" --prefix="$3"
 }
 
 wait_featureplant_followed_seed() {
-    prefix_sql="$(sql_literal "$1")"
     expected_commit_seq="$2"
     attempt=1
     while :; do
-        output_count="$(psql_scalar "select count(*) from feature_outputs where source_event_id like '${prefix_sql}-%'")"
-        current_cursor_seq="$(cursor_commit_seq)"
+        progress="$(db_probe featureOutputsForPrefix --prefix="$1" --cursor-name="$FEATUREPLANT_DB_CURSOR_NAME")"
+        output_count="$(printf '%s\n' "$progress" | awk -F '|' 'NR == 1 {print $1}')"
+        current_cursor_seq="$(printf '%s\n' "$progress" | awk -F '|' 'NR == 1 {print $2}')"
         if [ "$output_count" -ge 3 ] && [ "$current_cursor_seq" -ge "$expected_commit_seq" ]; then
             printf '%s\n%s\n' "$output_count" "$current_cursor_seq"
             return 0
@@ -563,7 +479,7 @@ check_optional_live_data() {
     if ! is_true "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"; then
         return 0
     fi
-    live_count="$(psql_scalar "select count(*) from canonical_events where event_id not like 'live-product-smoke-%' and created_at >= now() - interval '15 minutes'")"
+    live_count="$(db_probe recentNonSmokeCanonicalEvents)"
     if [ "$live_count" -le 0 ]; then
         printf 'live data requirement failed: no non-smoke canonical_events in the last 15 minutes\n' >&2
         print_diagnostics
@@ -573,6 +489,7 @@ check_optional_live_data() {
 }
 
 compose ps >/dev/null
+validate_live_db_config
 
 wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health
@@ -586,7 +503,7 @@ printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output
 check_product_static_ui
 
 cursor_before="$(cursor_commit_seq)"
-max_commit_before="$(psql_scalar "select coalesce(max(canonical_commit_seq), 0) from canonical_events")"
+max_commit_before="$(db_probe maxCanonicalCommitSeq)"
 if [ "$cursor_before" -gt "$max_commit_before" ]; then
     printf 'FeaturePlant cursor is ahead of canonical_events: cursor=%s max_commit_seq=%s\n' \
         "$cursor_before" "$max_commit_before" >&2

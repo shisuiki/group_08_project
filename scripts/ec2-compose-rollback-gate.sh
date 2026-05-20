@@ -58,7 +58,7 @@ diagnose_profile() {
     elif [ "$DEPLOY_PROFILE" = "live-product" ]; then
         log "Recent live-product logs:"
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
-            timescaledb db-migrate node0 node1 node2 wsclient streamtap \
+            db-migrate-live node0 node1 node2 wsclient streamtap \
             featureplant-db-follower frontend-adapter-db-primary >&2 || true
     fi
 }
@@ -192,12 +192,12 @@ validate_live_product_db_writer() {
     local_url="$(local_db_url "$env_file")"
     local_user="$(local_db_value "$env_file" LOCAL_DB_USER kalshi)"
     local_password="$(local_db_value "$env_file" LOCAL_DB_PASSWORD kalshi)"
-    featureplant_url="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_URL "$local_url")"
-    featureplant_user="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_USER "$local_user")"
-    featureplant_password="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_PASSWORD "$local_password")"
-    frontend_url="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_URL "$local_url")"
-    frontend_user="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_USER "$local_user")"
-    frontend_password="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_PASSWORD "$local_password")"
+    featureplant_url="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_URL "${db_url:-$local_url}")"
+    featureplant_user="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_USER "${db_user:-$local_user}")"
+    featureplant_password="$(effective_product_db_value "$env_file" FEATUREPLANT_DB_PASSWORD "${db_password:-$local_password}")"
+    frontend_url="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_URL "${db_url:-$local_url}")"
+    frontend_user="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_USER "${db_user:-$local_user}")"
+    frontend_password="$(effective_product_db_value "$env_file" FRONTEND_ADAPTER_DB_PASSWORD "${db_password:-$local_password}")"
 
     case "$db_enabled" in
         true|TRUE|True) ;;
@@ -265,9 +265,10 @@ run_db_release_preflight() {
             db_user="$(env_file_value "$env_file" DB_WRITER_DATABASE_USER)"
             db_password="$(env_file_value "$env_file" DB_WRITER_DATABASE_PASSWORD)"
             required="true"
-            if [ "$db_url" = "$(local_db_url "$env_file")" ]; then
-                log "Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup."
-                return 0
+            log "Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight."
+            if ! compose_profile "$env_file" run --rm --no-deps -T db-migrate-live; then
+                log "live-product Flyway migration failed."
+                return 1
             fi
             ;;
         *)
@@ -391,8 +392,8 @@ run_live_product_semantic_smoke() {
         enabled="$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"
     fi
     if ! is_true "$enabled"; then
-        log "WARNING: live-product semantic smoke is disabled; enforcing feature_outputs but recording success without DB-primary product proof."
-        return 0
+        log "live-product semantic smoke must be enabled before recording a live-product deploy success."
+        return 1
     fi
 
     log "Running live-product semantic smoke before recording candidate success."

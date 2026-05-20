@@ -1,6 +1,7 @@
 package edu.illinois.group8.storage.db;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -10,10 +11,10 @@ import java.util.Objects;
 public final class DbReleasePreflightCheck {
     static final int MIN_POSTGRES_VERSION_NUM = 150_000;
     static final String POSTGRES_VERSION_SQL = "select current_setting('server_version_num')";
-    static final String FLYWAY_V008_SQL = """
+    static final String FLYWAY_MIGRATION_SQL = """
         select success
         from flyway_schema_history
-        where version in ('8', '008')
+        where version in (?, ?)
         order by installed_rank desc
         limit 1
         """;
@@ -41,9 +42,10 @@ public final class DbReleasePreflightCheck {
                         + "; actual=" + postgresVersion
                 );
             }
-            if (!flywayV008Succeeded(connection)) {
-                throw new IllegalStateException("flyway_schema_history does not contain successful V008 migration.");
-            }
+            requireFlywayMigration(connection, "006");
+            requireFlywayMigration(connection, "007");
+            requireFlywayMigration(connection, "008");
+            requireFlywayMigration(connection, "010");
             String indexDefinition = canonicalReplayIndexDefinition(connection);
             if (!validCanonicalReplayIndex(indexDefinition)) {
                 throw new IllegalStateException(
@@ -67,14 +69,26 @@ public final class DbReleasePreflightCheck {
         }
     }
 
-    private boolean flywayV008Succeeded(Connection connection) throws SQLException {
+    private void requireFlywayMigration(Connection connection, String version) throws SQLException {
+        if (!flywayMigrationSucceeded(connection, version)) {
+            throw new IllegalStateException(
+                "flyway_schema_history does not contain successful V" + version + " migration."
+            );
+        }
+    }
+
+    private boolean flywayMigrationSucceeded(Connection connection, String paddedVersion) throws SQLException {
+        String numericVersion = String.valueOf(Integer.parseInt(paddedVersion));
         try (
-             Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(FLYWAY_V008_SQL)) {
-            if (!resultSet.next()) {
-                return false;
+             PreparedStatement statement = connection.prepareStatement(FLYWAY_MIGRATION_SQL)) {
+            statement.setString(1, numericVersion);
+            statement.setString(2, paddedVersion);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return false;
+                }
+                return resultSet.getBoolean(1);
             }
-            return resultSet.getBoolean(1);
         }
     }
 

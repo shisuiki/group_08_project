@@ -69,8 +69,11 @@ docker compose --profile local-db down -v
 ```
 
 The demo password variables in `.env.example` are for local development only.
-EC2 deploys should continue to use external DB URL/user/password variables and
-must not rely on the `local-db` profile.
+EC2 `live-product` deploys use `DB_WRITER_DATABASE_URL`,
+`FEATUREPLANT_DB_URL`, and `FRONTEND_ADAPTER_DB_URL` for the same external live
+DB. The live-product Flyway service targets that external URL; it does not start
+the local `timescaledb` service. `db-primary-product` remains the local
+Timescale demo profile.
 
 ## Live Startup
 

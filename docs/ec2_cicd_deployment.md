@@ -107,11 +107,14 @@ The workflow bootstraps an Amazon Linux host by installing:
 - Docker Compose plugin
 
 It checks out the exact tested workflow SHA at `DEPLOY_PATH`, writes runtime
-secrets into `DEPLOY_PATH/secrets`, uploads the candidate environment as
-`.env.next`, validates and builds the candidate Compose profile before stopping
-the current services, then promotes `.env.next` to `.env` and starts the
-configured profile. A successful deploy records `.deploy-state/last_success.ref`
-and `.deploy-state/last_success.env` after the health smoke check passes.
+secrets into `DEPLOY_PATH/secrets`, loads the exact app image artifact built by
+CI for the workflow SHA, uploads the candidate environment as `.env.next`, then
+uses the rollback gate to verify that image before stopping the current
+services. When `KALSHI_APP_IMAGE` is present, the rollback gate uses
+`up --no-build`; local/manual deploys with no app image still build from the
+checked-out source. A successful deploy records `.deploy-state/last_success.ref`
+and `.deploy-state/last_success.env` after image verification, DB preflight,
+health smoke, and any profile-specific semantic smoke pass.
 
 If candidate deploy or health smoke fails, the rollback gate restores the last
 successful ref and env when present, redeploys and smokes that previous state,
