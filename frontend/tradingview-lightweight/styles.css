@@ -358,6 +358,12 @@ main {
     margin-bottom: 0;
 }
 
+.semantic-controls select,
+.semantic-controls input {
+    min-width: 0;
+    width: 100%;
+}
+
 .semantic-search-field {
     grid-column: span 2;
 }
@@ -392,10 +398,12 @@ main {
 
 .semantic-group-chip {
     min-width: 0;
+    max-width: 100%;
     background: #151719;
     border: 1px solid #30373c;
     border-radius: 4px;
     padding: 6px 7px;
+    overflow: hidden;
 }
 
 .semantic-group-chip strong,
@@ -442,6 +450,7 @@ main {
     overflow: hidden;
     font-size: 11px;
     line-height: 1.2;
+    contain: layout paint;
 }
 
 .semantic-tile:hover,
@@ -477,6 +486,36 @@ main {
     color: rgba(244, 247, 249, 0.78);
     font-style: normal;
     white-space: nowrap;
+}
+
+.semantic-tile-small {
+    grid-template-rows: auto auto;
+    gap: 1px;
+    padding: 4px;
+    font-size: 10px;
+}
+
+.semantic-tile-small span,
+.semantic-tile-small em {
+    display: none;
+}
+
+.semantic-tile-tiny {
+    grid-template-rows: 1fr;
+    gap: 0;
+    padding: 2px;
+    font-size: 9px;
+}
+
+.semantic-tile-tiny span,
+.semantic-tile-tiny small,
+.semantic-tile-tiny em {
+    display: none;
+}
+
+.semantic-tile-tiny strong {
+    font-size: 9px;
+    line-height: 1;
 }
 
 .semantic-empty {

@@ -640,24 +640,26 @@
         dom.semanticMapState.textContent =
             `${leaves.length} market(s) grouped by ${body.group_by || dom.semanticGroupBy.value || 'sector'}`;
         renderSemanticGroupSummary(groups);
+        const fragment = document.createDocumentFragment();
         for (const rect of layoutSemanticTreemap(groups)) {
             const tile = document.createElement('button');
+            const sizeClass = semanticTileSizeClass(rect);
+            const title = semanticTileTitle(rect.leaf, rect.groupKey);
             tile.type = 'button';
-            tile.className = `semantic-tile semantic-${semanticStatusClass(rect.leaf.semantic_status)}`;
+            tile.className = `semantic-tile ${sizeClass} semantic-${semanticStatusClass(rect.leaf.semantic_status)}`;
             tile.dataset.market = rect.leaf.market_ticker || '';
+            tile.title = title;
+            tile.setAttribute('aria-label', title.replace(/\n/g, '; '));
             tile.style.left = `${rect.x}%`;
             tile.style.top = `${rect.y}%`;
             tile.style.width = `${rect.width}%`;
             tile.style.height = `${rect.height}%`;
             tile.style.background = semanticTileColor(rect.leaf);
-            tile.innerHTML =
-                `<strong>${escapeHtml(rect.leaf.market_ticker || '-')}</strong>` +
-                `<span>${escapeHtml(rect.leaf.label || rect.leaf.market_ticker || '-')}</span>` +
-                `<small>${escapeHtml(rect.groupKey)} / ${escapeHtml(confidenceText(rect.leaf.metadata_confidence))}</small>` +
-                `<em>${escapeHtml(semanticQuoteText(rect.leaf.quote))}</em>`;
+            tile.innerHTML = semanticTileMarkup(rect.leaf, rect.groupKey, sizeClass);
             tile.addEventListener('click', () => selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey));
-            dom.semanticTreemap.appendChild(tile);
+            fragment.appendChild(tile);
         }
+        dom.semanticTreemap.appendChild(fragment);
         const first = leaves[0];
         if (first) {
             renderSemanticDetailFromLeaf(first);
@@ -861,24 +863,69 @@
         return String(status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     }
 
+    function semanticTileSizeClass(rect) {
+        const area = Number(rect.width || 0) * Number(rect.height || 0);
+        if (rect.width < 4.5 || rect.height < 4.5 || area < 32) {
+            return 'semantic-tile-tiny';
+        }
+        if (rect.width < 9 || rect.height < 8 || area < 95) {
+            return 'semantic-tile-small';
+        }
+        return 'semantic-tile-regular';
+    }
+
+    function semanticTileMarkup(leaf, groupKey, sizeClass) {
+        const ticker = escapeHtml(leaf.market_ticker || '-');
+        if (sizeClass === 'semantic-tile-tiny') {
+            return `<strong>${ticker}</strong>`;
+        }
+        const confidence = escapeHtml(confidenceText(leaf.metadata_confidence));
+        if (sizeClass === 'semantic-tile-small') {
+            return `<strong>${ticker}</strong><small>${confidence}</small>`;
+        }
+        return `<strong>${ticker}</strong>` +
+            `<span>${escapeHtml(leaf.label || leaf.market_ticker || '-')}</span>` +
+            `<small>${escapeHtml(groupKey)} / ${confidence}</small>` +
+            `<em>${escapeHtml(semanticQuoteText(leaf.quote))}</em>`;
+    }
+
+    function semanticTileTitle(leaf, groupKey) {
+        return [
+            leaf.market_ticker || '-',
+            leaf.label || '-',
+            `${groupKey || 'unknown'} / ${confidenceText(leaf.metadata_confidence)}`,
+            semanticQuoteText(leaf.quote)
+        ].join('\n');
+    }
+
     function semanticTileColor(leaf) {
         const status = String(leaf.semantic_status || '').toLowerCase();
-        const confidence = Number(leaf.metadata_confidence);
-        const alpha = Number.isFinite(confidence) ? 0.64 + Math.max(0, Math.min(1, confidence)) * 0.24 : 0.58;
+        const confidence = Math.max(0, Math.min(1, Number(leaf.metadata_confidence)));
+        const confidenceValue = Number.isFinite(confidence) ? confidence : 0.5;
+        const hueOffset = semanticStableHueOffset(leaf.market_ticker || leaf.label || '');
+        const lightness = Math.round(27 + confidenceValue * 12);
         const stale = leaf.quote && leaf.quote.freshness_status && leaf.quote.freshness_status !== 'available';
         if (status === 'failed') {
-            return `rgba(142, 63, 63, ${alpha})`;
+            return `hsl(${4 + hueOffset}, 42%, ${Math.max(30, lightness)}%)`;
         }
         if (status === 'review_required') {
-            return `rgba(165, 118, 46, ${alpha})`;
+            return `hsl(${38 + hueOffset}, 53%, ${Math.max(32, lightness)}%)`;
         }
         if (status === 'rate_limited') {
-            return `rgba(92, 103, 94, ${alpha})`;
+            return `hsl(${82 + hueOffset}, 18%, ${Math.max(31, lightness)}%)`;
         }
         if (stale) {
-            return `rgba(101, 105, 84, ${alpha})`;
+            return `hsl(${63 + hueOffset}, 22%, ${Math.max(30, lightness)}%)`;
         }
-        return `rgba(47, 137, 101, ${alpha})`;
+        return `hsl(${150 + Math.round(confidenceValue * 22) + hueOffset}, 49%, ${lightness}%)`;
+    }
+
+    function semanticStableHueOffset(value) {
+        let hash = 0;
+        for (let index = 0; index < value.length; index++) {
+            hash = (hash * 31 + value.charCodeAt(index)) % 997;
+        }
+        return (hash % 15) - 7;
     }
 
     function confidenceText(value) {

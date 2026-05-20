@@ -46,6 +46,9 @@ EXPECTED_FEATURE_OUTPUTS_MIN="${EXPECTED_FEATURE_OUTPUTS_MIN:-}"
 EXPECTED_FEATURE_COUNT_MIN="${EXPECTED_FEATURE_COUNT_MIN:-}"
 EXPECTED_HISTORY_BARS_MIN="${EXPECTED_HISTORY_BARS_MIN:-}"
 EXPECTED_REFRESH_TOTAL_LOADED_MIN="${EXPECTED_REFRESH_TOTAL_LOADED_MIN:-}"
+PRODUCT_DEMO_SEMANTIC_FIXTURE="${PRODUCT_DEMO_SEMANTIC_FIXTURE:-false}"
+PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS="${PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS:-120}"
+EXPECTED_SEMANTIC_METADATA_MIN_ROWS="${EXPECTED_SEMANTIC_METADATA_MIN_ROWS:-80}"
 PRODUCT_DEMO_REPLAY_ID="demo-db-primary-long-replay"
 
 case "$PRODUCT_DEMO_SCENARIO" in
@@ -90,6 +93,7 @@ export FRONTEND_ADAPTER_DB_URL FRONTEND_ADAPTER_DB_USER FRONTEND_ADAPTER_DB_PASS
 export FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS
 export FRONTEND_ADAPTER_BASIC_AUTH_USER FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD
 export DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT
+export PRODUCT_DEMO_SEMANTIC_FIXTURE PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS EXPECTED_SEMANTIC_METADATA_MIN_ROWS
 
 cd "$REPO_ROOT"
 
@@ -112,6 +116,17 @@ psql_scalar() {
     docker compose --profile local-db exec -T -e PGPASSWORD="$LOCAL_DB_PASSWORD" timescaledb \
         psql -qAt -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -v ON_ERROR_STOP=1 -c "$1" \
         | tr -d '\r'
+}
+
+truthy() {
+    case "$1" in
+        1|true|TRUE|yes|YES|on|ON)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 demo_feature_outputs() {
@@ -280,10 +295,105 @@ PY
     done
 }
 
+wait_semantic_metadata_fixture() {
+    sector_file="$tmpdir/semantic-fixture-sector.json"
+    tag_file="$tmpdir/semantic-fixture-tag.json"
+    markets_file="$tmpdir/semantic-fixture-markets.json"
+    values_file="$tmpdir/semantic-fixture.values"
+    attempt=1
+    while :; do
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/api/semantic-metadata/treemap?group_by=sector&limit=200&status=generated&q=DEMO-SEMANTIC" \
+                -o "$sector_file" \
+            && frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/api/semantic-metadata/treemap?group_by=tag&limit=200&status=generated&q=DEMO-SEMANTIC" \
+                -o "$tag_file" \
+            && frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/api/semantic-metadata/markets?limit=200&status=generated&q=DEMO-SEMANTIC" \
+                -o "$markets_file" \
+            && python3 - "$sector_file" "$tag_file" "$markets_file" "$EXPECTED_SEMANTIC_METADATA_MIN_ROWS" \
+                > "$values_file" <<'PY'
+import json
+import sys
+
+sector_path, tag_path, markets_path, expected_raw = sys.argv[1:]
+expected = int(expected_raw)
+
+with open(sector_path, "r", encoding="utf-8") as handle:
+    sector = json.load(handle)
+with open(tag_path, "r", encoding="utf-8") as handle:
+    tag = json.load(handle)
+with open(markets_path, "r", encoding="utf-8") as handle:
+    markets_body = json.load(handle)
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+require(sector.get("status") == "ok", f"sector treemap status {sector.get('status')}")
+require(tag.get("status") == "ok", f"tag treemap status {tag.get('status')}")
+require(markets_body.get("status") == "ok", f"markets status {markets_body.get('status')}")
+
+sector_count = int(sector.get("count") or 0)
+sector_groups = sector.get("groups") or []
+tag_count = int(tag.get("count") or 0)
+tag_groups = tag.get("groups") or []
+markets = markets_body.get("markets") or []
+
+require(sector_count >= expected, f"sector treemap count {sector_count} below expected {expected}")
+require(tag_count >= expected, f"tag treemap count {tag_count} below expected {expected}")
+require(len(sector_groups) >= 5, f"sector group count {len(sector_groups)} below 5")
+require(any(group.get("leaves") for group in tag_groups), "tag treemap returned no leaves")
+require(int(markets_body.get("count") or 0) >= expected, "markets count below expected")
+require(markets, "markets endpoint returned no rows")
+
+for group in sector_groups + tag_groups:
+    for leaf in group.get("leaves") or []:
+        ticker = str(leaf.get("market_ticker") or "")
+        require(ticker.startswith("DEMO-SEMANTIC-"), f"fixture query returned non-fixture leaf {ticker}")
+
+for market in markets:
+    ticker = str(market.get("market_ticker") or "")
+    metadata = market.get("semantic_metadata") or {}
+    require(ticker.startswith("DEMO-SEMANTIC-"), f"fixture query returned non-fixture market {ticker}")
+    require(metadata.get("status") == "generated", f"market {ticker} missing generated semantic metadata")
+    require(metadata.get("sector"), f"market {ticker} missing sector")
+
+print(sector_count)
+print(len(sector_groups))
+print(len(tag_groups))
+print(len(markets))
+PY
+        then
+            semantic_count="$(sed -n '1p' "$values_file")"
+            sector_groups="$(sed -n '2p' "$values_file")"
+            tag_groups="$(sed -n '3p' "$values_file")"
+            markets_count="$(sed -n '4p' "$values_file")"
+            printf 'PASS semantic_metadata_fixture rows=%s sector_groups=%s tag_groups=%s markets=%s expected_rows_at_least=%s\n' \
+                "$semantic_count" "$sector_groups" "$tag_groups" "$markets_count" "$EXPECTED_SEMANTIC_METADATA_MIN_ROWS"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'Semantic metadata fixture did not become visible through frontend API at %s\n' \
+                "$FRONTEND_BASE_URL" >&2
+            print_product_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
 docker compose --profile db-primary-product stop featureplant-db-follower >/dev/null 2>&1 || true
 docker compose --profile db-primary-product rm -f featureplant-db-follower >/dev/null 2>&1 || true
 
 "$SCRIPT_DIR/db-primary-demo-seed.sh"
+
+if truthy "$PRODUCT_DEMO_SEMANTIC_FIXTURE"; then
+    SEMANTIC_DEMO_RUN_MIGRATIONS=false \
+    PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS="$PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS" \
+    "$SCRIPT_DIR/semantic-metadata-demo-seed.sh"
+fi
 
 expected_commit_seq="$(
     psql_scalar "select coalesce(max(canonical_commit_seq), 0) from canonical_events where event_id like 'demo-db-primary-canonical-%'"
@@ -343,6 +453,10 @@ if [ "$PRODUCT_DEMO_SCENARIO" = "long-replay" ]; then
             "$latest_state_count" >&2
         exit 1
     fi
+fi
+
+if truthy "$PRODUCT_DEMO_SEMANTIC_FIXTURE"; then
+    wait_semantic_metadata_fixture
 fi
 
 wait_featureplant_metrics "$EXPECTED_FEATURE_OUTPUTS_MIN"

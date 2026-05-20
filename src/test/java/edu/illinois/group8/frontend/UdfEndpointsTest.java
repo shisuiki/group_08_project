@@ -33,6 +33,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -902,6 +903,35 @@ class UdfEndpointsTest {
         assertEquals("MKT-SEM", weather.path("leaves").get(0).path("market_ticker").asText());
         assertEquals(123L, weather.path("leaves").get(0).path("quote").path("open_interest").asLong());
         assertEquals("forecast", weather.path("leaves").get(0).path("tags").get(0).asText());
+    }
+
+    @Test
+    void semanticTreemapEndpointAggregatesManyGroupsAndTags() throws Exception {
+        restartWithSemanticReader(List.of(
+            semanticRow("MKT-WX-RAIN", "weather", "forecast", List.of("forecast", "rain"), 100L),
+            semanticRow("MKT-WX-CLIMATE", "weather", "climate", List.of("climate", "rain"), 200L),
+            semanticRow("MKT-FIN-RATES", "finance", "macro", List.of("macro", "rates"), 300L)
+        ));
+
+        JsonNode sectorBody = getJson("/api/semantic-metadata/treemap?group_by=sector&limit=10");
+        JsonNode tagBody = getJson("/api/semantic-metadata/treemap?group_by=tag&limit=10");
+
+        assertEquals("ok", sectorBody.path("status").asText());
+        assertEquals(3, sectorBody.path("count").asInt());
+        JsonNode weather = group(sectorBody.path("groups"), "weather");
+        assertEquals(2, weather.path("count").asInt());
+        assertEquals(300L, weather.path("value").asLong());
+        JsonNode finance = group(sectorBody.path("groups"), "finance");
+        assertEquals(1, finance.path("count").asInt());
+        assertEquals(300L, finance.path("value").asLong());
+
+        assertEquals("tag", tagBody.path("group_by").asText());
+        assertEquals(3, tagBody.path("count").asInt());
+        JsonNode rain = group(tagBody.path("groups"), "rain");
+        assertEquals(2, rain.path("count").asInt());
+        assertEquals(300L, rain.path("value").asLong());
+        assertEquals(1, group(tagBody.path("groups"), "forecast").path("count").asInt());
+        assertEquals(1, group(tagBody.path("groups"), "rates").path("count").asInt());
     }
 
     @Test
@@ -2026,10 +2056,27 @@ class UdfEndpointsTest {
 
     private static SemanticMarketMetadataRow semanticRow(String marketTicker, String sector) {
         boolean weather = "weather".equals(sector);
+        return semanticRow(
+            marketTicker,
+            sector,
+            weather ? "forecast" : "election",
+            weather ? List.of("forecast", "weather") : List.of("election"),
+            weather ? 123L : 45L
+        );
+    }
+
+    private static SemanticMarketMetadataRow semanticRow(
+        String marketTicker,
+        String sector,
+        String eventType,
+        List<String> tags,
+        long openInterest
+    ) {
+        boolean weather = "weather".equals(sector);
         return new SemanticMarketMetadataRow(
             marketTicker,
-            weather ? "EVENT-WEATHER" : "EVENT-POL",
-            weather ? "SERIES-WEATHER" : "SERIES-POL",
+            weather ? "EVENT-WEATHER" : "EVENT-" + sector.toUpperCase(Locale.ROOT),
+            weather ? "SERIES-WEATHER" : "SERIES-" + sector.toUpperCase(Locale.ROOT),
             "open",
             weather ? "Will it rain?" : "Who wins?",
             "tax-v1",
@@ -2037,13 +2084,13 @@ class UdfEndpointsTest {
             "prompt-v1",
             "generated",
             sector,
-            weather ? "rain" : "election",
-            weather ? "forecast" : "election",
+            weather ? "rain" : eventType,
+            eventType,
             "us",
             "daily",
             "high",
             "low",
-            weather ? List.of("forecast", "weather") : List.of("election"),
+            tags,
             new BigDecimal(weather ? "0.83" : "0.72"),
             "classification rationale",
             Instant.parse("2026-05-20T00:00:00Z"),
@@ -2056,7 +2103,7 @@ class UdfEndpointsTest {
             440_000L,
             460_000L,
             450_000L,
-            weather ? 123L : 45L,
+            openInterest,
             Instant.parse("2026-05-20T00:00:02Z"),
             5L
         );

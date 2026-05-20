@@ -91,6 +91,16 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FEATUREPLANT_METRICS_HOST=\"$FEATUREPLANT_METRICS_HOST\""));
         assertTrue(script.contains("FEATUREPLANT_METRICS_PORT=\"$FEATUREPLANT_METRICS_PORT\""));
         assertTrue(script.contains("FEATUREPLANT_METRICS_HOST_PORT=\"$FEATUREPLANT_METRICS_HOST_PORT\""));
+        assertTrue(script.contains("PRODUCT_DEMO_SEMANTIC_FIXTURE=\"${PRODUCT_DEMO_SEMANTIC_FIXTURE:-false}\""));
+        assertTrue(script.contains("PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS=\"${PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS:-120}\""));
+        assertTrue(script.contains("EXPECTED_SEMANTIC_METADATA_MIN_ROWS=\"${EXPECTED_SEMANTIC_METADATA_MIN_ROWS:-80}\""));
+        assertTrue(script.contains("if truthy \"$PRODUCT_DEMO_SEMANTIC_FIXTURE\"; then"));
+        assertTrue(script.contains("semantic-metadata-demo-seed.sh"));
+        assertTrue(script.contains("SEMANTIC_DEMO_RUN_MIGRATIONS=false"));
+        assertTrue(script.contains("/api/semantic-metadata/treemap?group_by=sector&limit=200&status=generated&q=DEMO-SEMANTIC"));
+        assertTrue(script.contains("/api/semantic-metadata/treemap?group_by=tag&limit=200&status=generated&q=DEMO-SEMANTIC"));
+        assertTrue(script.contains("/api/semantic-metadata/markets?limit=200&status=generated&q=DEMO-SEMANTIC"));
+        assertTrue(script.contains("PASS semantic_metadata_fixture"));
         assertTrue(script.contains("FRONTEND_NO_PROXY=\"${FRONTEND_NO_PROXY:-127.0.0.1,localhost}\""));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
         assertTrue(script.contains("PASS featureplant_health"));
@@ -115,8 +125,32 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN=\"$EXPECTED_REFRESH_TOTAL_LOADED_MIN\""));
         assertTrue(script.contains("EXPECTED_FEATURE_COUNT_MIN=\"$EXPECTED_FEATURE_COUNT_MIN\""));
         assertTrue(script.contains("EXPECTED_HISTORY_BARS_MIN=\"$EXPECTED_HISTORY_BARS_MIN\""));
+        assertTrue(script.indexOf("long-replay must not update latest_market_state")
+            < script.lastIndexOf("wait_semantic_metadata_fixture"));
         assertFalse(script.contains("db-primary-demo-run-featureplant.sh"));
         assertFalse(script.contains("docker compose --profile featureplant run"));
+    }
+
+    @Test
+    void semanticMetadataDemoFixtureIsPrefixScopedAndIdempotent() throws Exception {
+        String script = read("scripts/semantic-metadata-demo-seed.sh");
+        String sql = read("scripts/semantic-metadata-demo-seed.sql").toLowerCase(Locale.ROOT);
+
+        assertTrue(script.contains("PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS=\"${PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS:-120}\""));
+        assertTrue(script.contains("SEMANTIC_DEMO_RUN_MIGRATIONS=\"${SEMANTIC_DEMO_RUN_MIGRATIONS:-true}\""));
+        assertTrue(script.contains("-v fixture_rows=\"$PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS\""));
+        assertTrue(script.contains("PASS semantic_metadata_demo_seed"));
+        assertTrue(script.contains("market_ticker like 'DEMO-SEMANTIC-%'"));
+        assertTrue(sql.contains("demo-semantic-%"));
+        assertTrue(sql.contains("fixture/semantic-demo-v1"));
+        assertTrue(sql.contains("market_metadata"));
+        assertTrue(sql.contains("market_semantic_metadata"));
+        assertTrue(sql.contains("latest_market_state"));
+        assertTrue(sql.contains("on conflict (market_ticker) do update"));
+        assertTrue(sql.contains("on conflict (market_ticker, taxonomy_version) do update"));
+        assertTrue(sql.contains("where latest_market_state.last_event_ts_ms is null"));
+        assertTrue(sql.contains("or excluded.last_event_ts_ms >= latest_market_state.last_event_ts_ms"));
+        assertFalse(sql.contains("openrouter"));
     }
 
     @Test
@@ -713,6 +747,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/operator/semantic-metadata/run"));
         assertTrue(app.contains("layoutSemanticTreemap"));
+        assertTrue(app.contains("semanticTileSizeClass"));
+        assertTrue(app.contains("semanticTileTitle"));
+        assertTrue(styles.contains("semantic-tile-small"));
+        assertTrue(styles.contains("semantic-tile-tiny"));
         assertTrue(styles.contains("semantic-treemap"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));
         assertTrue(chart.contains("v4.2.0"));
