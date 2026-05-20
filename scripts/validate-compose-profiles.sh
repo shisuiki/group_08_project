@@ -295,6 +295,89 @@ assert_live_product_db_writer_expectations() {
     printf 'PASS live_product_db_writer_expectations\n'
 }
 
+assert_kalshi_app_image_contract() {
+    app_image="example/kalshi:aj"
+    app_services="
+        node0:cluster-live
+        node0-capture:recording-capture
+        node1:cluster-live
+        node2:cluster-live
+        wsclient:cluster-live
+        wsclient-capture:recording-capture
+        raw-ingress-replay:raw-replay
+        historical-backfill:historical-backfill
+        streamtap:cluster-live
+        stream-recorder:recording-capture
+        featureplant:featureplant
+        featureplant-db-follower:db-primary-product
+        frontend-adapter-db-primary:db-primary-product
+        frontend-adapter:frontend-integration
+    "
+    for service_profile in $app_services; do
+        service="${service_profile%%:*}"
+        profile="${service_profile#*:}"
+        rendered="$(KALSHI_APP_IMAGE="$app_image" service_config_for "$service" --profile "$profile")"
+        if ! printf '%s\n' "$rendered" | grep -q "^    image: $app_image$"; then
+            printf 'profile %s service %s did not render KALSHI_APP_IMAGE image %s\n' \
+                "$profile" "$service" "$app_image" >&2
+            exit 1
+        fi
+        if ! printf '%s\n' "$rendered" | grep -Fq "      context: $REPO_ROOT"; then
+            printf 'profile %s service %s no longer builds from repo root\n' "$profile" "$service" >&2
+            exit 1
+        fi
+    done
+
+    s3_compose_block="$(awk '
+        /^  s3-recording-sync:$/ { capture = 1; print; next }
+        capture && /^  [A-Za-z0-9_.-]+:$/ { exit }
+        capture { print }
+    ' docker-compose.yml)"
+    if printf '%s\n' "$s3_compose_block" | grep -q 'KALSHI_APP_IMAGE'; then
+        printf 's3-recording-sync must not use KALSHI_APP_IMAGE\n' >&2
+        exit 1
+    fi
+    for expected in \
+        '    image: group_08_project-s3-recording-sync' \
+        '      dockerfile: ops/docker/s3-recording-sync.Dockerfile'; do
+        if ! printf '%s\n' "$s3_compose_block" | grep -Fq "$expected"; then
+            printf 's3-recording-sync missing dedicated image/build contract: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        'KALSHI_APP_IMAGE: kalshi-project:${{ github.sha }}' \
+        'docker save "$KALSHI_APP_IMAGE"' \
+        'actions/upload-artifact@v6' \
+        'actions/download-artifact@v7' \
+        'sudo docker load' \
+        'sudo docker image inspect "$KALSHI_APP_IMAGE"' \
+        'KALSHI_APP_IMAGE=$KALSHI_APP_IMAGE' \
+        'KALSHI_APP_IMAGE=$q_kalshi_app_image'; do
+        if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing immutable app image contract: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        'compose_app_image()' \
+        'env_file_value "$env_file" KALSHI_APP_IMAGE' \
+        'build_or_verify_app_image()' \
+        'sudo docker image inspect "$app_image"' \
+        'skipping Docker Compose build' \
+        'if ! build_or_verify_app_image "$env_file"; then' \
+        'if ! compose_profile "$env_file" build; then'; do
+        if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
+            printf 'rollback gate missing immutable app image behavior: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    printf 'PASS kalshi_app_image_contract services=java-apps image=%s\n' "$app_image"
+}
+
 assert_published_ports_loopback() {
     label="$1"
     shift
@@ -581,6 +664,7 @@ assert_db_primary_product_defaults_aligned
 assert_frontend_adapter_db_primary_static_root
 assert_cluster_live_db_writer_stays_opt_in
 assert_live_product_db_writer_expectations
+assert_kalshi_app_image_contract
 assert_frontend_adapter_metadata_env_present "local-db,frontend-integration" --profile local-db --profile frontend-integration
 assert_published_ports_loopback "cluster-live" --profile cluster-live
 assert_published_ports_loopback "single-node-local" --profile single-node-local

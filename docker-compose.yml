@@ -1,6 +1,7 @@
 services:
   node0:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["cluster-live", "single-node-local", "live-product"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
@@ -34,6 +35,7 @@ services:
 
   node0-capture:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["recording-capture"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
@@ -69,6 +71,7 @@ services:
 
   node1:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["cluster-live", "live-product"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
@@ -101,6 +104,7 @@ services:
 
   node2:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["cluster-live", "live-product"]
     environment:
       BACKEND_PROFILE: ${BACKEND_PROFILE:-docker}
@@ -133,6 +137,7 @@ services:
 
   wsclient:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["cluster-live", "live-product"]
     depends_on:
       - node0
@@ -195,6 +200,7 @@ services:
 
   wsclient-capture:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["recording-capture"]
     depends_on:
       - node0-capture
@@ -264,6 +270,7 @@ services:
 
   raw-ingress-replay:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["raw-replay"]
     environment:
       BACKEND_PROFILE: replay
@@ -341,6 +348,7 @@ services:
 
   historical-backfill:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["historical-backfill"]
     environment:
       BASE_DIR: /app
@@ -390,6 +398,7 @@ services:
 
   streamtap:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["cluster-live", "observability", "live-product"]
     restart: unless-stopped
     environment:
@@ -410,6 +419,7 @@ services:
 
   stream-recorder:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["recording-capture"]
     restart: unless-stopped
     environment:
@@ -464,6 +474,7 @@ services:
 
   featureplant:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["featureplant"]
     environment:
       BASE_DIR: /app
@@ -500,6 +511,7 @@ services:
 
   featureplant-db-follower:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["db-primary-product", "live-product"]
     depends_on:
       db-migrate:
@@ -542,6 +554,7 @@ services:
 
   frontend-adapter-db-primary:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["db-primary-product", "live-product"]
     depends_on:
       db-migrate:
@@ -587,6 +600,7 @@ services:
 
   frontend-adapter:
     build: .
+    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}
     profiles: ["frontend-integration"]
     environment:
       BASE_DIR: /app

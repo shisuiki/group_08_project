@@ -15,6 +15,7 @@ WSCLIENT_START_DELAY_SECONDS="${WSCLIENT_START_DELAY_SECONDS:-20}"
 DEPLOY_DB_PREFLIGHT_REQUIRED="${DEPLOY_DB_PREFLIGHT_REQUIRED:-false}"
 LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
+KALSHI_APP_IMAGE="${KALSHI_APP_IMAGE:-}"
 
 down_all_profiles() {
     sudo docker compose --env-file "$1" \
@@ -78,6 +79,34 @@ env_file_value() {
         return 0
     fi
     sed -n "s/^${key}=//p" "$env_file" | tail -n 1
+}
+
+compose_app_image() {
+    env_file="$1"
+    app_image="$(env_file_value "$env_file" KALSHI_APP_IMAGE)"
+    if [ -z "$app_image" ] && [ "$env_file" = "$CANDIDATE_ENV_FILE" ]; then
+        app_image="$KALSHI_APP_IMAGE"
+    fi
+    printf '%s\n' "$app_image"
+}
+
+build_or_verify_app_image() {
+    env_file="$1"
+    app_image="$(compose_app_image "$env_file")"
+    if [ -n "$app_image" ]; then
+        log "KALSHI_APP_IMAGE=$app_image is set; verifying image exists and skipping Docker Compose build."
+        if ! sudo docker image inspect "$app_image" >/dev/null 2>&1; then
+            log "KALSHI_APP_IMAGE image not found locally: $app_image"
+            return 1
+        fi
+        return 0
+    fi
+
+    log "Building Docker Compose services for DEPLOY_PROFILE=$DEPLOY_PROFILE before stopping current services."
+    if ! compose_profile "$env_file" build; then
+        log "Docker Compose build failed."
+        return 1
+    fi
 }
 
 is_true() {
@@ -387,9 +416,7 @@ deploy_env() {
         return 1
     fi
 
-    log "Building Docker Compose services for DEPLOY_PROFILE=$DEPLOY_PROFILE before stopping current services."
-    if ! compose_profile "$env_file" build; then
-        log "Docker Compose build failed."
+    if ! build_or_verify_app_image "$env_file"; then
         return 1
     fi
 

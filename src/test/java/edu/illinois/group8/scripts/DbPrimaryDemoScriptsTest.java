@@ -192,8 +192,16 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("required=\"true\""));
         assertTrue(script.contains("log \"Building Docker Compose services for DEPLOY_PROFILE=$DEPLOY_PROFILE before stopping current services.\""));
         assertTrue(script.contains("if ! compose_profile \"$env_file\" build; then"));
+        assertTrue(script.contains("compose_app_image()"));
+        assertTrue(script.contains("env_file_value \"$env_file\" KALSHI_APP_IMAGE"));
+        assertTrue(script.contains("build_or_verify_app_image()"));
+        assertTrue(script.contains("sudo docker image inspect \"$app_image\""));
+        assertTrue(script.contains("skipping Docker Compose build"));
+        assertTrue(script.contains("if ! build_or_verify_app_image \"$env_file\"; then"));
         assertTrue(script.contains("if ! run_db_release_preflight \"$env_file\"; then"));
         assertTrue(script.contains("log \"Stopping existing Compose services for controlled deploy.\""));
+        assertTrue(script.indexOf("if ! build_or_verify_app_image \"$env_file\"; then")
+            < script.indexOf("if ! run_db_release_preflight \"$env_file\"; then"));
         assertTrue(script.indexOf("if ! run_db_release_preflight \"$env_file\"; then")
             < script.indexOf("log \"Stopping existing Compose services for controlled deploy.\""));
         assertTrue(script.contains("if ! profile_health_smoke; then"));
@@ -221,6 +229,15 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("assert_published_ports_loopback \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_live_product_manual_smoke_contract"));
+        assertTrue(script.contains("assert_kalshi_app_image_contract"));
+        assertTrue(script.contains("app_image=\"example/kalshi:aj\""));
+        assertTrue(script.contains("KALSHI_APP_IMAGE=\"$app_image\""));
+        assertTrue(script.contains("^    image: $app_image$"));
+        assertTrue(script.contains("s3-recording-sync must not use KALSHI_APP_IMAGE"));
+        assertTrue(script.contains("actions/upload-artifact@v6"));
+        assertTrue(script.contains("actions/download-artifact@v7"));
+        assertTrue(script.contains("sudo docker image inspect \"$app_image\""));
+        assertTrue(script.contains("skipping Docker Compose build"));
         assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: \\${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}"));
         assertTrue(script.contains("'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE'"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
@@ -260,6 +277,37 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$q_live_product_semantic_smoke_enabled"));
+    }
+
+    @Test
+    void deployWorkflowShipsImmutableCiBuiltAppImage() throws Exception {
+        String workflow = read(".github/workflows/deploy-ec2.yml");
+        String compose = read("docker-compose.yml");
+
+        assertTrue(workflow.contains("KALSHI_APP_IMAGE: kalshi-project:${{ github.sha }}"));
+        assertTrue(workflow.contains("docker build --pull --build-arg MAVEN_PACKAGE_ARGS=\"-DskipTests package\" -t \"$KALSHI_APP_IMAGE\" ."));
+        assertTrue(workflow.contains("docker image inspect \"$KALSHI_APP_IMAGE\""));
+        assertTrue(workflow.contains("docker save \"$KALSHI_APP_IMAGE\" | gzip -1"));
+        assertTrue(workflow.contains("uses: actions/upload-artifact@v6"));
+        assertTrue(workflow.contains("uses: actions/download-artifact@v7"));
+        assertTrue(workflow.contains("kalshi-project-image-${{ github.sha }}"));
+        assertTrue(workflow.contains("gzip -dc \"\\$IMAGE_TAR\" | sudo docker load"));
+        assertTrue(workflow.contains("sudo docker image inspect \"$KALSHI_APP_IMAGE\" >/dev/null"));
+        assertTrue(workflow.contains("KALSHI_APP_IMAGE=$KALSHI_APP_IMAGE"));
+        assertTrue(workflow.contains("printf -v q_kalshi_app_image '%q' \"$KALSHI_APP_IMAGE\""));
+        assertTrue(workflow.contains("KALSHI_APP_IMAGE=$q_kalshi_app_image"));
+
+        for (String service : new String[] {
+            "node0", "node0-capture", "node1", "node2", "wsclient", "wsclient-capture",
+            "raw-ingress-replay", "historical-backfill", "streamtap", "stream-recorder",
+            "featureplant", "featureplant-db-follower", "frontend-adapter-db-primary",
+            "frontend-adapter"
+        }) {
+            assertTrue(
+                compose.contains("  " + service + ":\n    build: .\n    image: ${KALSHI_APP_IMAGE:-kalshi-project:local}"),
+                "missing KALSHI_APP_IMAGE contract for " + service);
+        }
+        assertTrue(compose.contains("  s3-recording-sync:\n    build:\n      context: .\n      dockerfile: ops/docker/s3-recording-sync.Dockerfile\n    image: group_08_project-s3-recording-sync"));
     }
 
     @Test
