@@ -14,6 +14,7 @@ SMOKE_HTTP_ATTEMPTS="${SMOKE_HTTP_ATTEMPTS:-45}"
 SMOKE_HTTP_RETRY_SLEEP_SECONDS="${SMOKE_HTTP_RETRY_SLEEP_SECONDS:-1}"
 SMOKE_DB_ATTEMPTS="${SMOKE_DB_ATTEMPTS:-90}"
 SMOKE_DB_RETRY_SLEEP_SECONDS="${SMOKE_DB_RETRY_SLEEP_SECONDS:-1}"
+LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS="${LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS:-30000}"
 LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="${LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA:-false}"
 LIVE_PRODUCT_RELIABILITY_WINDOW_SECONDS="${LIVE_PRODUCT_RELIABILITY_WINDOW_SECONDS:-300}"
 LIVE_PRODUCT_RELIABILITY_ROW_LIMIT="${LIVE_PRODUCT_RELIABILITY_ROW_LIMIT:-1000}"
@@ -95,6 +96,10 @@ is_true() {
         true|TRUE|True|1|yes|YES|Yes) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+now_ms() {
+    date +%s%3N
 }
 
 docker_compose() {
@@ -489,6 +494,10 @@ feature_outputs_for_source_event() {
 
 latest_non_smoke_feature_output_after() {
     db_probe latestNonSmokeFeatureOutputAfter --after-commit-seq="$1"
+}
+
+product_latency_for_source_event() {
+    db_probe latencyForSourceEvent --source-event-id="$1"
 }
 
 seed_canonical_events() {
@@ -1047,7 +1056,9 @@ seed_prefix="live-product-smoke-${run_id}"
 market_ticker="${LIVE_PRODUCT_SMOKE_MARKET_TICKER:-LIVE-PRODUCT-SMOKE-${run_id}}"
 bbo_event_id="${seed_prefix}-bbo-001"
 
+seed_start_ms="$(now_ms)"
 seed_result="$(seed_canonical_events "$run_id" "$market_ticker" "$seed_prefix")"
+seed_commit_ms="$(now_ms)"
 seeded_count="$(printf '%s\n' "$seed_result" | awk -F '|' 'NR == 1 {print $1}')"
 target_commit_seq="$(printf '%s\n' "$seed_result" | awk -F '|' 'NR == 1 {print $2}')"
 if [ "$seeded_count" -ne 3 ] || [ "$target_commit_seq" -le "$cursor_before" ]; then
@@ -1058,7 +1069,10 @@ fi
 printf 'PASS live_product_seed market=%s prefix=%s seeded_canonical_events=%s cursor_before=%s target_commit_seq=%s\n' \
     "$market_ticker" "$seed_prefix" "$seeded_count" "$cursor_before" "$target_commit_seq"
 
+seed_cursor_after="$(wait_featureplant_cursor_caught_up "$target_commit_seq")"
+seed_cursor_done_ms="$(now_ms)"
 follow_result="$(wait_featureplant_followed_seed "$seed_prefix" "$target_commit_seq")"
+feature_done_ms="$(now_ms)"
 feature_outputs_after="$(printf '%s\n' "$follow_result" | sed -n '1p')"
 cursor_after="$(printf '%s\n' "$follow_result" | sed -n '2p')"
 printf 'PASS featureplant_followed_seed prefix=%s feature_outputs=%s cursor_after=%s expected_cursor_at_least=%s\n' \
@@ -1073,8 +1087,52 @@ frontend_readiness_status_after="$(printf '%s\n' "$frontend_after" | sed -n '4p'
 frontend_readiness_stale_after="$(printf '%s\n' "$frontend_after" | sed -n '5p')"
 frontend_readiness_degraded_after="$(printf '%s\n' "$frontend_after" | sed -n '6p')"
 wait_frontend_feature_output "$market_ticker" "$bbo_event_id"
+feature_http_done_ms="$(now_ms)"
 wait_frontend_quote "$market_ticker"
+quote_done_ms="$(now_ms)"
 wait_frontend_quote_stream "$market_ticker" 461500
+sse_done_ms="$(now_ms)"
+
+latency_result="$(product_latency_for_source_event "$bbo_event_id")"
+latency_status="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $1}')"
+latency_source_event_id="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $2}')"
+latency_canonical_commit_seq="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $3}')"
+latency_latest_market_state_commit_seq="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $7}')"
+canonical_to_feature_ms="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $8}')"
+feature_to_latest_state_ms="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $9}')"
+canonical_to_latest_state_ms="$(printf '%s\n' "$latency_result" | awk -F '|' 'NR == 1 {print $10}')"
+seed_to_cursor_ms=$((seed_cursor_done_ms - seed_commit_ms))
+seed_to_feature_ms=$((feature_done_ms - seed_commit_ms))
+seed_to_frontend_feature_ms=$((feature_http_done_ms - seed_commit_ms))
+seed_to_frontend_quote_ms=$((quote_done_ms - seed_commit_ms))
+seed_to_sse_ms=$((sse_done_ms - seed_commit_ms))
+seed_insert_ms=$((seed_commit_ms - seed_start_ms))
+product_latency_status="$latency_status"
+if [ "$product_latency_status" = "ok" ]; then
+    for latency_ms in \
+        "$canonical_to_feature_ms" \
+        "$feature_to_latest_state_ms" \
+        "$canonical_to_latest_state_ms" \
+        "$seed_to_feature_ms" \
+        "$seed_to_frontend_quote_ms" \
+        "$seed_to_sse_ms"; do
+        if [ "$latency_ms" -gt "$LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS" ]; then
+            product_latency_status="latency_budget_exceeded"
+        fi
+    done
+fi
+printf 'PASS product_latency market=%s run_id=%s source_event_id=%s canonical_commit_seq=%s latest_market_state_commit_seq=%s canonical_to_feature_ms=%s feature_to_latest_state_ms=%s canonical_to_latest_state_ms=%s seed_to_cursor_ms=%s seed_to_feature_ms=%s seed_to_frontend_feature_ms=%s seed_to_frontend_quote_ms=%s seed_to_sse_ms=%s seed_insert_ms=%s max_allowed_ms=%s status=%s\n' \
+    "$market_ticker" "$run_id" "$latency_source_event_id" "$latency_canonical_commit_seq" "$latency_latest_market_state_commit_seq" \
+    "$canonical_to_feature_ms" "$feature_to_latest_state_ms" "$canonical_to_latest_state_ms" \
+    "$seed_to_cursor_ms" "$seed_to_feature_ms" "$seed_to_frontend_feature_ms" "$seed_to_frontend_quote_ms" \
+    "$seed_to_sse_ms" "$seed_insert_ms" "$LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS" "$product_latency_status"
+if [ "$product_latency_status" != "ok" ]; then
+    printf 'product latency evidence is not ok: status=%s source_event_id=%s max_allowed_ms=%s seed_to_frontend_quote_ms=%s seed_to_sse_ms=%s canonical_to_latest_state_ms=%s\n' \
+        "$product_latency_status" "$latency_source_event_id" "$LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS" \
+        "$seed_to_frontend_quote_ms" "$seed_to_sse_ms" "$canonical_to_latest_state_ms" >&2
+    print_diagnostics
+    exit 1
+fi
 
 wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health

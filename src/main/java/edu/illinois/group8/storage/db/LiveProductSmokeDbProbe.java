@@ -77,6 +77,65 @@ public final class LiveProductSmokeDbProbe {
         order by ce.canonical_commit_seq desc, fo.created_at desc, fo.feature_event_id desc
         limit 1
         """;
+    static final String LATENCY_FOR_SOURCE_EVENT_SQL = """
+        with canonical as (
+            select
+                event_id,
+                market_ticker,
+                canonical_commit_seq,
+                (extract(epoch from created_at) * 1000)::bigint as canonical_created_at_ms
+            from canonical_events
+            where event_id = ?
+        ),
+        timings as (
+            select
+                c.event_id,
+                c.canonical_commit_seq,
+                c.canonical_created_at_ms,
+                fo.feature_output_created_at_ms,
+                lms.latest_market_state_updated_at_ms,
+                lms.last_canonical_commit_seq as latest_market_state_commit_seq
+            from canonical c
+            left join lateral (
+                select
+                    (extract(epoch from fo.created_at) * 1000)::bigint as feature_output_created_at_ms
+                from feature_outputs fo
+                where fo.source_event_id = c.event_id
+                order by fo.created_at desc, fo.feature_event_id desc
+                limit 1
+            ) fo on true
+            left join lateral (
+                select
+                    (extract(epoch from lms.updated_at) * 1000)::bigint as latest_market_state_updated_at_ms,
+                    lms.last_canonical_commit_seq
+                from latest_market_state lms
+                where lms.last_canonical_commit_seq = c.canonical_commit_seq
+                  and (c.market_ticker is null or lms.market_ticker = c.market_ticker)
+                order by lms.updated_at desc, lms.market_ticker asc
+                limit 1
+            ) lms on true
+        )
+        select
+            event_id,
+            canonical_commit_seq,
+            canonical_created_at_ms,
+            coalesce(feature_output_created_at_ms, -1),
+            coalesce(latest_market_state_updated_at_ms, -1),
+            coalesce(latest_market_state_commit_seq, -1),
+            case
+                when feature_output_created_at_ms is null then -1
+                else greatest(0, feature_output_created_at_ms - canonical_created_at_ms)
+            end,
+            case
+                when feature_output_created_at_ms is null or latest_market_state_updated_at_ms is null then -1
+                else greatest(0, latest_market_state_updated_at_ms - feature_output_created_at_ms)
+            end,
+            case
+                when latest_market_state_updated_at_ms is null then -1
+                else greatest(0, latest_market_state_updated_at_ms - canonical_created_at_ms)
+            end
+        from timings
+        """;
     static final String RAW_PROGRESS_SQL = """
         select
             count(*),
@@ -328,6 +387,34 @@ public final class LiveProductSmokeDbProbe {
         }
     }
 
+    public ProductLatencySummary latencyForSourceEvent(String sourceEventId) {
+        String normalizedSourceEventId = normalize(sourceEventId, "sourceEventId");
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(LATENCY_FOR_SOURCE_EVENT_SQL)) {
+            statement.setString(1, normalizedSourceEventId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return ProductLatencySummary.missingCanonicalEvent(normalizedSourceEventId);
+                }
+                ProductLatencySummary summary = new ProductLatencySummary(
+                    latencyStatus(resultSet.getLong(4), resultSet.getLong(5)),
+                    resultSet.getString(1),
+                    resultSet.getLong(2),
+                    resultSet.getLong(3),
+                    resultSet.getLong(4),
+                    resultSet.getLong(5),
+                    resultSet.getLong(6),
+                    resultSet.getLong(7),
+                    resultSet.getLong(8),
+                    resultSet.getLong(9)
+                );
+                return summary;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read live-product latency for source event", e);
+        }
+    }
+
     public PipelineReliabilitySnapshot pipelineReliabilitySnapshot(
         String cursorName,
         long windowSeconds,
@@ -562,6 +649,16 @@ public final class LiveProductSmokeDbProbe {
         return "ok";
     }
 
+    private static String latencyStatus(long featureOutputCreatedAtMs, long latestMarketStateUpdatedAtMs) {
+        if (featureOutputCreatedAtMs < 0L) {
+            return "missing_feature_output";
+        }
+        if (latestMarketStateUpdatedAtMs < 0L) {
+            return "missing_latest_market_state";
+        }
+        return "ok";
+    }
+
     private static void rollback(Connection connection, Exception cause) {
         try {
             connection.rollback();
@@ -640,6 +737,34 @@ public final class LiveProductSmokeDbProbe {
         long featureLatestAgeMs,
         long rawWithoutCanonicalCount
     ) {
+    }
+
+    public record ProductLatencySummary(
+        String status,
+        String sourceEventId,
+        long canonicalCommitSeq,
+        long canonicalCreatedAtMs,
+        long featureOutputCreatedAtMs,
+        long latestMarketStateUpdatedAtMs,
+        long latestMarketStateCommitSeq,
+        long canonicalToFeatureMs,
+        long featureToLatestStateMs,
+        long canonicalToLatestStateMs
+    ) {
+        private static ProductLatencySummary missingCanonicalEvent(String sourceEventId) {
+            return new ProductLatencySummary(
+                "missing_canonical_event",
+                sourceEventId,
+                -1L,
+                -1L,
+                -1L,
+                -1L,
+                -1L,
+                -1L,
+                -1L,
+                -1L
+            );
+        }
     }
 
     private record ProgressSummary(long count, long maxSequenceOrEventTs, long latestAgeMs) {

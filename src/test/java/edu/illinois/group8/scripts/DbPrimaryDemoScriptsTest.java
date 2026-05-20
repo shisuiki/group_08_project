@@ -141,6 +141,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FEATUREPLANT_DB_URL"));
         assertTrue(script.contains("FRONTEND_ADAPTER_DB_URL"));
         assertTrue(script.contains("EXPECTED_FEATURE_SOURCE=\"$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)\""));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS=\"${LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS:-30000}\""));
         assertTrue(script.contains("print(body.get(\"feature_source\") or \"\")"));
         assertTrue(script.contains("LiveProductSmokeDbProbeCli"));
         assertTrue(script.contains("db_probe_output=\"$tmpdir/db-probe.out\""));
@@ -152,6 +153,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("latestNonSmokeCanonicalAfter"));
         assertTrue(script.contains("featureOutputsForSourceEvent"));
         assertTrue(script.contains("latestNonSmokeFeatureOutputAfter"));
+        assertTrue(script.contains("latencyForSourceEvent"));
         assertTrue(script.contains("pipelineReliabilitySnapshot"));
         assertTrue(script.contains("PASS pipeline_reliability"));
         assertTrue(script.contains("wait_featureplant_cursor_caught_up"));
@@ -172,6 +174,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("if [ \"$seeded_count\" -ne 3 ] || [ \"$target_commit_seq\" -le \"$cursor_before\" ]; then"));
         assertTrue(script.contains("wait_featureplant_followed_seed \"$seed_prefix\" \"$target_commit_seq\""));
         assertTrue(script.contains("wait_featureplant_metrics \"$feature_outputs_after\""));
+        assertTrue(script.contains("product_latency_for_source_event()"));
+        assertTrue(script.contains("db_probe latencyForSourceEvent --source-event-id=\"$1\""));
         assertTrue(script.contains("wait_frontend_refresh_progress \"$frontend_started_at_before\" \"$frontend_loaded_before\" \"$frontend_errors_before\""));
         assertTrue(script.contains("wait_frontend_feature_output \"$market_ticker\" \"$bbo_event_id\""));
         assertTrue(script.contains("wait_frontend_quote \"$market_ticker\""));
@@ -179,6 +183,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("check_optional_live_data \"$max_commit_before\""));
         assertTrue(script.contains("product_readiness_status"));
         assertTrue(script.contains("PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s"));
+        assertTrue(script.contains("PASS product_latency market=%s run_id=%s source_event_id=%s"));
+        assertTrue(script.contains("canonical_to_feature_ms=%s"));
+        assertTrue(script.contains("seed_to_frontend_quote_ms=%s"));
+        assertTrue(script.contains("seed_to_sse_ms=%s"));
         assertTrue(script.contains("PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s"));
         assertTrue(
             script.indexOf("check_optional_live_data \"$max_commit_before\"")
@@ -262,6 +270,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_JSON"));
         assertTrue(script.contains("live_product_smoke_summary_json()"));
         assertTrue(script.contains("\"feature_source\": body.get(\"feature_source\")"));
+        assertTrue(script.contains("\"product_latency\": latest(passes.get(\"product_latency\", []))"));
+        assertTrue(script.contains("\"canonical_to_latest_state_ms\","));
+        assertTrue(script.contains("\"seed_to_frontend_quote_ms\","));
         assertTrue(script.contains("\"feature_source\","));
         assertTrue(script.contains("\"expected_feature_source\","));
         assertTrue(script.contains("> \"$smoke_stdout\" 2> \"$smoke_stderr\""));
@@ -384,6 +395,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("release evidence summary leaked forbidden value"));
         assertTrue(validator.contains("| evidence_artifact | live-product-release-evidence-release-sha-123-2 |"));
         assertTrue(validator.contains("| frontend_feature_source | latest_market_state |"));
+        assertTrue(validator.contains("\"product_latency\""));
+        assertTrue(validator.contains("| product_latency_seed_to_quote_ms | 500 |"));
+        assertTrue(validator.contains("missing-product-latency-release-evidence.json"));
+        assertTrue(validator.contains("accepted missing product_latency"));
+        assertTrue(validator.contains("slow-product-latency-release-evidence.json"));
+        assertTrue(validator.contains("accepted over-budget product_latency"));
         assertTrue(validator.contains("python3 -m json.tool \"$evidence_file\""));
         assertTrue(validator.contains("secret-db-password"));
         String verifier = read("scripts/verify-live-product-release-evidence.sh");
@@ -393,6 +410,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(verifier.contains("frontend health feature_source mismatch"));
         assertTrue(verifier.contains("final smoke feature_source mismatch"));
         assertTrue(verifier.contains("feature_source={at(final, 'feature_source')"));
+        assertTrue(verifier.contains("product_latency snapshot missing"));
+        assertTrue(verifier.contains("product_latency status must be ok"));
+        assertTrue(verifier.contains("seed_to_frontend_quote_ms"));
+        assertTrue(verifier.contains("exceeds max_allowed_ms"));
         assertTrue(verifier.contains("final product_readiness must not be degraded"));
         assertTrue(verifier.contains("final product_readiness status must be ok"));
 

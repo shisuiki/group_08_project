@@ -100,6 +100,21 @@ public final class LiveProductSmokeDbProbeCli {
                             + "|" + output.eventTsMs() + "|" + output.streamName() + "|" + output.commitSeq());
                     }
                 }
+                case "latencyForSourceEvent" -> {
+                    LiveProductSmokeDbProbe.ProductLatencySummary latency = probe.latencyForSourceEvent(
+                        required(config, "source-event-id")
+                    );
+                    out.println(latency.status()
+                        + "|" + latency.sourceEventId()
+                        + "|" + latency.canonicalCommitSeq()
+                        + "|" + latency.canonicalCreatedAtMs()
+                        + "|" + latency.featureOutputCreatedAtMs()
+                        + "|" + latency.latestMarketStateUpdatedAtMs()
+                        + "|" + latency.latestMarketStateCommitSeq()
+                        + "|" + latency.canonicalToFeatureMs()
+                        + "|" + latency.featureToLatestStateMs()
+                        + "|" + latency.canonicalToLatestStateMs());
+                }
                 case "pipelineReliabilitySnapshot" -> {
                     LiveProductSmokeDbProbe.PipelineReliabilitySnapshot snapshot =
                         probe.pipelineReliabilitySnapshot(
@@ -145,6 +160,7 @@ public final class LiveProductSmokeDbProbeCli {
               latestNonSmokeCanonicalAfter --after-commit-seq=<seq>
               featureOutputsForSourceEvent --source-event-id=<event-id>
               latestNonSmokeFeatureOutputAfter --after-commit-seq=<seq>
+              latencyForSourceEvent --source-event-id=<event-id>
               pipelineReliabilitySnapshot --cursor-name=<name> [--window-seconds=300] [--row-limit=1000]
 
             DB options:

@@ -825,6 +825,12 @@ assert_live_product_manual_smoke_contract() {
         'latestNonSmokeCanonicalAfter' \
         'featureOutputsForSourceEvent' \
         'latestNonSmokeFeatureOutputAfter' \
+        'latencyForSourceEvent' \
+        'LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS="${LIVE_PRODUCT_SMOKE_MAX_E2E_LATENCY_MS:-30000}"' \
+        'PASS product_latency' \
+        'canonical_to_feature_ms' \
+        'seed_to_frontend_quote_ms' \
+        'seed_to_sse_ms' \
         'wait_featureplant_cursor_caught_up' \
         'wait_frontend_live_feature_output' \
         'wait_frontend_health_non_smoke_freshness' \
@@ -858,6 +864,8 @@ assert_live_product_manual_smoke_contract() {
         'LATEST_NON_SMOKE_CANONICAL_AFTER_SQL' \
         'FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL' \
         'LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL' \
+        'LATENCY_FOR_SOURCE_EVENT_SQL' \
+        'latest_market_state' \
         'source_event_id like ?'; do
         if ! grep -Fq "$expected" "$smoke_probe"; then
             printf 'live-product smoke DB probe missing contract fragment: %s\n' "$expected" >&2

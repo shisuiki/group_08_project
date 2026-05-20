@@ -152,6 +152,81 @@ class LiveProductSmokeDbProbeCliTest {
     }
 
     @Test
+    void probeLatencyForSourceEventReadsExpectedRows() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.LATENCY_FOR_SOURCE_EVENT_SQL,
+                List.<Object[]>of(new Object[] {
+                    "live-event-1", 42L, 1_700_000_001_000L, 1_700_000_001_250L, 1_700_000_001_400L,
+                    42L, 250L, 150L, 400L
+                })
+            );
+        LiveProductSmokeDbProbe probe = new LiveProductSmokeDbProbe(jdbc::openConnection);
+
+        LiveProductSmokeDbProbe.ProductLatencySummary latency = probe.latencyForSourceEvent("live-event-1");
+
+        assertEquals("ok", latency.status());
+        assertEquals("live-event-1", latency.sourceEventId());
+        assertEquals(42L, latency.canonicalCommitSeq());
+        assertEquals(1_700_000_001_000L, latency.canonicalCreatedAtMs());
+        assertEquals(1_700_000_001_250L, latency.featureOutputCreatedAtMs());
+        assertEquals(1_700_000_001_400L, latency.latestMarketStateUpdatedAtMs());
+        assertEquals(42L, latency.latestMarketStateCommitSeq());
+        assertEquals(250L, latency.canonicalToFeatureMs());
+        assertEquals(150L, latency.featureToLatestStateMs());
+        assertEquals(400L, latency.canonicalToLatestStateMs());
+    }
+
+    @Test
+    void probeLatencyForSourceEventReportsMissingStates() {
+        LiveProductSmokeDbProbe missingCanonical = new LiveProductSmokeDbProbe(new RecordingJdbc()::openConnection);
+        LiveProductSmokeDbProbe.ProductLatencySummary missingCanonicalLatency =
+            missingCanonical.latencyForSourceEvent("missing-event");
+        assertEquals("missing_canonical_event", missingCanonicalLatency.status());
+        assertEquals("missing-event", missingCanonicalLatency.sourceEventId());
+        assertEquals(-1L, missingCanonicalLatency.canonicalToLatestStateMs());
+
+        RecordingJdbc missingFeatureJdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.LATENCY_FOR_SOURCE_EVENT_SQL,
+                List.<Object[]>of(new Object[] {
+                    "live-event-2", 43L, 1_700_000_002_000L, -1L, -1L, -1L, -1L, -1L, -1L
+                })
+            );
+        LiveProductSmokeDbProbe.ProductLatencySummary missingFeature =
+            new LiveProductSmokeDbProbe(missingFeatureJdbc::openConnection).latencyForSourceEvent("live-event-2");
+        assertEquals("missing_feature_output", missingFeature.status());
+        assertEquals(-1L, missingFeature.featureOutputCreatedAtMs());
+
+        RecordingJdbc missingLatestStateJdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.LATENCY_FOR_SOURCE_EVENT_SQL,
+                List.<Object[]>of(new Object[] {
+                    "live-event-3", 44L, 1_700_000_003_000L, 1_700_000_003_200L, -1L, -1L,
+                    200L, -1L, -1L
+                })
+            );
+        LiveProductSmokeDbProbe.ProductLatencySummary missingLatestState =
+            new LiveProductSmokeDbProbe(missingLatestStateJdbc::openConnection).latencyForSourceEvent("live-event-3");
+        assertEquals("missing_latest_market_state", missingLatestState.status());
+        assertEquals(200L, missingLatestState.canonicalToFeatureMs());
+        assertEquals(-1L, missingLatestState.featureToLatestStateMs());
+    }
+
+    @Test
+    void latencySqlJoinsCanonicalFeatureAndLatestStateTimings() {
+        String sql = LiveProductSmokeDbProbe.LATENCY_FOR_SOURCE_EVENT_SQL.toLowerCase(Locale.ROOT);
+
+        assertTrue(sql.contains("from canonical_events"));
+        assertTrue(sql.contains("from feature_outputs"));
+        assertTrue(sql.contains("from latest_market_state"));
+        assertTrue(sql.contains("extract(epoch from created_at)"));
+        assertTrue(sql.contains("extract(epoch from lms.updated_at)"));
+        assertTrue(sql.contains("last_canonical_commit_seq"));
+        assertTrue(sql.contains("greatest(0"));
+    }
+
+    @Test
     void probePipelineReliabilitySnapshotSummarizesBoundedProgress() {
         RecordingJdbc jdbc = new RecordingJdbc()
             .withRows(
@@ -294,6 +369,34 @@ class LiveProductSmokeDbProbeCliTest {
             latestFeature.err()
         ));
         assertEquals("live-event-1|feature.bbo|MKT-1|1700000000000|derived.top_of_book|42\n", latestFeature.stdout());
+    }
+
+    @Test
+    void cliPrintsLatencyForSourceEventShape() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.LATENCY_FOR_SOURCE_EVENT_SQL,
+                List.<Object[]>of(new Object[] {
+                    "live-event-1", 42L, 1_700_000_001_000L, 1_700_000_001_250L, 1_700_000_001_400L,
+                    42L, 250L, 150L, 400L
+                })
+            );
+        Output output = new Output();
+        LiveProductSmokeDbProbeCli.Config config = new LiveProductSmokeDbProbeCli.Config(
+            "latencyForSourceEvent",
+            "jdbc:postgresql://live/db",
+            "user",
+            "password",
+            Map.of("source-event-id", "live-event-1"),
+            false
+        );
+
+        assertEquals(0, LiveProductSmokeDbProbeCli.run(config, jdbc::openConnection, output.out(), output.err()));
+
+        assertEquals(
+            "ok|live-event-1|42|1700000001000|1700000001250|1700000001400|42|250|150|400\n",
+            output.stdout()
+        );
     }
 
     @Test

@@ -916,6 +916,24 @@ ALLOWED_KEYS = {
         "product_readiness_stale",
         "product_readiness_degraded",
     },
+    "product_latency": {
+        "market",
+        "run_id",
+        "source_event_id",
+        "canonical_commit_seq",
+        "latest_market_state_commit_seq",
+        "canonical_to_feature_ms",
+        "feature_to_latest_state_ms",
+        "canonical_to_latest_state_ms",
+        "seed_to_cursor_ms",
+        "seed_to_feature_ms",
+        "seed_to_frontend_feature_ms",
+        "seed_to_frontend_quote_ms",
+        "seed_to_sse_ms",
+        "seed_insert_ms",
+        "max_allowed_ms",
+        "status",
+    },
 }
 
 def convert(value):
@@ -982,6 +1000,7 @@ summary = {
     "pass_labels": sorted(passes),
     "pipeline_reliability": latest(passes.get("pipeline_reliability", [])),
     "frontend_health": frontend_health,
+    "product_latency": latest(passes.get("product_latency", [])),
     "final_pass": latest(passes.get("live_product_smoke", [])) is not None,
     "live_product_smoke": latest(passes.get("live_product_smoke", [])),
 }

@@ -133,6 +133,32 @@ if isinstance(final, dict):
     require(at(final, "product_readiness_degraded") is False, "final product_readiness must not be degraded")
     require(at(final, "product_readiness_status") == "ok", "final product_readiness status must be ok")
 
+product_latency = at(smoke, "product_latency")
+require(isinstance(product_latency, dict), "product_latency snapshot missing")
+if isinstance(product_latency, dict):
+    require(at(product_latency, "status") == "ok", "product_latency status must be ok")
+    for key in (
+        "canonical_commit_seq",
+        "latest_market_state_commit_seq",
+        "canonical_to_feature_ms",
+        "feature_to_latest_state_ms",
+        "canonical_to_latest_state_ms",
+        "seed_to_cursor_ms",
+        "seed_to_feature_ms",
+        "seed_to_frontend_feature_ms",
+        "seed_to_frontend_quote_ms",
+        "seed_to_sse_ms",
+        "seed_insert_ms",
+        "max_allowed_ms",
+    ):
+        require(isinstance(at(product_latency, key), int) and at(product_latency, key) >= 0, f"product_latency {key} must be non-negative integer")
+    max_allowed_ms = at(product_latency, "max_allowed_ms")
+    if isinstance(max_allowed_ms, int):
+        for key in ("seed_to_frontend_quote_ms", "seed_to_sse_ms"):
+            value = at(product_latency, key)
+            if isinstance(value, int):
+                require(value <= max_allowed_ms, f"product_latency {key} exceeds max_allowed_ms")
+
 if errors:
     for error in errors:
         print(f"FAIL live_product_release_evidence {error}", file=sys.stderr)
@@ -158,6 +184,8 @@ if summary_mode == "true":
         ("pipeline_status", at(pipeline, "status") if isinstance(pipeline, dict) else ""),
         ("final_product_readiness", at(final, "product_readiness_status") if isinstance(final, dict) else ""),
         ("frontend_feature_source", at(final, "feature_source") if isinstance(final, dict) else ""),
+        ("product_latency_seed_to_quote_ms", at(product_latency, "seed_to_frontend_quote_ms") if isinstance(product_latency, dict) else ""),
+        ("product_latency_seed_to_sse_ms", at(product_latency, "seed_to_sse_ms") if isinstance(product_latency, dict) else ""),
         ("frontend_release_sha", at(frontend_health, "release_sha") if isinstance(frontend_health, dict) else ""),
         ("frontend_release_profile", at(frontend_health, "release_profile") if isinstance(frontend_health, dict) else ""),
         ("evidence_artifact", artifact_name),
@@ -174,6 +202,8 @@ print(
     f"github_run_attempt={at(evidence, 'github_run_attempt') or ''} "
     f"pipeline_status={at(pipeline, 'status') if isinstance(pipeline, dict) else ''} "
     f"final_product_readiness={at(final, 'product_readiness_status') if isinstance(final, dict) else ''} "
-    f"feature_source={at(final, 'feature_source') if isinstance(final, dict) else ''}"
+    f"feature_source={at(final, 'feature_source') if isinstance(final, dict) else ''} "
+    f"seed_to_frontend_quote_ms={at(product_latency, 'seed_to_frontend_quote_ms') if isinstance(product_latency, dict) else ''} "
+    f"seed_to_sse_ms={at(product_latency, 'seed_to_sse_ms') if isinstance(product_latency, dict) else ''}"
 )
 PY
