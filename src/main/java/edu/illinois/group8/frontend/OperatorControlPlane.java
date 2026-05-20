@@ -15,6 +15,10 @@ final class OperatorControlPlane {
         "live-product-local-db",
         "live-product"
     );
+    private static final List<String> SEMANTIC_METADATA_READ_ENDPOINTS = List.of(
+        "/api/semantic-metadata/markets",
+        "/api/semantic-metadata/treemap"
+    );
 
     private final FrontendAdapterConfig config;
     private final FrontendReleaseInfo releaseInfo;
@@ -217,6 +221,10 @@ final class OperatorControlPlane {
         body.put("openrouter_api_key_file_configured", apiKeyFile);
         body.put("execution_mode", "offline_batch");
         body.put("runtime_execution_enabled", false);
+        body.put("read_api_enabled",
+            config.semanticMetadataStatusSource() != FrontendAdapterConfig.SemanticMetadataStatusSource.DISABLED
+                && !config.dbUrl().isBlank());
+        body.put("read_api_endpoints", SEMANTIC_METADATA_READ_ENDPOINTS);
         return body;
     }
 

@@ -23,12 +23,14 @@ import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.JdbcOperatorLatencyReader;
 import edu.illinois.group8.storage.db.JdbcOperatorPipelineStatusReader;
 import edu.illinois.group8.storage.db.JdbcOperatorSemanticMetadataStatusReader;
+import edu.illinois.group8.storage.db.JdbcSemanticMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.MarketMetadataReader;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,6 +70,7 @@ public final class FrontendAdapterMain {
                 buildOperatorPipelineStatusSupplier(config),
                 buildOperatorLatencyStatusFunction(config),
                 buildOperatorSemanticMetadataStatusSupplier(config),
+                buildSemanticMarketMetadataReader(config),
                 FrontendReleaseInfo.fromEnvironment()
             );
             server.start();
@@ -100,7 +103,13 @@ public final class FrontendAdapterMain {
             config,
             store,
             buildMarketMetadataCatalog(config),
-            () -> readFeaturePlantStats(metrics)
+            () -> readFeaturePlantStats(metrics),
+            FeatureOutputRefreshStatus::disabled,
+            buildOperatorPipelineStatusSupplier(config),
+            buildOperatorLatencyStatusFunction(config),
+            buildOperatorSemanticMetadataStatusSupplier(config),
+            buildSemanticMarketMetadataReader(config),
+            FrontendReleaseInfo.fromEnvironment()
         );
         server.start();
 
@@ -224,6 +233,18 @@ public final class FrontendAdapterMain {
                 );
             }
         };
+    }
+
+    static SemanticMarketMetadataReader buildSemanticMarketMetadataReader(FrontendAdapterConfig config) {
+        if (config.semanticMetadataStatusSource() == FrontendAdapterConfig.SemanticMetadataStatusSource.DISABLED
+            || config.dbUrl().isBlank()) {
+            return request -> List.of();
+        }
+        return JdbcSemanticMarketMetadataReader.fromDriverManager(
+            config.dbUrl(),
+            config.dbUser(),
+            config.dbPassword()
+        );
     }
 
     static FeatureOutputRefreshService.RowReader buildFeatureOutputRowReader(FrontendAdapterConfig config) {

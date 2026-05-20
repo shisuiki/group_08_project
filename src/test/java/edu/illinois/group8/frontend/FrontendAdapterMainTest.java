@@ -7,9 +7,12 @@ import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcSemanticMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReadRequest;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -140,6 +143,32 @@ class FrontendAdapterMainTest {
             FrontendAdapterMain.buildOperatorSemanticMetadataStatusSupplier(config);
 
         assertTrue(supplier != null);
+    }
+
+    @Test
+    void semanticMarketMetadataReaderIsDisabledWithoutDatabase() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db",
+            "LLM_METADATA_TAXONOMY_VERSION", "tax-v1"
+        ));
+
+        SemanticMarketMetadataReader reader = FrontendAdapterMain.buildSemanticMarketMetadataReader(config);
+
+        assertEquals(List.of(), reader.read(SemanticMarketMetadataReadRequest.defaultForTaxonomy("tax-v1")));
+    }
+
+    @Test
+    void semanticMarketMetadataReaderBuildsWithoutOpeningConnection() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi",
+            "FRONTEND_ADAPTER_DB_USER", "frontend",
+            "FRONTEND_ADAPTER_DB_PASSWORD", "secret",
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db"
+        ));
+
+        SemanticMarketMetadataReader reader = FrontendAdapterMain.buildSemanticMarketMetadataReader(config);
+
+        assertInstanceOf(JdbcSemanticMarketMetadataReader.class, reader);
     }
 
     @Test

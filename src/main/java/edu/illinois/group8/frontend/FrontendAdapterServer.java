@@ -12,6 +12,9 @@ import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReadRequest;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataRow;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -21,6 +24,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -45,6 +49,12 @@ public class FrontendAdapterServer {
     private static final int MAX_FEATURE_LIMIT = 500;
     private static final int DEFAULT_MARKET_LIMIT = 100;
     private static final int MAX_MARKET_LIMIT = 500;
+    private static final int DEFAULT_SEMANTIC_MARKET_LIMIT = 200;
+    private static final int MAX_SEMANTIC_MARKET_LIMIT = 500;
+    private static final List<String> SEMANTIC_METADATA_ENDPOINTS = List.of(
+        "/api/semantic-metadata/markets",
+        "/api/semantic-metadata/treemap"
+    );
     private static final int HTTP_WORKER_THREADS = 8;
     private static final int QUOTE_UPDATE_MAX_WAITERS = 4;
     private static final int QUOTE_STREAM_MAX_STREAMS = 2;
@@ -71,6 +81,7 @@ public class FrontendAdapterServer {
     private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
     private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
     private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
+    private final SemanticMarketMetadataReader semanticMarketMetadataReader;
     private final FrontendReleaseInfo releaseInfo;
     private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -189,6 +200,32 @@ public class FrontendAdapterServer {
         Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
         FrontendReleaseInfo releaseInfo
     ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            request -> List.of(),
+            releaseInfo
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo
+    ) {
         this.config = config;
         this.store = store;
         this.metadataCatalog = metadataCatalog == null
@@ -207,6 +244,9 @@ public class FrontendAdapterServer {
         this.operatorSemanticMetadataStatus = operatorSemanticMetadataStatus == null
             ? () -> OperatorSemanticMetadataStatus.disabled("", "", "")
             : operatorSemanticMetadataStatus;
+        this.semanticMarketMetadataReader = semanticMarketMetadataReader == null
+            ? request -> List.of()
+            : semanticMarketMetadataReader;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
     }
@@ -224,6 +264,8 @@ public class FrontendAdapterServer {
         bind("/quotes", this::handleQuotes);
         bind("/features", this::handleFeatures);
         bind("/markets", this::handleMarkets);
+        bind("/api/semantic-metadata/markets", this::handleSemanticMetadataMarkets);
+        bind("/api/semantic-metadata/treemap", this::handleSemanticMetadataTreemap);
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
         bind("/ops/pipeline", this::handleOpsPipeline);
@@ -681,6 +723,62 @@ public class FrontendAdapterServer {
         writeJson(exchange, 200, body);
     }
 
+    private void handleSemanticMetadataMarkets(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        SemanticMarketMetadataReadRequest request;
+        try {
+            request = semanticMetadataReadRequest(params);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+        if (semanticMetadataReadDisabled()) {
+            writeJson(exchange, 200, semanticMetadataUnavailableBody("disabled", request, List.of(), null));
+            return;
+        }
+        try {
+            List<Map<String, Object>> markets = semanticMarketMetadataReader.read(request).stream()
+                .map(FrontendAdapterServer::semanticMarketBody)
+                .toList();
+            Map<String, Object> body = semanticMetadataUnavailableBody("ok", request, markets, null);
+            body.put("markets", markets);
+            writeJson(exchange, 200, body);
+        } catch (RuntimeException e) {
+            writeJson(exchange, 200, semanticMetadataUnavailableBody("unavailable", request, List.of(), e.getMessage()));
+        }
+    }
+
+    private void handleSemanticMetadataTreemap(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        SemanticMarketMetadataReadRequest request;
+        String groupBy;
+        try {
+            request = semanticMetadataReadRequest(params);
+            groupBy = semanticTreemapGroupBy(params.get("group_by"));
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+        if (semanticMetadataReadDisabled()) {
+            writeJson(exchange, 200, semanticTreemapBody("disabled", request, groupBy, List.of(), null));
+            return;
+        }
+        try {
+            List<SemanticMarketMetadataRow> rows = semanticMarketMetadataReader.read(request);
+            writeJson(exchange, 200, semanticTreemapBody("ok", request, groupBy, rows, null));
+        } catch (RuntimeException e) {
+            writeJson(exchange, 200, semanticTreemapBody("unavailable", request, groupBy, List.of(), e.getMessage()));
+        }
+    }
+
     private void handleHealth(HttpExchange exchange) throws IOException {
         FeaturePlantStats stats = featurePlantStats.get();
         long nowMs = System.currentTimeMillis();
@@ -1014,6 +1112,278 @@ public class FrontendAdapterServer {
         return body;
     }
 
+    private SemanticMarketMetadataReadRequest semanticMetadataReadRequest(Map<String, String> params) {
+        int limit = parseLimit(params.get("limit"), DEFAULT_SEMANTIC_MARKET_LIMIT, MAX_SEMANTIC_MARKET_LIMIT);
+        String taxonomyVersion = firstNonBlank(
+            params.get("taxonomy_version"),
+            config.llmMetadataTaxonomyVersion(),
+            "v1"
+        );
+        String rawStatus = normalize(params.get("status"));
+        String semanticStatus = firstNonBlankOrNull(
+            params.get("semantic_status"),
+            truthy(params.get("generated")) ? "generated" : null,
+            isSemanticMetadataStatus(rawStatus) ? rawStatus : null
+        );
+        String marketStatus = firstNonBlankOrNull(
+            params.get("market_status"),
+            rawStatus != null && !isSemanticMetadataStatus(rawStatus) ? rawStatus : null
+        );
+        return new SemanticMarketMetadataReadRequest(
+            taxonomyVersion,
+            firstNonBlankOrNull(params.get("market_ticker"), params.get("ticker"), params.get("symbol")),
+            semanticStatus,
+            marketStatus,
+            normalize(params.get("tag")),
+            firstNonBlankOrNull(params.get("q"), params.get("search"), params.get("query")),
+            limit
+        );
+    }
+
+    private boolean semanticMetadataReadDisabled() {
+        return config.semanticMetadataStatusSource() == FrontendAdapterConfig.SemanticMetadataStatusSource.DISABLED
+            || config.dbUrl().isBlank();
+    }
+
+    private static Map<String, Object> semanticMetadataUnavailableBody(
+        String status,
+        SemanticMarketMetadataReadRequest request,
+        List<Map<String, Object>> markets,
+        String error
+    ) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", status);
+        body.put("taxonomy_version", request.taxonomyVersion());
+        body.put("limit", request.maxRows());
+        body.put("count", markets.size());
+        body.put("endpoints", SEMANTIC_METADATA_ENDPOINTS);
+        body.put("markets", markets);
+        if (error != null) {
+            body.put("error", operatorVisibleError(error));
+        }
+        return body;
+    }
+
+    private static Map<String, Object> semanticTreemapBody(
+        String status,
+        SemanticMarketMetadataReadRequest request,
+        String groupBy,
+        List<SemanticMarketMetadataRow> rows,
+        String error
+    ) {
+        Map<String, SemanticTreemapGroup> groups = new LinkedHashMap<>();
+        for (SemanticMarketMetadataRow row : rows) {
+            for (String key : semanticGroupKeys(row, groupBy)) {
+                groups.computeIfAbsent(key, value -> new SemanticTreemapGroup(groupBy, value)).add(row);
+            }
+        }
+        List<Map<String, Object>> groupBodies = groups.values().stream()
+            .map(SemanticTreemapGroup::body)
+            .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", status);
+        body.put("taxonomy_version", request.taxonomyVersion());
+        body.put("group_by", groupBy);
+        body.put("limit", request.maxRows());
+        body.put("count", rows.size());
+        body.put("endpoints", SEMANTIC_METADATA_ENDPOINTS);
+        body.put("groups", groupBodies);
+        if (error != null) {
+            body.put("error", operatorVisibleError(error));
+        }
+        return body;
+    }
+
+    private static Map<String, Object> semanticMarketBody(SemanticMarketMetadataRow row) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("market_ticker", row.marketTicker());
+        body.put("event_ticker", row.eventTicker());
+        body.put("series_ticker", row.seriesTicker());
+        body.put("status", row.marketStatus());
+        body.put("title", row.marketTitle());
+        body.put("semantic_metadata", semanticDetailsBody(row));
+        body.put("quote", semanticQuoteBody(row));
+        return body;
+    }
+
+    private static Map<String, Object> semanticDetailsBody(SemanticMarketMetadataRow row) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("taxonomy_version", row.taxonomyVersion());
+        body.put("model", row.model());
+        body.put("prompt_version", row.promptVersion());
+        body.put("status", row.semanticStatus());
+        body.put("sector", row.sector());
+        body.put("subsector", row.subsector());
+        body.put("event_type", row.eventType());
+        body.put("region", row.region());
+        body.put("time_horizon", row.timeHorizon());
+        body.put("liquidity_bucket", row.liquidityBucket());
+        body.put("risk_bucket", row.riskBucket());
+        body.put("tags", row.tags());
+        body.put("confidence", row.confidence());
+        body.put("rationale", row.rationale());
+        body.put("generated_at", row.generatedAt() == null ? null : row.generatedAt().toString());
+        body.put("updated_at", row.updatedAt() == null ? null : row.updatedAt().toString());
+        body.put("generated_age_ms", row.generatedAgeMs());
+        body.put("updated_age_ms", row.updatedAgeMs());
+        return body;
+    }
+
+    private static Map<String, Object> semanticQuoteBody(SemanticMarketMetadataRow row) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("last_event_ts_ms", row.lastEventTsMs());
+        body.put("last_canonical_event_id", row.lastCanonicalEventId());
+        body.put("last_canonical_commit_seq", row.lastCanonicalCommitSeq());
+        body.put("best_bid_micros", row.bestBidMicros());
+        body.put("best_ask_micros", row.bestAskMicros());
+        body.put("midpoint_micros", row.midpointMicros());
+        body.put("open_interest", row.openInterest());
+        body.put("latest_state_updated_at",
+            row.latestStateUpdatedAt() == null ? null : row.latestStateUpdatedAt().toString());
+        body.put("latest_state_age_ms", row.latestStateAgeMs());
+        body.put("freshness_status", row.latestStateUpdatedAt() == null ? "missing_latest_state" : "available");
+        return body;
+    }
+
+    private static String semanticTreemapGroupBy(String raw) {
+        String value = normalize(raw);
+        if (value == null) {
+            return "sector";
+        }
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "sector", "subsector", "event_type", "tag" -> value.toLowerCase(Locale.ROOT);
+            default -> throw new IllegalArgumentException("group_by must be sector, subsector, event_type, or tag");
+        };
+    }
+
+    private static List<String> semanticGroupKeys(SemanticMarketMetadataRow row, String groupBy) {
+        return switch (groupBy) {
+            case "subsector" -> List.of(fallbackGroup(row.subsector()));
+            case "event_type" -> List.of(fallbackGroup(row.eventType()));
+            case "tag" -> row.tags().isEmpty()
+                ? List.of("untagged")
+                : row.tags().stream().map(FrontendAdapterServer::fallbackGroup).distinct().toList();
+            case "sector" -> List.of(fallbackGroup(row.sector()));
+            default -> List.of("unknown");
+        };
+    }
+
+    private static String fallbackGroup(String value) {
+        String normalized = normalize(value);
+        return normalized == null ? "unknown" : normalized;
+    }
+
+    private static long semanticTreemapValue(SemanticMarketMetadataRow row) {
+        Long openInterest = row.openInterest();
+        return openInterest != null && openInterest > 0L ? openInterest : 1L;
+    }
+
+    private static boolean isSemanticMetadataStatus(String value) {
+        return switch (value == null ? "" : value.trim().toLowerCase(Locale.ROOT)) {
+            case "generated", "review_required", "failed", "rate_limited" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean truthy(String value) {
+        return switch (value == null ? "" : value.trim().toLowerCase(Locale.ROOT)) {
+            case "1", "true", "yes", "y", "on" -> true;
+            default -> false;
+        };
+    }
+
+    private static String firstNonBlank(String... values) {
+        String value = firstNonBlankOrNull(values);
+        return value == null ? "" : value;
+    }
+
+    private static String firstNonBlankOrNull(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String normalized = normalize(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    private static String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static final class SemanticTreemapGroup {
+        private final String groupBy;
+        private final String key;
+        private final List<Map<String, Object>> leaves = new ArrayList<>();
+        private long value;
+        private long generatedCount;
+        private long reviewRequiredCount;
+        private long failedCount;
+        private long rateLimitedCount;
+        private BigDecimal confidenceSum = BigDecimal.ZERO;
+        private long confidenceCount;
+
+        private SemanticTreemapGroup(String groupBy, String key) {
+            this.groupBy = groupBy;
+            this.key = key;
+        }
+
+        private void add(SemanticMarketMetadataRow row) {
+            long leafValue = semanticTreemapValue(row);
+            value += leafValue;
+            switch (row.semanticStatus()) {
+                case "generated" -> generatedCount++;
+                case "review_required" -> reviewRequiredCount++;
+                case "failed" -> failedCount++;
+                case "rate_limited" -> rateLimitedCount++;
+                default -> {
+                }
+            }
+            if (row.confidence() != null) {
+                confidenceSum = confidenceSum.add(row.confidence());
+                confidenceCount++;
+            }
+            Map<String, Object> leaf = new LinkedHashMap<>();
+            leaf.put("label", firstNonBlank(row.marketTitle(), row.marketTicker()));
+            leaf.put("market_ticker", row.marketTicker());
+            leaf.put("value", leafValue);
+            leaf.put("color_metric", row.confidence());
+            leaf.put("semantic_status", row.semanticStatus());
+            leaf.put("metadata_confidence", row.confidence());
+            leaf.put("sector", row.sector());
+            leaf.put("subsector", row.subsector());
+            leaf.put("event_type", row.eventType());
+            leaf.put("tags", row.tags());
+            leaf.put("quote", semanticQuoteBody(row));
+            leaves.add(leaf);
+        }
+
+        private Map<String, Object> body() {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("key", key);
+            body.put("label", key);
+            body.put("group_by", groupBy);
+            body.put("value", value);
+            body.put("count", leaves.size());
+            body.put("generated_count", generatedCount);
+            body.put("review_required_count", reviewRequiredCount);
+            body.put("failed_count", failedCount);
+            body.put("rate_limited_count", rateLimitedCount);
+            body.put("average_confidence", confidenceCount == 0L
+                ? null
+                : confidenceSum.divide(BigDecimal.valueOf(confidenceCount), java.math.MathContext.DECIMAL64));
+            body.put("leaves", leaves);
+            return body;
+        }
+    }
+
     private static Map<String, Object> semanticMetadataStatusBody(OperatorSemanticMetadataStatus status) {
         OperatorSemanticMetadataStatus view = status == null
             ? OperatorSemanticMetadataStatus.disabled("", "", "")
@@ -1033,9 +1403,23 @@ public class FrontendAdapterServer {
         body.put("runtime_status", "offline_batch_only");
         body.put("runtime_supported", false);
         body.put("execution_enabled", false);
+        body.put("read_api", semanticMetadataReadApiStatus(view));
         if (view.error() != null) {
             body.put("error", operatorVisibleError(view.error()));
         }
+        return body;
+    }
+
+    private static Map<String, Object> semanticMetadataReadApiStatus(OperatorSemanticMetadataStatus status) {
+        long rowCount = status.generatedCount()
+            + status.reviewRequiredCount()
+            + status.failedCount()
+            + status.rateLimitedCount();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("enabled", status.configured());
+        body.put("available", status.configured() && !"unavailable".equals(status.status()));
+        body.put("row_count", rowCount);
+        body.put("endpoints", SEMANTIC_METADATA_ENDPOINTS);
         return body;
     }
 

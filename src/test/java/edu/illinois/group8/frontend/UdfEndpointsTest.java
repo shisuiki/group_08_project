@@ -8,10 +8,14 @@ import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReadRequest;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
+import edu.illinois.group8.storage.db.SemanticMarketMetadataRow;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -814,10 +818,117 @@ class UdfEndpointsTest {
         assertEquals(3L, health.path("rate_limited_count").asLong());
         assertEquals("offline_batch_only", health.path("runtime_status").asText());
         assertFalse(health.path("execution_enabled").asBoolean());
+        assertTrue(health.path("read_api").path("available").asBoolean());
+        assertEquals(13L, health.path("read_api").path("row_count").asLong());
         assertEquals("tax-v1", operatorSemantic.path("taxonomy_version").asText());
         assertEquals("offline_batch", configSemantic.path("execution_mode").asText());
+        assertTrue(configSemantic.path("read_api_enabled").asBoolean());
         assertFalse(configSemantic.path("runtime_execution_enabled").asBoolean());
         assertFalse(status.toString().contains("OPENROUTER_API_KEY"));
+    }
+
+    @Test
+    void semanticMarketsEndpointReturnsRowsAndHidesRawResponse() throws Exception {
+        FakeSemanticMarketMetadataReader reader = restartWithSemanticReader(List.of(semanticRow("MKT-SEM", "weather")));
+
+        HttpResponse<String> response = get(
+            "/api/semantic-metadata/markets?limit=999&status=generated&tag=forecast&q=rain"
+        );
+        JsonNode body = MAPPER.readTree(response.body());
+
+        assertEquals(200, response.statusCode());
+        assertEquals("ok", body.path("status").asText());
+        assertEquals("tax-v1", body.path("taxonomy_version").asText());
+        assertEquals(500, body.path("limit").asInt());
+        assertEquals(1, body.path("count").asInt());
+        assertEquals("MKT-SEM", body.path("markets").get(0).path("market_ticker").asText());
+        assertEquals("Will it rain?", body.path("markets").get(0).path("title").asText());
+        JsonNode metadata = body.path("markets").get(0).path("semantic_metadata");
+        assertEquals("weather", metadata.path("sector").asText());
+        assertEquals("forecast", metadata.path("event_type").asText());
+        assertEquals("forecast", metadata.path("tags").get(0).asText());
+        assertEquals(450_000L, body.path("markets").get(0).path("quote").path("midpoint_micros").asLong());
+        assertFalse(response.body().contains("raw_response"));
+
+        SemanticMarketMetadataReadRequest request = reader.requests.get(0);
+        assertEquals("tax-v1", request.taxonomyVersion());
+        assertEquals("generated", request.semanticStatus());
+        assertEquals("forecast", request.tag());
+        assertEquals("rain", request.query());
+        assertEquals(500, request.maxRows());
+    }
+
+    @Test
+    void semanticTreemapEndpointGroupsRowsBySector() throws Exception {
+        restartWithSemanticReader(List.of(
+            semanticRow("MKT-SEM", "weather"),
+            semanticRow("MKT-POL", "politics")
+        ));
+
+        JsonNode body = getJson("/api/semantic-metadata/treemap?group_by=sector&limit=10");
+
+        assertEquals("ok", body.path("status").asText());
+        assertEquals("sector", body.path("group_by").asText());
+        assertEquals(2, body.path("count").asInt());
+        assertEquals(2, body.path("groups").size());
+        JsonNode weather = group(body.path("groups"), "weather");
+        assertEquals(123L, weather.path("value").asLong());
+        assertEquals(1, weather.path("count").asInt());
+        assertEquals("MKT-SEM", weather.path("leaves").get(0).path("market_ticker").asText());
+        assertEquals(123L, weather.path("leaves").get(0).path("quote").path("open_interest").asLong());
+        assertEquals("forecast", weather.path("leaves").get(0).path("tags").get(0).asText());
+    }
+
+    @Test
+    void semanticEndpointsReturnDisabledWhenSourceDisabled() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi",
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "disabled",
+            "LLM_METADATA_TAXONOMY_VERSION", "tax-v1"
+        ));
+        server = semanticServer(config, request -> {
+            throw new IllegalStateException("reader should not run");
+        });
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode markets = getJson("/api/semantic-metadata/markets");
+        JsonNode treemap = getJson("/api/semantic-metadata/treemap");
+
+        assertEquals("disabled", markets.path("status").asText());
+        assertEquals(0, markets.path("count").asInt());
+        assertTrue(markets.path("markets").isArray());
+        assertEquals(0, markets.path("markets").size());
+        assertEquals("disabled", treemap.path("status").asText());
+        assertEquals(0, treemap.path("groups").size());
+    }
+
+    @Test
+    void semanticEndpointsReturnUnavailableWithRedactedErrors() throws Exception {
+        String sensitive = "password=hunter2 Authorization: Basic secret-token";
+        restartWithSemanticReader(request -> {
+            throw new IllegalStateException(sensitive);
+        });
+
+        HttpResponse<String> response = get("/api/semantic-metadata/markets");
+        JsonNode body = MAPPER.readTree(response.body());
+
+        assertEquals(200, response.statusCode());
+        assertEquals("unavailable", body.path("status").asText());
+        assertEquals(0, body.path("count").asInt());
+        assertFalse(response.body().contains("hunter2"));
+        assertFalse(response.body().contains("secret-token"));
+        assertTrue(response.body().contains("[redacted]"));
+    }
+
+    @Test
+    void semanticEndpointsUseBasicAuth() throws Exception {
+        restartWithBasicAuth();
+
+        assertEquals(401, get("/api/semantic-metadata/markets").statusCode());
+        assertEquals(200, getWithBasicAuth("/api/semantic-metadata/markets", "operator", "secret").statusCode());
     }
 
     @Test
@@ -1609,6 +1720,119 @@ class UdfEndpointsTest {
             }
         }
         return false;
+    }
+
+    private FakeSemanticMarketMetadataReader restartWithSemanticReader(List<SemanticMarketMetadataRow> rows)
+        throws Exception {
+        FakeSemanticMarketMetadataReader reader = new FakeSemanticMarketMetadataReader(rows);
+        restartWithSemanticReader((SemanticMarketMetadataReader) reader);
+        return reader;
+    }
+
+    private void restartWithSemanticReader(SemanticMarketMetadataReader reader) throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi",
+            "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db",
+            "LLM_METADATA_TAXONOMY_VERSION", "tax-v1"
+        ));
+        server = semanticServer(config, reader);
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
+    private FrontendAdapterServer semanticServer(
+        FrontendAdapterConfig config,
+        SemanticMarketMetadataReader reader
+    ) {
+        return new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> new OperatorSemanticMetadataStatus(
+                "ok",
+                true,
+                "model",
+                "fallback",
+                config.llmMetadataTaxonomyVersion(),
+                1L,
+                0L,
+                0L,
+                0L,
+                Instant.parse("2026-05-20T00:00:00Z"),
+                10L,
+                null
+            ),
+            reader,
+            FrontendReleaseInfo.empty()
+        );
+    }
+
+    private static JsonNode group(JsonNode groups, String key) {
+        for (JsonNode group : groups) {
+            if (key.equals(group.path("key").asText())) {
+                return group;
+            }
+        }
+        throw new AssertionError("missing group " + key + ": " + groups);
+    }
+
+    private static SemanticMarketMetadataRow semanticRow(String marketTicker, String sector) {
+        boolean weather = "weather".equals(sector);
+        return new SemanticMarketMetadataRow(
+            marketTicker,
+            weather ? "EVENT-WEATHER" : "EVENT-POL",
+            weather ? "SERIES-WEATHER" : "SERIES-POL",
+            "open",
+            weather ? "Will it rain?" : "Who wins?",
+            "tax-v1",
+            "model",
+            "prompt-v1",
+            "generated",
+            sector,
+            weather ? "rain" : "election",
+            weather ? "forecast" : "election",
+            "us",
+            "daily",
+            "high",
+            "low",
+            weather ? List.of("forecast", "weather") : List.of("election"),
+            new BigDecimal(weather ? "0.83" : "0.72"),
+            "classification rationale",
+            Instant.parse("2026-05-20T00:00:00Z"),
+            Instant.parse("2026-05-20T00:00:01Z"),
+            20L,
+            10L,
+            1_000L,
+            "canonical-1",
+            42L,
+            440_000L,
+            460_000L,
+            450_000L,
+            weather ? 123L : 45L,
+            Instant.parse("2026-05-20T00:00:02Z"),
+            5L
+        );
+    }
+
+    private static final class FakeSemanticMarketMetadataReader implements SemanticMarketMetadataReader {
+        private final List<SemanticMarketMetadataRow> rows;
+        private final List<SemanticMarketMetadataReadRequest> requests = new ArrayList<>();
+
+        private FakeSemanticMarketMetadataReader(List<SemanticMarketMetadataRow> rows) {
+            this.rows = List.copyOf(rows);
+        }
+
+        @Override
+        public List<SemanticMarketMetadataRow> read(SemanticMarketMetadataReadRequest request) {
+            requests.add(request);
+            return rows;
+        }
     }
 
     private static FeatureOutput feature(String market, long eventTsMs, String sourceEventId, long midpointMicros) {
