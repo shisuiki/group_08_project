@@ -58,6 +58,7 @@ public class FrontendAdapterServer {
     private final FrontendMarketMetadataCatalog metadataCatalog;
     private final Supplier<FeaturePlantStats> featurePlantStats;
     private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
+    private final FrontendReleaseInfo releaseInfo;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
     private final BackendMetrics metrics = new BackendMetrics();
     private final ConcurrentHashMap<String, LongAdder> requestCounters = new ConcurrentHashMap<>();
@@ -98,6 +99,24 @@ public class FrontendAdapterServer {
         Supplier<FeaturePlantStats> featurePlantStats,
         Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus
     ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            FrontendReleaseInfo.fromEnvironment()
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        FrontendReleaseInfo releaseInfo
+    ) {
         this.config = config;
         this.store = store;
         this.metadataCatalog = metadataCatalog == null
@@ -107,6 +126,7 @@ public class FrontendAdapterServer {
         this.featureOutputRefreshStatus = featureOutputRefreshStatus == null
             ? FeatureOutputRefreshStatus::disabled
             : featureOutputRefreshStatus;
+        this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
     }
 
     public void start() throws IOException {
@@ -464,18 +484,21 @@ public class FrontendAdapterServer {
 
     private void handleHealth(HttpExchange exchange) throws IOException {
         FeaturePlantStats stats = featurePlantStats.get();
+        long nowMs = System.currentTimeMillis();
         Map<String, Object> health = new LinkedHashMap<>();
         health.put("status", "ok");
         health.put("service", "frontend-adapter");
+        health.put("release", releaseInfo.toBody());
         health.put("source_mode", config.sourceMode().name().toLowerCase(Locale.ROOT));
         health.put("feature_source", config.featureSource().name().toLowerCase(Locale.ROOT));
         health.put("started_at", java.time.Instant.ofEpochMilli(startedAtMs).toString());
-        health.put("uptime_ms", System.currentTimeMillis() - startedAtMs);
+        health.put("uptime_ms", nowMs - startedAtMs);
         Map<String, Object> storeView = new LinkedHashMap<>();
         storeView.put("symbols", store.symbolCount());
         storeView.put("total_features", store.totalAccepted());
         storeView.put("sequence", store.sequence());
         health.put("store", storeView);
+        health.put("data_freshness", dataFreshnessBody(store.latestFreshness(nowMs)));
         Map<String, Object> quoteUpdatesView = new LinkedHashMap<>();
         quoteUpdatesView.put("requests", quoteUpdateRequests.sum());
         quoteUpdatesView.put("changed", quoteUpdateChanged.sum());
@@ -605,6 +628,17 @@ public class FrontendAdapterServer {
         body.put("last_row_count", view.lastRowCount());
         body.put("total_loaded", view.totalLoaded());
         body.put("refresh_errors", view.refreshErrors());
+        return body;
+    }
+
+    private static Map<String, Object> dataFreshnessBody(FrontendFeatureStore.DataFreshness freshness) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("latest_event_ts_ms", freshness.latestEventTsMs());
+        body.put("latest_event_age_ms", freshness.latestEventAgeMs());
+        body.put("symbol", freshness.symbol());
+        body.put("feature_name", freshness.featureName());
+        body.put("source_event_id", freshness.sourceEventId());
+        body.put("store_sequence", freshness.storeSequence());
         return body;
     }
 

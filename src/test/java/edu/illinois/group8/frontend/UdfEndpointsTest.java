@@ -194,6 +194,10 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("market-list"));
         assertTrue(root.body().contains("feature-list"));
         assertTrue(root.body().contains("Runtime Health"));
+        assertTrue(root.body().contains("id=\"release-identity\""));
+        assertTrue(root.body().contains("id=\"health-data-age\""));
+        assertTrue(root.body().contains("<dt>Release</dt>"));
+        assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("placeholder=\"same origin\""));
         assertTrue(index.body().contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
         assertTrue(index.body().contains(
@@ -220,6 +224,11 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/markets?limit=100"));
         assertTrue(js.body().contains("/features?symbol="));
         assertTrue(js.body().contains("/health"));
+        assertTrue(js.body().contains("document.getElementById('release-identity')"));
+        assertTrue(js.body().contains("document.getElementById('health-data-age')"));
+        assertTrue(js.body().contains("body.release"));
+        assertTrue(js.body().contains("body.data_freshness"));
+        assertTrue(js.body().contains("latest_event_ts_ms"));
         assertTrue(js.body().contains("nextSequence < quoteSequence"));
         assertTrue(js.body().contains("window.location.origin"));
         assertTrue(css.body().contains("chart-container"));
@@ -381,9 +390,58 @@ class UdfEndpointsTest {
         assertEquals(42L, body.path("feature_plant").path("events_in").asLong());
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
         assertTrue(body.path("store").path("sequence").asLong() > 0L);
+        assertFalse(body.path("release").isMissingNode());
+        assertEquals(5_000L, body.path("data_freshness").path("latest_event_ts_ms").asLong());
+        assertEquals("MKT-1", body.path("data_freshness").path("symbol").asText());
+        assertEquals("feature.bbo", body.path("data_freshness").path("feature_name").asText());
+        assertEquals("evt-5000", body.path("data_freshness").path("source_event_id").asText());
+        assertTrue(body.path("data_freshness").path("latest_event_age_ms").asLong() >= 0L);
         assertEquals(0L, body.path("quote_updates").path("timeouts").asLong());
         assertEquals(0L, body.path("quote_updates").path("rejected").asLong());
         assertEquals(4, body.path("quote_updates").path("max_waits").asInt());
+    }
+
+    @Test
+    void healthReportsReleaseIdentityAndDataFreshness() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(new FeatureOutput(
+            FrontendFeatureStore.BBO_FEATURE,
+            FrontendFeatureStore.BBO_FEATURE,
+            "MKT-REL",
+            System.currentTimeMillis() - 250L,
+            "evt-release",
+            Map.of(
+                "bid_price_micros", 450_000L,
+                "ask_price_micros", 550_000L,
+                "midpoint_micros", 500_000L
+            )
+        ));
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            new FrontendReleaseInfo("abcdef1234567890", "kalshi-project:abcdef", "live-product", "261", "2")
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode body = getJson("/health");
+
+        assertEquals("abcdef1234567890", body.path("release").path("sha").asText());
+        assertEquals("kalshi-project:abcdef", body.path("release").path("image").asText());
+        assertEquals("live-product", body.path("release").path("profile").asText());
+        assertEquals("261", body.path("release").path("run_id").asText());
+        assertEquals("2", body.path("release").path("run_attempt").asText());
+        JsonNode freshness = body.path("data_freshness");
+        assertEquals("MKT-REL", freshness.path("symbol").asText());
+        assertEquals("feature.bbo", freshness.path("feature_name").asText());
+        assertEquals("evt-release", freshness.path("source_event_id").asText());
+        assertEquals(1L, freshness.path("store_sequence").asLong());
+        assertTrue(freshness.path("latest_event_age_ms").asLong() >= 0L);
     }
 
     @Test

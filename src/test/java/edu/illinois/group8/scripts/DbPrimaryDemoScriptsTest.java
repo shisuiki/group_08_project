@@ -44,6 +44,11 @@ class DbPrimaryDemoScriptsTest {
 
         assertTrue(script.contains("EXPECTED_FRONTEND_STARTED_AT"));
         assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN"));
+        assertTrue(script.contains("EXPECTED_KALSHI_RELEASE_SHA"));
+        assertTrue(script.contains("EXPECTED_KALSHI_APP_IMAGE"));
+        assertTrue(script.contains("health check failed: release is missing"));
+        assertTrue(script.contains("freshness = body.get(\"data_freshness\")"));
+        assertTrue(script.contains("latest_event_age_ms"));
         assertTrue(script.contains("feature_output_refresh.running"));
         assertTrue(script.contains("feature_output_refresh.total_loaded"));
         assertProductStaticSmokeContract(script);
@@ -117,6 +122,13 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FRONTEND_HEALTH_URL"));
         assertTrue(script.contains("FRONTEND_NO_PROXY=\"${FRONTEND_NO_PROXY:-127.0.0.1,localhost}\""));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
+        assertTrue(script.contains("EXPECTED_KALSHI_RELEASE_SHA"));
+        assertTrue(script.contains("EXPECTED_KALSHI_APP_IMAGE"));
+        assertTrue(script.contains("EXPECTED_KALSHI_DEPLOY_PROFILE"));
+        assertTrue(script.contains("health check failed: release is missing"));
+        assertTrue(script.contains("freshness = body.get(\"data_freshness\")"));
+        assertTrue(script.contains("latest_event_ts_ms"));
+        assertTrue(script.contains("latest_event_age_ms"));
         assertProductStaticSmokeContract(script);
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DB_URL"));
         assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
@@ -283,6 +295,15 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_live_product_manual_smoke_contract"));
         assertTrue(script.contains("assert_kalshi_app_image_contract"));
+        assertTrue(script.contains("assert_frontend_release_health_contract"));
+        assertTrue(script.contains("KALSHI_RELEASE_SHA"));
+        assertTrue(script.contains("KALSHI_DEPLOY_PROFILE"));
+        assertTrue(script.contains("KALSHI_GITHUB_RUN_ID"));
+        assertTrue(script.contains("EXPECTED_KALSHI_RELEASE_SHA"));
+        assertTrue(script.contains("rendered_default_image=\"$(KALSHI_APP_IMAGE= service_config_for \"$service\" $profile_args)\""));
+        assertTrue(script.contains("data_freshness"));
+        assertTrue(script.contains("release-identity"));
+        assertTrue(script.contains("health-data-age"));
         assertTrue(script.contains("app_image=\"example/kalshi:aj\""));
         assertTrue(script.contains("KALSHI_APP_IMAGE=\"$app_image\""));
         assertTrue(script.contains("^    image: $app_image$"));
@@ -316,6 +337,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
         assertTrue(index.contains("<script src=\"vendor/lightweight-charts-4.2.0.standalone.production.js\"></script>"));
         assertTrue(index.contains("<script src=\"app.js\"></script>"));
+        assertTrue(index.contains("id=\"release-identity\""));
+        assertTrue(index.contains("id=\"health-data-age\""));
+        assertTrue(app.contains("body.release"));
+        assertTrue(app.contains("body.data_freshness"));
+        assertTrue(app.contains("latest_event_ts_ms"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));
         assertTrue(chart.contains("v4.2.0"));
         assertNoExternalCdn(index);
@@ -329,6 +355,10 @@ class DbPrimaryDemoScriptsTest {
         String workflow = read(".github/workflows/deploy-ec2.yml");
 
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT: ${{ vars.DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT || '8090' }}"));
+        assertTrue(workflow.contains("KALSHI_RELEASE_SHA: ${{ github.sha }}"));
+        assertTrue(workflow.contains("KALSHI_DEPLOY_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}"));
+        assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ID: ${{ github.run_id }}"));
+        assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT: ${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}"));
         assertTrue(workflow.contains("LOCAL_DB_NAME: ${{ vars.LOCAL_DB_NAME || 'kalshi_test' }}"));
         assertTrue(workflow.contains("LOCAL_DB_USER: ${{ vars.LOCAL_DB_USER || 'kalshi' }}"));
@@ -340,6 +370,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"));
+        assertTrue(workflow.contains("KALSHI_RELEASE_SHA=$KALSHI_RELEASE_SHA"));
+        assertTrue(workflow.contains("KALSHI_DEPLOY_PROFILE=$KALSHI_DEPLOY_PROFILE"));
+        assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ID=$KALSHI_GITHUB_RUN_ID"));
+        assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ATTEMPT=$KALSHI_GITHUB_RUN_ATTEMPT"));
         assertTrue(workflow.contains("LOCAL_DB_NAME=$LOCAL_DB_NAME"));
         assertTrue(workflow.contains("LOCAL_DB_USER=$LOCAL_DB_USER"));
         assertTrue(workflow.contains("LOCAL_DB_PASSWORD=$LOCAL_DB_PASSWORD"));
@@ -352,6 +386,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("printf -v q_db_primary_product_frontend_host_port '%q' \"$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_live_product_semantic_smoke_enabled '%q' \"$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED\""));
+        assertTrue(workflow.contains("printf -v q_kalshi_release_sha '%q' \"$KALSHI_RELEASE_SHA\""));
+        assertTrue(workflow.contains("EXPECTED_KALSHI_RELEASE_SHA=$q_kalshi_release_sha"));
+        assertTrue(workflow.contains("EXPECTED_KALSHI_APP_IMAGE=$q_kalshi_app_image"));
+        assertTrue(workflow.contains("EXPECTED_KALSHI_DEPLOY_PROFILE=$q_deploy_profile"));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$q_live_product_semantic_smoke_enabled"));
@@ -434,6 +472,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
         assertTrue(script.contains("<script src=\"vendor/lightweight-charts-4.2.0.standalone.production.js\"></script>"));
         assertTrue(script.contains("<script src=\"app.js\"></script>"));
+        assertTrue(script.contains("release-identity"));
+        assertTrue(script.contains("health-data-age"));
+        assertTrue(script.contains("body.release"));
+        assertTrue(script.contains("body.data_freshness"));
+        assertTrue(script.contains("latest_event_ts_ms"));
         assertTrue(script.contains("LightweightCharts"));
         assertTrue(script.contains("frontend static UI must not reference external CDN assets"));
         assertTrue(script.contains("unpkg|jsdelivr|cdnjs|cdn"));

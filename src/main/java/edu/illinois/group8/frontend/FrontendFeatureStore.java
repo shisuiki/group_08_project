@@ -27,6 +27,7 @@ public class FrontendFeatureStore {
     private final Map<String, Deque<FeatureOutput>> byMarket = new LinkedHashMap<>();
     private final Map<String, Map<String, LatestFeature>> latestByMarket = new HashMap<>();
     private final AtomicLong totalAccepted = new AtomicLong();
+    private LatestFeature latestGlobal;
     private long sequence;
 
     public FrontendFeatureStore(int maxFeaturesPerMarket, int maxSymbolsIndexed) {
@@ -67,6 +68,7 @@ public class FrontendFeatureStore {
                     Map.Entry<String, Deque<FeatureOutput>> evicted = it.next();
                     it.remove();
                     latestByMarket.remove(evicted.getKey());
+                    recomputeLatestGlobal();
                 }
             }
             deque = new ArrayDeque<>(Math.min(maxFeaturesPerMarket, 1024));
@@ -83,6 +85,9 @@ public class FrontendFeatureStore {
         LatestFeature current = latestByFeature.get(out.featureName());
         if (current == null || key.compareTo(current.key()) >= 0) {
             latestByFeature.put(out.featureName(), new LatestFeature(out, key));
+        }
+        if (latestGlobal == null || key.compareTo(latestGlobal.key()) >= 0) {
+            latestGlobal = new LatestFeature(out, key);
         }
         totalAccepted.incrementAndGet();
         sequence = acceptedSequence;
@@ -128,6 +133,35 @@ public class FrontendFeatureStore {
 
     public synchronized long sequence() {
         return sequence;
+    }
+
+    private void recomputeLatestGlobal() {
+        LatestFeature best = null;
+        for (Map<String, LatestFeature> byFeature : latestByMarket.values()) {
+            for (LatestFeature candidate : byFeature.values()) {
+                if (best == null || candidate.key().compareTo(best.key()) >= 0) {
+                    best = candidate;
+                }
+            }
+        }
+        latestGlobal = best;
+    }
+
+    public synchronized DataFreshness latestFreshness(long nowMs) {
+        if (latestGlobal == null) {
+            return new DataFreshness(null, null, null, null, null, sequence);
+        }
+        FeatureOutput output = latestGlobal.output();
+        Long eventTsMs = output.eventTsMs();
+        Long eventAgeMs = eventTsMs == null ? null : Math.max(0L, nowMs - eventTsMs);
+        return new DataFreshness(
+            eventTsMs,
+            eventAgeMs,
+            output.marketTicker(),
+            output.featureName(),
+            output.sourceEventId(),
+            sequence
+        );
     }
 
     public synchronized long waitForSequenceAfter(long after, long timeoutMs) throws InterruptedException {
@@ -220,6 +254,16 @@ public class FrontendFeatureStore {
     }
 
     private record LatestFeature(FeatureOutput output, LatestKey key) {
+    }
+
+    public record DataFreshness(
+        Long latestEventTsMs,
+        Long latestEventAgeMs,
+        String symbol,
+        String featureName,
+        String sourceEventId,
+        long storeSequence
+    ) {
     }
 
     private record LatestKey(long eventTsMs, Instant createdAt, String featureEventId, long acceptedSequence)

@@ -105,6 +105,10 @@ jobs:
       DEPLOY_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}
       KALSHI_APP_IMAGE: kalshi-project:${{ github.sha }}
       KALSHI_APP_IMAGE_TAR: .deploy-state/images/kalshi-project-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz
+      KALSHI_RELEASE_SHA: ${{ github.sha }}
+      KALSHI_DEPLOY_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}
+      KALSHI_GITHUB_RUN_ID: ${{ github.run_id }}
+      KALSHI_GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
       RUN_LIVE_PRODUCT_SMOKE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}
       LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: ${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}
       COMPOSE_HOST_BIND_IP: ${{ vars.COMPOSE_HOST_BIND_IP || '127.0.0.1' }}
@@ -388,6 +392,10 @@ jobs:
           BACKEND_PROFILE=production
           KALSHI_APP_IMAGE=$KALSHI_APP_IMAGE
           KALSHI_APP_IMAGE_TAR=$KALSHI_APP_IMAGE_TAR
+          KALSHI_RELEASE_SHA=$KALSHI_RELEASE_SHA
+          KALSHI_DEPLOY_PROFILE=$KALSHI_DEPLOY_PROFILE
+          KALSHI_GITHUB_RUN_ID=$KALSHI_GITHUB_RUN_ID
+          KALSHI_GITHUB_RUN_ATTEMPT=$KALSHI_GITHUB_RUN_ATTEMPT
           COMPOSE_HOST_BIND_IP=$COMPOSE_HOST_BIND_IP
           KALSHI_BASE_URL=$KALSHI_BASE_URL
           KALSHI_KEY_ID=$KALSHI_KEY_ID
@@ -544,8 +552,11 @@ jobs:
         if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'
         run: |
           printf -v q_deploy_path '%q' "$DEPLOY_PATH"
+          printf -v q_kalshi_release_sha '%q' "$KALSHI_RELEASE_SHA"
+          printf -v q_kalshi_app_image '%q' "$KALSHI_APP_IMAGE"
+          printf -v q_deploy_profile '%q' "$DEPLOY_PROFILE"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
-            "cd $q_deploy_path && LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh"
+            "cd $q_deploy_path && EXPECTED_KALSHI_RELEASE_SHA=$q_kalshi_release_sha EXPECTED_KALSHI_APP_IMAGE=$q_kalshi_app_image EXPECTED_KALSHI_DEPLOY_PROFILE=$q_deploy_profile LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh"
 
       - name: Show service status
         if: always()

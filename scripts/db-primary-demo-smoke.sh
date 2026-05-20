@@ -10,6 +10,11 @@ EXPECTED_FRONTEND_STARTED_AT="${EXPECTED_FRONTEND_STARTED_AT:-}"
 EXPECTED_REFRESH_TOTAL_LOADED_MIN="${EXPECTED_REFRESH_TOTAL_LOADED_MIN:-}"
 EXPECTED_MARKET_METADATA_STATUS="${EXPECTED_MARKET_METADATA_STATUS:-loaded}"
 EXPECTED_MARKET_METADATA_MIN_ROWS="${EXPECTED_MARKET_METADATA_MIN_ROWS:-1}"
+EXPECTED_KALSHI_RELEASE_SHA="${EXPECTED_KALSHI_RELEASE_SHA:-}"
+EXPECTED_KALSHI_APP_IMAGE="${EXPECTED_KALSHI_APP_IMAGE:-}"
+EXPECTED_KALSHI_DEPLOY_PROFILE="${EXPECTED_KALSHI_DEPLOY_PROFILE:-}"
+EXPECTED_KALSHI_GITHUB_RUN_ID="${EXPECTED_KALSHI_GITHUB_RUN_ID:-}"
+EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT="${EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT:-}"
 DEMO_FEATURE="${DEMO_FEATURE:-feature.bbo}"
 DEMO_LIMIT="${DEMO_LIMIT:-5}"
 DEMO_HISTORY_RESOLUTION="${DEMO_HISTORY_RESOLUTION:-1}"
@@ -72,11 +77,16 @@ check_product_static_ui() {
     grep -q 'market-list' "$index_file"
     grep -q 'feature-list' "$index_file"
     grep -q 'Runtime Health' "$index_file"
+    grep -q 'release-identity' "$index_file"
+    grep -q 'health-data-age' "$index_file"
     grep -q 'same origin' "$index_file"
     grep -q '/quotes/updates' "$app_file"
     grep -q '/markets?limit=100' "$app_file"
     grep -q '/features?symbol=' "$app_file"
     grep -q '/health' "$app_file"
+    grep -q 'body.release' "$app_file"
+    grep -q 'body.data_freshness' "$app_file"
+    grep -q 'latest_event_ts_ms' "$app_file"
     grep -q 'chart-container' "$css_file"
     grep -q 'LightweightCharts' "$chart_file"
     if grep -Eiq '(https?://|//)[^"'"'"' ]*(unpkg|jsdelivr|cdnjs|cdn)' \
@@ -98,7 +108,12 @@ while :; do
         "$EXPECTED_FRONTEND_STARTED_AT" \
         "$EXPECTED_REFRESH_TOTAL_LOADED_MIN" \
         "$EXPECTED_MARKET_METADATA_STATUS" \
-        "$EXPECTED_MARKET_METADATA_MIN_ROWS" > "$health_selection" <<'PY'
+        "$EXPECTED_MARKET_METADATA_MIN_ROWS" \
+        "$EXPECTED_KALSHI_RELEASE_SHA" \
+        "$EXPECTED_KALSHI_APP_IMAGE" \
+        "$EXPECTED_KALSHI_DEPLOY_PROFILE" \
+        "$EXPECTED_KALSHI_GITHUB_RUN_ID" \
+        "$EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT" > "$health_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -176,6 +191,43 @@ if raw_rows < min_rows:
     raise SystemExit(
         f"health check failed: market_metadata.markets is {raw_rows}, expected at least {min_rows}"
     )
+release = body.get("release")
+if not isinstance(release, dict):
+    raise SystemExit("health check failed: release is missing")
+for field, expected_index in (
+    ("sha", 9),
+    ("image", 10),
+    ("profile", 11),
+    ("run_id", 12),
+    ("run_attempt", 13),
+):
+    if field not in release:
+        raise SystemExit(f"health check failed: release.{field} is missing")
+    expected_value = sys.argv[expected_index].strip() if len(sys.argv) > expected_index else ""
+    actual_value = release.get(field)
+    if expected_value and actual_value != expected_value:
+        raise SystemExit(
+            f"health check failed: release.{field} is {actual_value!r}, expected {expected_value!r}"
+        )
+freshness = body.get("data_freshness")
+if not isinstance(freshness, dict):
+    raise SystemExit("health check failed: data_freshness is missing")
+for key in ("latest_event_ts_ms", "latest_event_age_ms", "symbol", "feature_name", "source_event_id", "store_sequence"):
+    if key not in freshness:
+        raise SystemExit(f"health check failed: data_freshness.{key} is missing")
+store = body.get("store")
+store_sequence = freshness.get("store_sequence")
+if isinstance(store_sequence, bool) or not isinstance(store_sequence, int):
+    raise SystemExit("health check failed: data_freshness.store_sequence is not an integer")
+if isinstance(store, dict) and isinstance(store.get("sequence"), int) and store.get("sequence") > 0:
+    latest_event_ts_ms = freshness.get("latest_event_ts_ms")
+    latest_event_age_ms = freshness.get("latest_event_age_ms")
+    if isinstance(latest_event_ts_ms, bool) or not isinstance(latest_event_ts_ms, int):
+        raise SystemExit("health check failed: data_freshness.latest_event_ts_ms is not an integer")
+    if isinstance(latest_event_age_ms, bool) or not isinstance(latest_event_age_ms, int):
+        raise SystemExit("health check failed: data_freshness.latest_event_age_ms is not an integer")
+    if not freshness.get("symbol") or not freshness.get("feature_name"):
+        raise SystemExit("health check failed: data_freshness latest event identity is incomplete")
 print(feature_source)
 print(metadata_status)
 print(raw_rows)
@@ -183,6 +235,13 @@ print(refresh.get("enabled") if isinstance(refresh, dict) else "")
 print(refresh.get("running") if isinstance(refresh, dict) else "")
 print(refresh.get("total_loaded") if isinstance(refresh, dict) else "")
 print(started_at)
+print(release.get("sha") or "")
+print(release.get("image") or "")
+print(release.get("profile") or "")
+print(freshness.get("latest_event_ts_ms") if freshness.get("latest_event_ts_ms") is not None else "")
+print(freshness.get("latest_event_age_ms") if freshness.get("latest_event_age_ms") is not None else "")
+print(freshness.get("symbol") or "")
+print(freshness.get("source_event_id") or "")
 PY
     then
         break
@@ -201,8 +260,15 @@ feature_output_refresh_enabled="$(sed -n '4p' "$health_selection")"
 feature_output_refresh_running="$(sed -n '5p' "$health_selection")"
 feature_output_refresh_total_loaded="$(sed -n '6p' "$health_selection")"
 frontend_started_at="$(sed -n '7p' "$health_selection")"
-printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s feature_output_refresh_enabled=%s feature_output_refresh_running=%s feature_output_refresh_total_loaded=%s started_at=%s market_metadata_status=%s market_metadata_rows=%s\n' \
-    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$feature_output_refresh_enabled" "$feature_output_refresh_running" "$feature_output_refresh_total_loaded" "$frontend_started_at" "$market_metadata_status" "$market_metadata_rows"
+release_sha="$(sed -n '8p' "$health_selection")"
+release_image="$(sed -n '9p' "$health_selection")"
+release_profile="$(sed -n '10p' "$health_selection")"
+freshness_event_ts_ms="$(sed -n '11p' "$health_selection")"
+freshness_age_ms="$(sed -n '12p' "$health_selection")"
+freshness_symbol="$(sed -n '13p' "$health_selection")"
+freshness_source_event_id="$(sed -n '14p' "$health_selection")"
+printf 'PASS health service=frontend-adapter feature_source=%s expected_feature_source=%s feature_output_refresh_enabled=%s feature_output_refresh_running=%s feature_output_refresh_total_loaded=%s started_at=%s market_metadata_status=%s market_metadata_rows=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s\n' \
+    "$feature_source" "$EXPECTED_FEATURE_SOURCE" "$feature_output_refresh_enabled" "$feature_output_refresh_running" "$feature_output_refresh_total_loaded" "$frontend_started_at" "$market_metadata_status" "$market_metadata_rows" "$release_sha" "$release_image" "$release_profile" "$freshness_event_ts_ms" "$freshness_age_ms" "$freshness_symbol" "$freshness_source_event_id"
 
 check_product_static_ui
 

@@ -28,6 +28,8 @@
         featureCount: document.getElementById('feature-count'),
         featureList: document.getElementById('feature-list'),
         adapterHealth: document.getElementById('adapter-health'),
+        releaseIdentity: document.getElementById('release-identity'),
+        healthDataAge: document.getElementById('health-data-age'),
         healthSequence: document.getElementById('health-sequence'),
         refreshHealth: document.getElementById('refresh-health'),
         metadataHealth: document.getElementById('metadata-health'),
@@ -443,6 +445,8 @@
         try {
             const body = await fetchJson('/health');
             dom.adapterHealth.textContent = body.status || '-';
+            dom.releaseIdentity.textContent = releaseStatusText(body.release);
+            dom.healthDataAge.textContent = dataFreshnessText(body.data_freshness);
             dom.healthSequence.textContent = body.store ? String(body.store.sequence) : '-';
             dom.refreshHealth.textContent = refreshStatusText(body.feature_output_refresh);
             dom.metadataHealth.textContent = body.market_metadata
@@ -453,8 +457,40 @@
                 : '-';
         } catch (err) {
             dom.adapterHealth.textContent = 'unavailable';
+            dom.releaseIdentity.textContent = '-';
+            dom.healthDataAge.textContent = '-';
             dom.refreshHealth.textContent = err.message;
         }
+    }
+
+    function releaseStatusText(release) {
+        if (!release) {
+            return '-';
+        }
+        const sha = release.sha ? String(release.sha).slice(0, 12) : '';
+        const profile = release.profile || '';
+        const image = release.image ? String(release.image).split('/').pop() : '';
+        const parts = [];
+        if (sha) {
+            parts.push(sha);
+        }
+        if (profile) {
+            parts.push(profile);
+        }
+        if (image) {
+            parts.push(image);
+        }
+        return parts.length ? parts.join(' / ') : '-';
+    }
+
+    function dataFreshnessText(freshness) {
+        if (!freshness || freshness.latest_event_ts_ms == null) {
+            return 'waiting';
+        }
+        const age = freshness.latest_event_age_ms == null ? '-' : formatAge(Number(freshness.latest_event_age_ms));
+        const symbol = freshness.symbol || '-';
+        const source = freshness.source_event_id || '-';
+        return `${age} / ${symbol} / ${source}`;
     }
 
     function refreshStatusText(status) {

@@ -27,6 +27,23 @@ class FrontendAdapterConfigTest {
     }
 
     @Test
+    void releaseInfoReadsDeploymentEnvironment() {
+        FrontendReleaseInfo info = FrontendReleaseInfo.from(Map.of(
+            "KALSHI_RELEASE_SHA", "abcdef123456",
+            "KALSHI_APP_IMAGE", "kalshi-project:abcdef",
+            "KALSHI_DEPLOY_PROFILE", "live-product",
+            "KALSHI_GITHUB_RUN_ID", "261",
+            "KALSHI_GITHUB_RUN_ATTEMPT", "2"
+        ));
+
+        assertEquals("abcdef123456", info.sha());
+        assertEquals("kalshi-project:abcdef", info.image());
+        assertEquals("live-product", info.profile());
+        assertEquals("261", info.runId());
+        assertEquals("2", info.runAttempt());
+    }
+
+    @Test
     void dbSourceAliasesParse() {
         for (String alias : new String[] {"db", "postgres", "postgresql", "timescale", "timescaledb"}) {
             assertEquals(FrontendAdapterConfig.SourceMode.DB, FrontendAdapterConfig.SourceMode.parse(alias));

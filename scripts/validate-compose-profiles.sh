@@ -225,6 +225,83 @@ assert_frontend_adapter_db_primary_static_root() {
     printf 'PASS frontend_adapter_db_primary_frontend_contract\n'
 }
 
+assert_frontend_release_health_contract() {
+    for service_profile in \
+        "frontend-adapter-db-primary:--profile db-primary-product" \
+        "frontend-adapter:--profile local-db --profile frontend-integration"; do
+        service="${service_profile%%:*}"
+        profile_args="${service_profile#*:}"
+        rendered="$(service_config_for "$service" $profile_args)"
+        for env_name in \
+            KALSHI_RELEASE_SHA \
+            KALSHI_APP_IMAGE \
+            KALSHI_DEPLOY_PROFILE \
+            KALSHI_GITHUB_RUN_ID \
+            KALSHI_GITHUB_RUN_ATTEMPT; do
+            if ! printf '%s\n' "$rendered" | grep -q "^      ${env_name}:"; then
+                printf '%s missing release environment %s\n' "$service" "$env_name" >&2
+                exit 1
+            fi
+        done
+        rendered_default_image="$(KALSHI_APP_IMAGE= service_config_for "$service" $profile_args)"
+        if ! printf '%s\n' "$rendered_default_image" | grep -q '^      KALSHI_APP_IMAGE: kalshi-project:local$'; then
+            printf '%s must expose the compose default app image in release health\n' "$service" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        'KALSHI_RELEASE_SHA: ${{ github.sha }}' \
+        "KALSHI_DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
+        'KALSHI_GITHUB_RUN_ID: ${{ github.run_id }}' \
+        'KALSHI_GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}' \
+        'KALSHI_RELEASE_SHA=$KALSHI_RELEASE_SHA' \
+        'KALSHI_DEPLOY_PROFILE=$KALSHI_DEPLOY_PROFILE' \
+        'KALSHI_GITHUB_RUN_ID=$KALSHI_GITHUB_RUN_ID' \
+        'KALSHI_GITHUB_RUN_ATTEMPT=$KALSHI_GITHUB_RUN_ATTEMPT' \
+        'EXPECTED_KALSHI_RELEASE_SHA=$q_kalshi_release_sha' \
+        'EXPECTED_KALSHI_APP_IMAGE=$q_kalshi_app_image' \
+        'EXPECTED_KALSHI_DEPLOY_PROFILE=$q_deploy_profile'; do
+        if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
+            printf 'deploy workflow missing frontend release health contract: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for smoke_script in scripts/db-primary-demo-smoke.sh scripts/live-product-smoke.sh; do
+        for expected in \
+            'EXPECTED_KALSHI_RELEASE_SHA' \
+            'EXPECTED_KALSHI_APP_IMAGE' \
+            'EXPECTED_KALSHI_DEPLOY_PROFILE' \
+            'EXPECTED_KALSHI_GITHUB_RUN_ID' \
+            'EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT' \
+            'health check failed: release is missing' \
+            'freshness = body.get("data_freshness")' \
+            'latest_event_ts_ms' \
+            'latest_event_age_ms' \
+            'release-identity' \
+            'health-data-age'; do
+            if ! grep -Fq "$expected" "$smoke_script"; then
+                printf '%s missing release/data freshness contract: %s\n' "$smoke_script" "$expected" >&2
+                exit 1
+            fi
+        done
+    done
+
+    for expected in \
+        'id="release-identity"' \
+        'id="health-data-age"' \
+        'body.release' \
+        'body.data_freshness' \
+        'latest_event_ts_ms'; do
+        if ! grep -Fq "$expected" frontend/tradingview-lightweight/index.html frontend/tradingview-lightweight/app.js; then
+            printf 'frontend static UI missing release/data freshness contract: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+    printf 'PASS frontend_release_health_contract\n'
+}
+
 assert_cluster_live_db_writer_stays_opt_in() {
     services="$(services_for --profile cluster-live)"
     for service in timescaledb db-migrate db-migrate-live featureplant-db-follower frontend-adapter-db-primary; do
@@ -785,6 +862,7 @@ assert_db_primary_product_services_present
 assert_live_product_services_present
 assert_db_primary_product_defaults_aligned
 assert_frontend_adapter_db_primary_static_root
+assert_frontend_release_health_contract
 assert_cluster_live_db_writer_stays_opt_in
 assert_live_product_db_writer_expectations
 assert_kalshi_app_image_contract

@@ -134,6 +134,51 @@ class FrontendFeatureStoreTest {
     }
 
     @Test
+    void latestFreshnessTracksGlobalLatestFeatureAndStoreSequence() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(bbo("MKT-1", 2_000L, 600_000L));
+        store.accept(trade("MKT-2", 3_000L, "T-1"));
+        store.accept(row("feature-old", "2026-05-20T00:00:03Z", bbo("MKT-3", 1_000L, 500_000L)));
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(3_500L);
+
+        assertEquals(3_000L, freshness.latestEventTsMs());
+        assertEquals(500L, freshness.latestEventAgeMs());
+        assertEquals("MKT-2", freshness.symbol());
+        assertEquals("feature.trade_tape", freshness.featureName());
+        assertEquals("evt-t-3000", freshness.sourceEventId());
+        assertEquals(3L, freshness.storeSequence());
+    }
+
+    @Test
+    void latestFreshnessIsEmptyBeforeAcceptedFeatures() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(3_500L);
+
+        assertEquals(null, freshness.latestEventTsMs());
+        assertEquals(null, freshness.latestEventAgeMs());
+        assertEquals(null, freshness.symbol());
+        assertEquals(null, freshness.featureName());
+        assertEquals(null, freshness.sourceEventId());
+        assertEquals(0L, freshness.storeSequence());
+    }
+
+    @Test
+    void latestFreshnessFollowsRetainedMarketAfterSymbolEviction() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 1);
+        store.accept(bbo("MKT-OLD", 10_000L, 600_000L));
+        store.accept(bbo("MKT-NEW", 1_000L, 500_000L));
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(12_000L);
+
+        assertEquals("MKT-NEW", freshness.symbol());
+        assertEquals(1_000L, freshness.latestEventTsMs());
+        assertEquals(11_000L, freshness.latestEventAgeMs());
+        assertEquals(List.of("MKT-NEW"), List.copyOf(store.symbols()));
+    }
+
+    @Test
     void waitForSequenceAfterReturnsWhenAcceptAdvancesSequence() throws Exception {
         FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
         ExecutorService executor = Executors.newSingleThreadExecutor();

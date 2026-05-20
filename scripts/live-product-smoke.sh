@@ -15,6 +15,11 @@ SMOKE_HTTP_RETRY_SLEEP_SECONDS="${SMOKE_HTTP_RETRY_SLEEP_SECONDS:-1}"
 SMOKE_DB_ATTEMPTS="${SMOKE_DB_ATTEMPTS:-90}"
 SMOKE_DB_RETRY_SLEEP_SECONDS="${SMOKE_DB_RETRY_SLEEP_SECONDS:-1}"
 LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="${LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA:-false}"
+EXPECTED_KALSHI_RELEASE_SHA="${EXPECTED_KALSHI_RELEASE_SHA:-}"
+EXPECTED_KALSHI_APP_IMAGE="${EXPECTED_KALSHI_APP_IMAGE:-}"
+EXPECTED_KALSHI_DEPLOY_PROFILE="${EXPECTED_KALSHI_DEPLOY_PROFILE:-}"
+EXPECTED_KALSHI_GITHUB_RUN_ID="${EXPECTED_KALSHI_GITHUB_RUN_ID:-}"
+EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT="${EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT:-}"
 
 env_file_value() {
     key="$1"
@@ -273,7 +278,12 @@ wait_frontend_ready() {
     attempt=1
     while :; do
         if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
-            && python3 - "$output" > "$selection" <<'PY'
+            && python3 - "$output" \
+                "$EXPECTED_KALSHI_RELEASE_SHA" \
+                "$EXPECTED_KALSHI_APP_IMAGE" \
+                "$EXPECTED_KALSHI_DEPLOY_PROFILE" \
+                "$EXPECTED_KALSHI_GITHUB_RUN_ID" \
+                "$EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT" > "$selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -293,9 +303,49 @@ if isinstance(total_loaded, bool) or not isinstance(total_loaded, int):
     raise SystemExit("feature output refresh total_loaded is not an integer")
 if isinstance(refresh_errors, bool) or not isinstance(refresh_errors, int):
     raise SystemExit("feature output refresh errors is not an integer")
+release = body.get("release")
+if not isinstance(release, dict):
+    raise SystemExit("health check failed: release is missing")
+for field, expected_index in (
+    ("sha", 2),
+    ("image", 3),
+    ("profile", 4),
+    ("run_id", 5),
+    ("run_attempt", 6),
+):
+    if field not in release:
+        raise SystemExit(f"frontend release.{field} is missing")
+    expected_value = sys.argv[expected_index].strip() if len(sys.argv) > expected_index else ""
+    actual_value = release.get(field)
+    if expected_value and actual_value != expected_value:
+        raise SystemExit(
+            f"frontend release.{field} is {actual_value!r}, expected {expected_value!r}"
+        )
+freshness = body.get("data_freshness")
+if not isinstance(freshness, dict):
+    raise SystemExit("health check failed: data_freshness is missing")
+for key in ("latest_event_ts_ms", "latest_event_age_ms", "symbol", "feature_name", "source_event_id", "store_sequence"):
+    if key not in freshness:
+        raise SystemExit(f"frontend data_freshness.{key} is missing")
+store_sequence = freshness.get("store_sequence")
+if isinstance(store_sequence, bool) or not isinstance(store_sequence, int):
+    raise SystemExit("frontend data_freshness.store_sequence is not an integer")
+latest_event_ts_ms = freshness.get("latest_event_ts_ms")
+latest_event_age_ms = freshness.get("latest_event_age_ms")
+if latest_event_ts_ms is not None and (isinstance(latest_event_ts_ms, bool) or not isinstance(latest_event_ts_ms, int)):
+    raise SystemExit("frontend data_freshness.latest_event_ts_ms is not an integer or null")
+if latest_event_age_ms is not None and (isinstance(latest_event_age_ms, bool) or not isinstance(latest_event_age_ms, int)):
+    raise SystemExit("frontend data_freshness.latest_event_age_ms is not an integer or null")
 print(body.get("started_at", ""))
 print(total_loaded)
 print(refresh_errors)
+print(release.get("sha") or "")
+print(release.get("image") or "")
+print(release.get("profile") or "")
+print(freshness.get("latest_event_ts_ms") if freshness.get("latest_event_ts_ms") is not None else "")
+print(freshness.get("latest_event_age_ms") if freshness.get("latest_event_age_ms") is not None else "")
+print(freshness.get("symbol") or "")
+print(freshness.get("source_event_id") or "")
 PY
         then
             cat "$selection"
@@ -385,11 +435,16 @@ check_product_static_ui() {
     grep -q 'market-list' "$index_file"
     grep -q 'feature-list' "$index_file"
     grep -q 'Runtime Health' "$index_file"
+    grep -q 'release-identity' "$index_file"
+    grep -q 'health-data-age' "$index_file"
     grep -q 'same origin' "$index_file"
     grep -q '/quotes/updates' "$app_file"
     grep -q '/markets?limit=100' "$app_file"
     grep -q '/features?symbol=' "$app_file"
     grep -q '/health' "$app_file"
+    grep -q 'body.release' "$app_file"
+    grep -q 'body.data_freshness' "$app_file"
+    grep -q 'latest_event_ts_ms' "$app_file"
     grep -q 'chart-container' "$css_file"
     grep -q 'LightweightCharts' "$chart_file"
     if grep -Eiq '(https?://|//)[^"'"'"' ]*(unpkg|jsdelivr|cdnjs|cdn)' \
@@ -510,8 +565,15 @@ frontend_before="$(wait_frontend_ready)"
 frontend_started_at_before="$(printf '%s\n' "$frontend_before" | sed -n '1p')"
 frontend_loaded_before="$(printf '%s\n' "$frontend_before" | sed -n '2p')"
 frontend_errors_before="$(printf '%s\n' "$frontend_before" | sed -n '3p')"
-printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s\n' \
-    "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before"
+frontend_release_sha="$(printf '%s\n' "$frontend_before" | sed -n '4p')"
+frontend_release_image="$(printf '%s\n' "$frontend_before" | sed -n '5p')"
+frontend_release_profile="$(printf '%s\n' "$frontend_before" | sed -n '6p')"
+frontend_freshness_event_ts_ms="$(printf '%s\n' "$frontend_before" | sed -n '7p')"
+frontend_freshness_age_ms="$(printf '%s\n' "$frontend_before" | sed -n '8p')"
+frontend_freshness_symbol="$(printf '%s\n' "$frontend_before" | sed -n '9p')"
+frontend_freshness_source_event_id="$(printf '%s\n' "$frontend_before" | sed -n '10p')"
+printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s\n' \
+    "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id"
 check_product_static_ui
 
 cursor_before="$(cursor_commit_seq)"
