@@ -20,9 +20,11 @@ import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcLatestMarketStateReader;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcOperatorPipelineStatusReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.MarketMetadataReader;
+import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,7 +59,9 @@ public final class FrontendAdapterMain {
                 store,
                 metadataCatalog,
                 () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
-                refreshService::status
+                refreshService::status,
+                buildOperatorPipelineStatusSupplier(config),
+                FrontendReleaseInfo.fromEnvironment()
             );
             server.start();
             refreshService.start();
@@ -139,6 +143,26 @@ public final class FrontendAdapterMain {
     static JdbcLatestMarketStateReader buildLatestMarketStateReader(FrontendAdapterConfig config) {
         requireFeatureDbUrl(config);
         return JdbcLatestMarketStateReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+    }
+
+    static java.util.function.Supplier<OperatorPipelineStatus> buildOperatorPipelineStatusSupplier(
+        FrontendAdapterConfig config
+    ) {
+        if (config.dbUrl().isBlank() || config.featurePlantCursorName().isBlank()) {
+            return OperatorPipelineStatus::disabled;
+        }
+        JdbcOperatorPipelineStatusReader reader = JdbcOperatorPipelineStatusReader.fromDriverManager(
+            config.dbUrl(),
+            config.dbUser(),
+            config.dbPassword()
+        );
+        return () -> {
+            try {
+                return reader.read(config.featurePlantCursorName());
+            } catch (RuntimeException e) {
+                return OperatorPipelineStatus.unavailable(config.featurePlantCursorName(), e.getMessage());
+            }
+        };
     }
 
     static FeatureOutputRefreshService.RowReader buildFeatureOutputRowReader(FrontendAdapterConfig config) {

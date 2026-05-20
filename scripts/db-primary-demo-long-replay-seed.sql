@@ -44,6 +44,7 @@ where market_ticker in (select market_ticker from db_primary_demo_markets);
 
 delete from canonical_events
 where event_id like 'demo-db-primary-canonical-%'
+   or replay_id = 'demo-db-primary-long-replay'
    or market_ticker in (select market_ticker from db_primary_demo_markets);
 
 delete from market_metadata
@@ -97,6 +98,7 @@ bbo_rows as (
 )
 insert into canonical_events (
     event_id,
+    replay_id,
     stream_name,
     event_type,
     schema_version,
@@ -106,6 +108,7 @@ insert into canonical_events (
 )
 select
     event_id,
+    'demo-db-primary-long-replay',
     'derived.top_of_book',
     'top_of_book_update',
     1,
@@ -148,6 +151,7 @@ ticker_rows as (
 )
 insert into canonical_events (
     event_id,
+    replay_id,
     stream_name,
     event_type,
     schema_version,
@@ -157,6 +161,7 @@ insert into canonical_events (
 )
 select
     event_id,
+    'demo-db-primary-long-replay',
     'canonical.ticker',
     'ticker_update',
     1,
@@ -198,6 +203,7 @@ trade_rows as (
 )
 insert into canonical_events (
     event_id,
+    replay_id,
     stream_name,
     event_type,
     schema_version,
@@ -207,6 +213,7 @@ insert into canonical_events (
 )
 select
     event_id,
+    'demo-db-primary-long-replay',
     'canonical.trade',
     'market_trade',
     1,

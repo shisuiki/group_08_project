@@ -5,8 +5,8 @@ outputs into the TradingView Lightweight Charts UDF datafeed protocol. In the
 default `FRONTEND_ADAPTER_FEATURE_SOURCE=modules` mode, it hosts a
 `FeaturePlantService` internally and consumes only `FeatureOutput` values via
 `FeatureOutputSink`; it does not subscribe to Aeron streams directly. In
-`feature_outputs` mode, it loads a bounded startup snapshot from persisted DB
-feature rows and does not start the module feeder loop. See
+`feature_outputs` mode, it seeds from persisted DB feature rows and refreshes
+from DB on its configured interval; it does not start the module feeder loop. See
 `docs/featureplant_runbook.md` for upstream feature semantics.
 
 The default source is canonical DB rows through `DbCanonicalEnvelopeSource`.
@@ -37,6 +37,8 @@ to that feature stream without breaking the external API.
 | `FRONTEND_ADAPTER_DB_PASSWORD` | `DB_WRITER_DATABASE_PASSWORD` | canonical DB password |
 | `FRONTEND_ADAPTER_DB_INCLUDE_REPLAY` | `false` | include replay rows when reading DB source |
 | `FRONTEND_ADAPTER_DB_REPLAY_ID` | blank | restrict DB source to one replay id |
+| `FRONTEND_ADAPTER_FEATUREPLANT_CURSOR_NAME` | `FEATUREPLANT_DB_CURSOR_NAME` | cursor shown in `/health.operator_pipeline` |
+| `FRONTEND_ADAPTER_BASIC_AUTH_USER` / `FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD` | blank | optional Basic Auth for app endpoints; default off |
 | `FRONTEND_ADAPTER_AERON_CHANNEL` | `AERON_EXTERNAL_CHANNEL` | tickerplant channel when `source=aeron` |
 | `FRONTEND_ADAPTER_RECORDING_ROOT` | `$BASE_DIR/recordings` | recordings root when `source=recording` |
 | `FRONTEND_ADAPTER_STREAMS` | `canonical.trade,canonical.ticker,derived.top_of_book` | canonical streams to subscribe |
@@ -68,7 +70,8 @@ Companion REST:
 - `GET /quotes?symbols=<csv>` — latest `feature.bbo` per market
 - `GET /features?symbol=<ticker>&feature=<featureName>&limit=<n>` — inspect buffered feature outputs, limit capped at 500
 - `GET /markets?query=<q>&status=<status>&limit=<n>` — compact market metadata catalog, limit capped at 500
-- `GET /health` — status + store size + feature-plant counters
+- `GET /health` — status + store size, feature-plant counters, release/data
+  freshness, quote counters, and read-only `operator_pipeline` DB lag status
 - `GET /metrics` — Prometheus text
 
 CORS: every response carries `Access-Control-Allow-Origin: *` and
@@ -115,8 +118,9 @@ only.
 
 For a persisted feature-output demo, set
 `FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs`. This mode requires the same
-DB URL fallback, loads at most `FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS` rows
-ordered by recent event time, and serves that startup snapshot without refresh.
+DB URL fallback, keeps at most `FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS` rows,
+and refreshes up to `FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS` rows per
+DB poll.
 
 ## Curl Smoke Tests
 
@@ -146,15 +150,14 @@ curl -s 'http://127.0.0.1:8090/features?symbol=KXHIGHCHI-26MAY12-T70&feature=fea
 
 ## Limits and Non-Goals
 
-- No WebSocket streaming. The UDF protocol is HTTP polling; that's sufficient
-  for the demo chart.
-- No replay session management. DB source excludes replay rows by default; set
-  `FRONTEND_ADAPTER_DB_INCLUDE_REPLAY=true` or a
-  `FRONTEND_ADAPTER_DB_REPLAY_ID` for replay-specific reads. There is no
-  pause/seek API.
-- No authorization. Bind to `127.0.0.1` unless you've fronted the service.
-- No refresh loop in `FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs`; restart
-  the service to load a newer persisted feature snapshot.
+- No bidirectional WebSocket frontend control plane. Quotes use HTTP reads and
+  SSE update streams; the UDF history protocol remains HTTP polling.
+- No product-level replay session management. DB source excludes replay rows by
+  default; set `FRONTEND_ADAPTER_DB_INCLUDE_REPLAY=true` or a
+  `FRONTEND_ADAPTER_DB_REPLAY_ID` only as a backend/profile choice. The product
+  UI has no pause/seek/session selector.
+- Optional Basic Auth exists, default off. Bind to `127.0.0.1` unless Basic Auth
+  or an external auth/proxy boundary is configured.
 - No market metadata refresh loop; restart to load newer metadata rows.
 - No PTP-aware code paths. `eventTsMs` from `FeatureOutput` is authoritative.
 

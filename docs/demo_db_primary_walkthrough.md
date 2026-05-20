@@ -14,6 +14,11 @@ passwords, or `.env` contents.
 - The no-credential local rehearsal uses `scripts/db-primary-demo-seed.sh`,
   which writes deterministic demo rows directly to `feature_outputs` and
   `market_metadata`.
+- The long-curve product rehearsal uses `scripts/db-primary-product-smoke.sh`
+  with `PRODUCT_DEMO_SCENARIO=long-replay`. That path seeds replay-scoped
+  `canonical_events`, runs FeaturePlant against that explicit replay id, and
+  serves `feature_outputs`. It intentionally does not update
+  `latest_market_state` and does not expose a product replay-session selector.
 - Containers use `jdbc:postgresql://timescaledb:5432/kalshi_test`. Host tools
   such as local `psql` use `127.0.0.1:${POSTGRES_HOST_PORT:-5432}`.
 
@@ -50,9 +55,8 @@ to age out.
 
 ## 2. Serve Persisted Features
 
-Start the frontend adapter in persisted feature-output mode. This loads a
-bounded startup snapshot from `feature_outputs`; it does not refresh until the
-service restarts.
+Start the frontend adapter in persisted feature-output mode. This loads and
+refreshes bounded rows from `feature_outputs`.
 
 ```bash
 FRONTEND_ADAPTER_DB_URL=jdbc:postgresql://timescaledb:5432/kalshi_test \
@@ -75,7 +79,9 @@ ssh "$EC2_USER@$EC2_HOST" '
 
 ## 3. Smoke The Demo
 
-Run the smoke script from the machine that can reach the frontend adapter:
+Run the smoke script from the machine that can reach the frontend adapter. If
+optional Basic Auth is enabled, set
+`FRONTEND_ADAPTER_BASIC_AUTH_USER/PASSWORD` for the smoke script.
 
 ```bash
 FRONTEND_BASE_URL=http://127.0.0.1:8090 \
@@ -158,6 +164,7 @@ demo rehearsal. The stable local seed above is the default no-credential path.
 ## Non-Goals
 
 - No live websocket ingestion.
-- No frontend refresh loop for `feature_outputs`; restart to load newer rows.
+- No product replay-session controls; replay-scoped demos are backend/profile
+  choices and use `feature_outputs`, not `latest_market_state`.
 - No S3/NDJSON fallback.
 - No DB schema changes.

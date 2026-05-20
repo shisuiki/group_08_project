@@ -67,6 +67,30 @@ class FeaturePlantDbProjectorTest {
     }
 
     @Test
+    void replayEventsWriteFeatureOutputsButDoNotUpdateLatestMarketState() {
+        FakeReader reader = new FakeReader(List.of(bboEvent(6L, "bbo-6", "demo-replay")));
+        FakeProjectionStore store = new FakeProjectionStore(new CanonicalDbCursor(5L));
+        FeaturePlantDbProjector projector = new FeaturePlantDbProjector(
+            reader,
+            store,
+            List.of(StreamRegistry.byName("derived.top_of_book").orElseThrow()),
+            List.of(new BestBidOfferFeatureModule()),
+            0L,
+            false,
+            "demo-replay",
+            "featureplant-replay",
+            new BackendMetrics()
+        );
+
+        assertEquals(1, projector.poll(10));
+
+        assertEquals(1, store.uniqueFeatureEventIds.size());
+        assertEquals(List.of(), store.latestStates);
+        assertEquals(6L, store.cursor.orElseThrow().lastCommitSeq());
+        assertEquals("demo-replay", reader.requests.get(0).replayId());
+    }
+
+    @Test
     void dbWriteFailureDoesNotAdvanceCursorAndEventCanBeReprocessed() {
         FakeReader reader = new FakeReader(
             List.of(bboEvent(6L, "bbo-6")),
@@ -282,11 +306,15 @@ class FeaturePlantDbProjectorTest {
     }
 
     private static CanonicalDbReadEvent bboEvent(long commitSeq, String eventId) {
+        return bboEvent(commitSeq, eventId, null);
+    }
+
+    private static CanonicalDbReadEvent bboEvent(long commitSeq, String eventId, String replayId) {
         return new CanonicalDbReadEvent(
             commitSeq,
             eventId,
             null,
-            null,
+            replayId,
             "derived.top_of_book",
             "top_of_book_update",
             1,

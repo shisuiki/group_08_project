@@ -8,6 +8,7 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -34,6 +35,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 public class FrontendAdapterServer {
     private static final int DEFAULT_FEATURE_LIMIT = 100;
@@ -47,6 +49,21 @@ public class FrontendAdapterServer {
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
     private static final long QUOTE_STREAM_HEARTBEAT_MS = 1_000L;
     private static final long DATA_FRESHNESS_STALE_AFTER_MS = 15_000L;
+    private static final int MAX_OPERATOR_ERROR_LENGTH = 240;
+    private static final Pattern PRIVATE_KEY_PATTERN = Pattern.compile(
+        "-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
+    private static final Pattern AUTH_HEADER_PATTERN = Pattern.compile(
+        "(?i)(authorization\\s*[:=]\\s*basic\\s+)[^\\s,;]+"
+    );
+    private static final Pattern PASSWORD_PATTERN = Pattern.compile(
+        "(?i)\\b(password|passwd|pwd|secret|token|api[_-]?key)\\b\\s*([=:])\\s*[^\\s,;&]+"
+    );
+    private static final Pattern URI_USERINFO_PATTERN = Pattern.compile(
+        "(?i)([a-z][a-z0-9+.-]*:(?://)?)([^\\s/@:]+):([^\\s/@]+)@"
+    );
+    private static final Pattern LONG_TOKEN_PATTERN = Pattern.compile("\\b[A-Za-z0-9_./+=-]{32,}\\b");
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
         "app.js",
@@ -63,6 +80,7 @@ public class FrontendAdapterServer {
     private final FrontendMarketMetadataCatalog metadataCatalog;
     private final Supplier<FeaturePlantStats> featurePlantStats;
     private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
+    private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
     private final FrontendReleaseInfo releaseInfo;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
     private final BackendMetrics metrics = new BackendMetrics();
@@ -117,6 +135,7 @@ public class FrontendAdapterServer {
             metadataCatalog,
             featurePlantStats,
             featureOutputRefreshStatus,
+            OperatorPipelineStatus::disabled,
             FrontendReleaseInfo.fromEnvironment()
         );
     }
@@ -127,6 +146,7 @@ public class FrontendAdapterServer {
         FrontendMarketMetadataCatalog metadataCatalog,
         Supplier<FeaturePlantStats> featurePlantStats,
         Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
         FrontendReleaseInfo releaseInfo
     ) {
         this.config = config;
@@ -138,6 +158,9 @@ public class FrontendAdapterServer {
         this.featureOutputRefreshStatus = featureOutputRefreshStatus == null
             ? FeatureOutputRefreshStatus::disabled
             : featureOutputRefreshStatus;
+        this.operatorPipelineStatus = operatorPipelineStatus == null
+            ? OperatorPipelineStatus::disabled
+            : operatorPipelineStatus;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
     }
 
@@ -637,7 +660,7 @@ public class FrontendAdapterServer {
         metadataView.put("status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT));
         metadataView.put("markets", metadataCatalog.size());
         if (metadataCatalog.error() != null) {
-            metadataView.put("error", metadataCatalog.error());
+            metadataView.put("error", operatorVisibleError(metadataCatalog.error()));
         }
         health.put("market_metadata", metadataView);
         Map<String, Object> fp = new LinkedHashMap<>();
@@ -646,6 +669,7 @@ public class FrontendAdapterServer {
         fp.put("errors", stats.errors());
         health.put("feature_plant", fp);
         health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
+        health.put("operator_pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
         writeJson(exchange, 200, health);
     }
 
@@ -769,11 +793,42 @@ public class FrontendAdapterServer {
         body.put("running", view.running());
         body.put("last_success_at", view.lastSuccessAt() == null ? null : view.lastSuccessAt().toString());
         body.put("last_error_at", view.lastErrorAt() == null ? null : view.lastErrorAt().toString());
-        body.put("last_error", view.lastError());
+        body.put("last_error", operatorVisibleError(view.lastError()));
         body.put("last_row_count", view.lastRowCount());
         body.put("total_loaded", view.totalLoaded());
         body.put("refresh_errors", view.refreshErrors());
         return body;
+    }
+
+    private static Map<String, Object> operatorPipelineStatusBody(OperatorPipelineStatus status) {
+        OperatorPipelineStatus view = status == null ? OperatorPipelineStatus.disabled() : status;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", view.status());
+        body.put("cursor_name", view.cursorName());
+        body.put("cursor_commit_seq", view.cursorCommitSeq());
+        body.put("canonical_max_commit_seq", view.canonicalMaxCommitSeq());
+        body.put("cursor_lag_events", view.cursorLagEvents());
+        body.put("latest_market_state_commit_seq", view.latestMarketStateCommitSeq());
+        body.put("latest_state_age_ms", view.latestStateAgeMs());
+        if (view.error() != null) {
+            body.put("error", operatorVisibleError(view.error()));
+        }
+        return body;
+    }
+
+    private static String operatorVisibleError(String message) {
+        if (message == null) {
+            return null;
+        }
+        String redacted = PRIVATE_KEY_PATTERN.matcher(message).replaceAll("[redacted-private-key]");
+        redacted = AUTH_HEADER_PATTERN.matcher(redacted).replaceAll("$1[redacted]");
+        redacted = URI_USERINFO_PATTERN.matcher(redacted).replaceAll("$1[redacted]@");
+        redacted = PASSWORD_PATTERN.matcher(redacted).replaceAll("$1$2[redacted]");
+        redacted = LONG_TOKEN_PATTERN.matcher(redacted).replaceAll("[redacted]");
+        if (redacted.length() > MAX_OPERATOR_ERROR_LENGTH) {
+            redacted = redacted.substring(0, MAX_OPERATOR_ERROR_LENGTH) + "...";
+        }
+        return redacted;
     }
 
     private static Map<String, Object> dataFreshnessBody(FrontendFeatureStore.DataFreshness freshness) {

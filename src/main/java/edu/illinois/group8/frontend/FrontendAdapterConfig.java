@@ -37,6 +37,7 @@ public record FrontendAdapterConfig(
     String dbPassword,
     boolean dbIncludeReplayEvents,
     String dbReplayId,
+    String featurePlantCursorName,
     String basicAuthUser,
     String basicAuthPassword
 ) {
@@ -143,6 +144,7 @@ public record FrontendAdapterConfig(
         dbUser = normalize(dbUser);
         dbPassword = dbPassword == null ? "" : dbPassword;
         dbReplayId = normalize(dbReplayId);
+        featurePlantCursorName = normalize(featurePlantCursorName);
         basicAuthUser = normalize(basicAuthUser);
         basicAuthPassword = basicAuthPassword == null ? "" : basicAuthPassword;
     }
@@ -197,6 +199,7 @@ public record FrontendAdapterConfig(
             dbPassword,
             dbIncludeReplayEvents,
             dbReplayId,
+            "",
             "",
             ""
         );
@@ -258,6 +261,8 @@ public record FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
             Boolean.parseBoolean(value(env, "FRONTEND_ADAPTER_DB_INCLUDE_REPLAY", "false")),
             value(env, "FRONTEND_ADAPTER_DB_REPLAY_ID", ""),
+            value(env, "FRONTEND_ADAPTER_FEATUREPLANT_CURSOR_NAME",
+                value(env, "FEATUREPLANT_DB_CURSOR_NAME", "")),
             value(env, "FRONTEND_ADAPTER_BASIC_AUTH_USER", ""),
             value(env, "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "")
         );

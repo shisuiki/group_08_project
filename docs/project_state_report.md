@@ -259,11 +259,11 @@ Legend:
 | FeaturePlant runtime | skeleton/current-basic | source + module dispatch exists; canonical DB source is default, live Aeron fair-polls streams and parses envelopes from byte[] while retaining payload strings, recording is explicit legacy/debug/demo/import; fair-poll coverage uses fake pollers |
 | Feature modules | current-basic | BBO, ticker snapshot, trade tape |
 | Versioned `feature.*` streams | planned | no feature stream registry/publisher |
-| Persistent feature store | current-basic | `feature_outputs` schema/store plus explicit `FEATUREPLANT_OUTPUT=db` FeaturePlant sink exist; stdout remains default and async/batched feature writes are absent |
+| Persistent feature store | current-basic | `feature_outputs` schema/store plus explicit `FEATUREPLANT_OUTPUT=db` FeaturePlant sink exist; FeaturePlant can write async/batched DB output outside the live hot path |
 | MarketStateStore | planned | latest trade/ticker/OI/BBO/depth runtime store absent; `market_metadata` schema/store/reader plus historical REST metadata upsert wiring exists |
 | Bar/bucket modules | planned | frontend synthesizes bars from BBO midpoint |
 | Feature/query API | current-basic | `/features` inspection endpoint serves buffered feature outputs; frontend market metadata catalog queries are startup-bounded; `/bars` and WS features absent |
-| Frontend adapter | current-demo | HTTP polling datafeed demo; module-driven canonical DB source remains default, recording is explicit legacy/debug/demo; optional `feature_outputs` startup snapshot mode reads persisted feature rows; metadata search/symbol/catalog responses can use a bounded DB startup snapshot |
+| Frontend adapter | current-demo | DB-backed product UI/datafeed demo; module-driven canonical DB source remains default, recording is explicit legacy/debug/demo; `feature_outputs` and `latest_market_state` modes read/refresh persisted DB rows; metadata search/symbol/catalog responses use a bounded DB startup snapshot |
 | Replay viewer controls | planned | pause/resume/seek/speed absent |
 | Research CSV export | current-basic | canonical DB source is default, recording is explicit legacy/export/debug/import |
 | Semantic parser/schema | planned | absent |
@@ -314,16 +314,21 @@ Current:
   - `/markets`
   - `/health`
   - `/metrics`
-- Quotes are HTTP polling, not streaming.
+- Quotes support HTTP reads and an SSE quote stream with HTTP bootstrap/fallback
+  behavior.
 - Market metadata search/catalog data is loaded as a bounded startup snapshot
   when configured; it is not a live metadata stream or full durable query API.
 - Bars are synthesized from `feature.bbo` midpoint.
 - Volume is sample count, not true trade volume.
+- The operator panel is read-only status/config/profile guidance. It does not
+  run shell, Compose, deploy, or rollback actions.
+- `/health.operator_pipeline` reports FeaturePlant cursor lag, canonical max
+  sequence, latest-state sequence/age, and redacted errors when a cursor is
+  configured.
 
 Missing:
 
 - production frontend app
-- WebSocket/SSE live quote stream
 - replay controls
 - durable query backend
 - mobile layout hardening
@@ -399,7 +404,7 @@ Recommended demo scope:
 1. Show current architecture and distinguish roadmap.
 2. Seed local Timescale/Postgres demo rows with `scripts/db-primary-demo-seed.sh`.
 3. Optionally run `featureplant` from the DB default source for real market rows.
-4. Run `frontend-adapter` from persisted `feature_outputs` startup snapshot mode.
+4. Run `frontend-adapter` from persisted `feature_outputs` DB mode.
 5. Run `scripts/db-primary-demo-smoke.sh` and show DB-primary proof:
    `feature_source=feature_outputs`, loaded `/health.market_metadata` with
    nonzero `markets`, metadata-backed `/datafeed/search`, `/markets`, features,
@@ -407,6 +412,11 @@ Recommended demo scope:
 6. Open `frontend/tradingview-lightweight/index.html` against the DB-backed adapter.
 7. Show `/health` and `/metrics`.
 8. Optionally show raw replay dry-run.
+
+Long-curve replay demos are backend-scoped. `PRODUCT_DEMO_SCENARIO=long-replay`
+seeds replay-scoped canonical rows, runs FeaturePlant for that replay id, and
+serves `feature_outputs`; it intentionally does not update
+`latest_market_state` and is not a product-level replay session selector.
 
 The canonical walkthrough is `docs/demo_db_primary_walkthrough.md`; the video
 guardrail is `docs/video_demo_checklist.md`; the stable local seed is
@@ -419,7 +429,7 @@ Do not demo as completed:
 - arbitrage scanner
 - semantic ontology
 - production durable feature/query API
-- WebSocket/SSE realtime frontend
+- production-grade live trading frontend
 - full alerting
 - production-grade reconnect/recovery
 

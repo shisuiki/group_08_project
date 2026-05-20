@@ -77,7 +77,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FEATUREPLANT_SOURCE=db"));
         assertTrue(script.contains("FEATUREPLANT_OUTPUT=db"));
         assertTrue(script.contains("FEATUREPLANT_RUN_ONCE=false"));
-        assertTrue(script.contains("FEATUREPLANT_DB_INCLUDE_REPLAY=false"));
+        assertTrue(script.contains("FEATUREPLANT_DB_INCLUDE_REPLAY=\"${FEATUREPLANT_DB_INCLUDE_REPLAY:-false}\""));
+        assertTrue(script.contains("FEATUREPLANT_DB_INCLUDE_REPLAY=true"));
+        assertTrue(script.contains("FEATUREPLANT_DB_REPLAY_ID=\"$PRODUCT_DEMO_REPLAY_ID\""));
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED=\"${FEATUREPLANT_DB_OUTPUT_ASYNC_ENABLED:-true}\""));
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY=\"${FEATUREPLANT_DB_OUTPUT_QUEUE_CAPACITY:-250000}\""));
         assertTrue(script.contains("FEATUREPLANT_DB_OUTPUT_BATCH_SIZE=\"${FEATUREPLANT_DB_OUTPUT_BATCH_SIZE:-500}\""));
@@ -294,6 +296,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(cdpSmoke.contains("selectedRowsAfter"));
         assertTrue(cdpSmoke.contains("historyBars"));
         assertTrue(cdpSmoke.contains("wait_for_history_bars"));
+        assertTrue(cdpSmoke.contains("quoteValuesRendered"));
         assertFalse(cdpSmoke.contains("market row click did not leave a selected row"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_PREFER"));
@@ -862,7 +865,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("sh -n scripts/frontend-product-browser-smoke.sh"));
         assertTrue(workflow.contains("if: (env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db') && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));
         assertTrue(workflow.contains("COMPOSE_PROFILE=\"$KALSHI_DEPLOY_PROFILE\""));
-        assertTrue(workflow.contains("REQUIRE_LIVE_PRODUCT_DATA=$q_require_live_product_data sh scripts/ec2-compose-rollback-gate.sh"));
+        assertTrue(workflow.contains("REQUIRE_LIVE_PRODUCT_DATA=$q_require_live_product_data FRONTEND_ADAPTER_BASIC_AUTH_USER=$q_frontend_basic_auth_user FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD=$q_frontend_basic_auth_password sh scripts/ec2-compose-rollback-gate.sh"));
         assertTrue(workflow.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=$q_live_product_browser_smoke_enabled"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=$q_require_live_product_data"));
         assertTrue(workflow.contains("FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED=true"));

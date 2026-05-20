@@ -1003,7 +1003,7 @@ assert_live_product_manual_smoke_contract() {
         "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
-        "REQUIRE_LIVE_PRODUCT_DATA=\$q_require_live_product_data sh scripts/ec2-compose-rollback-gate.sh" \
+        "REQUIRE_LIVE_PRODUCT_DATA=\$q_require_live_product_data FRONTEND_ADAPTER_BASIC_AUTH_USER=\$q_frontend_basic_auth_user FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD=\$q_frontend_basic_auth_password sh scripts/ec2-compose-rollback-gate.sh" \
         'EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS=300' \
         'KALSHI_MARKET_DISCOVERY_MAX_MARKETS=$EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS' \
         "env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db'" \

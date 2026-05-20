@@ -154,6 +154,7 @@ class FrontendAdapterConfigTest {
         assertEquals("secret", config.dbPassword());
         assertFalse(config.dbIncludeReplayEvents());
         assertEquals("", config.dbReplayId());
+        assertEquals("", config.featurePlantCursorName());
     }
 
     @Test
@@ -174,6 +175,20 @@ class FrontendAdapterConfigTest {
         assertEquals("frontend-secret", config.dbPassword());
         assertTrue(config.dbIncludeReplayEvents());
         assertEquals("replay-1", config.dbReplayId());
+    }
+
+    @Test
+    void featureplantCursorNameParsesFrontendEnvAndFallback() {
+        FrontendAdapterConfig fallback = FrontendAdapterConfig.from(Map.of(
+            "FEATUREPLANT_DB_CURSOR_NAME", "featureplant-prod"
+        ));
+        FrontendAdapterConfig override = FrontendAdapterConfig.from(Map.of(
+            "FEATUREPLANT_DB_CURSOR_NAME", "featureplant-prod",
+            "FRONTEND_ADAPTER_FEATUREPLANT_CURSOR_NAME", "frontend-prod"
+        ));
+
+        assertEquals("featureplant-prod", fallback.featurePlantCursorName());
+        assertEquals("frontend-prod", override.featurePlantCursorName());
     }
 
     @Test

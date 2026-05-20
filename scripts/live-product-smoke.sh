@@ -67,6 +67,8 @@ WSCLIENT_METRICS_HOST_PORT="$(env_or_file WSCLIENT_METRICS_HOST_PORT 8091)"
 STREAM_TAP_HOST_PORT="$(env_or_file STREAM_TAP_HOST_PORT 8080)"
 FEATUREPLANT_METRICS_HOST_PORT="$(env_or_file FEATUREPLANT_METRICS_HOST_PORT 8094)"
 DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="$(env_or_file DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT 8090)"
+FRONTEND_ADAPTER_BASIC_AUTH_USER="$(env_or_file FRONTEND_ADAPTER_BASIC_AUTH_USER "")"
+FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD="$(env_or_file FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD "")"
 LOCAL_DB_NAME="$(env_or_file LOCAL_DB_NAME kalshi_test)"
 LOCAL_DB_USER="$(env_or_file LOCAL_DB_USER kalshi)"
 LOCAL_DB_PASSWORD="$(env_or_file LOCAL_DB_PASSWORD kalshi)"
@@ -158,6 +160,14 @@ print_diagnostics() {
         wsclient streamtap featureplant-db-follower frontend-adapter-db-primary >&2 || true
 }
 
+frontend_curl() {
+    if [ -n "$FRONTEND_ADAPTER_BASIC_AUTH_USER" ] && [ -n "$FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD" ]; then
+        curl --user "${FRONTEND_ADAPTER_BASIC_AUTH_USER}:${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD}" "$@"
+    else
+        curl "$@"
+    fi
+}
+
 urlencode() {
     python3 - "$1" <<'PY'
 import sys
@@ -171,7 +181,7 @@ fetch_sse_stream() {
     output="$2"
     error_output="${output}.err"
     set +e
-    curl -fsS -N --max-time 3 --noproxy "$FRONTEND_NO_PROXY" \
+    frontend_curl -fsS -N --max-time 3 --noproxy "$FRONTEND_NO_PROXY" \
         "${FRONTEND_BASE_URL}${endpoint}" \
         -o "$output" \
         2> "$error_output"
@@ -371,7 +381,7 @@ wait_frontend_ready() {
     selection="$tmpdir/frontend.health.txt"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
             && python3 - "$output" \
                 "$EXPECTED_FEATURE_SOURCE" \
                 "$EXPECTED_KALSHI_RELEASE_SHA" \
@@ -644,10 +654,10 @@ check_product_static_ui() {
     app_file="$tmpdir/frontend-app.js"
     css_file="$tmpdir/frontend-styles.css"
     chart_file="$tmpdir/frontend-lightweight-charts.js"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
         "${FRONTEND_BASE_URL}/vendor/lightweight-charts-4.2.0.standalone.production.js" -o "$chart_file"
     grep -q 'Kalshi Product Dashboard' "$index_file"
     grep -q '<link rel="stylesheet" href="styles.css" />' "$index_file"
@@ -706,7 +716,7 @@ wait_frontend_feature_output() {
     output="$tmpdir/frontend.features.json"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
             "${FRONTEND_BASE_URL}/features?symbol=${encoded_market}&feature=${encoded_feature}&limit=20" \
             -o "$output" \
             && python3 - "$output" "$market" "$source_event_id" <<'PY'
@@ -753,7 +763,7 @@ wait_frontend_quote() {
     output="$tmpdir/frontend.quotes.json"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
             "${FRONTEND_BASE_URL}/quotes?symbols=${encoded_market}" \
             -o "$output" \
             && python3 - "$output" "$market" <<'PY'
@@ -921,7 +931,7 @@ wait_frontend_live_feature_output() {
     output="$tmpdir/frontend.live.features.json"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
             "${FRONTEND_BASE_URL}/features?symbol=${encoded_market}&feature=${encoded_feature}&limit=20" \
             -o "$output" \
             && python3 - "$output" "$market" "$feature" "$source_event_id" <<'PY'
@@ -967,7 +977,7 @@ wait_frontend_live_quote() {
     output="$tmpdir/frontend.live.quotes.json"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
             "${FRONTEND_BASE_URL}/quotes?symbols=${encoded_market}" \
             -o "$output" \
             && python3 - "$output" "$market" "$min_event_ts_ms" <<'PY'
@@ -1013,7 +1023,7 @@ wait_frontend_health_non_smoke_freshness() {
     output="$tmpdir/frontend.live.health.json"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
             && python3 - "$output" "$min_event_ts_ms" <<'PY'
 import json
 import sys

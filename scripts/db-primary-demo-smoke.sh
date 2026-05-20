@@ -3,6 +3,8 @@ set -eu
 
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:${FRONTEND_ADAPTER_HOST_PORT:-8090}}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
+FRONTEND_ADAPTER_BASIC_AUTH_USER="${FRONTEND_ADAPTER_BASIC_AUTH_USER:-}"
+FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD="${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD:-}"
 EXPECTED_FEATURE_SOURCE="${EXPECTED_FEATURE_SOURCE:-latest_market_state}"
 EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED="${EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED:-true}"
 EXPECTED_FEATURE_OUTPUT_REFRESH_RUNNING="${EXPECTED_FEATURE_OUTPUT_REFRESH_RUNNING:-$EXPECTED_FEATURE_OUTPUT_REFRESH_ENABLED}"
@@ -40,12 +42,20 @@ print(quote(sys.argv[1], safe=""))
 PY
 }
 
+frontend_curl() {
+    if [ -n "$FRONTEND_ADAPTER_BASIC_AUTH_USER" ] && [ -n "$FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD" ]; then
+        curl --user "${FRONTEND_ADAPTER_BASIC_AUTH_USER}:${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD}" "$@"
+    else
+        curl "$@"
+    fi
+}
+
 fetch_json() {
     endpoint="$1"
     output="$2"
     attempt=1
     while :; do
-        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}${endpoint}" -o "$output"; then
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}${endpoint}" -o "$output"; then
             break
         fi
         if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
@@ -67,7 +77,7 @@ fetch_sse_stream() {
     output="$2"
     error_output="${output}.err"
     set +e
-    curl -fsS -N --max-time 3 --noproxy "$FRONTEND_NO_PROXY" \
+    frontend_curl -fsS -N --max-time 3 --noproxy "$FRONTEND_NO_PROXY" \
         "${FRONTEND_BASE_URL}${endpoint}" \
         -o "$output" \
         2> "$error_output"
@@ -88,10 +98,10 @@ check_product_static_ui() {
     app_file="$tmpdir/frontend-app.js"
     css_file="$tmpdir/frontend-styles.css"
     chart_file="$tmpdir/frontend-lightweight-charts.js"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
-    curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
         "${FRONTEND_BASE_URL}/vendor/lightweight-charts-4.2.0.standalone.production.js" -o "$chart_file"
     grep -q 'Kalshi Product Dashboard' "$index_file"
     grep -q '<link rel="stylesheet" href="styles.css" />' "$index_file"

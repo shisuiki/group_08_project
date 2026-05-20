@@ -16,6 +16,8 @@ the short presentation guardrail for the DB-primary demo.
    `feature_outputs` bars visible.
 6. `/health` and `/metrics` from the frontend adapter or wsclient metrics
    service, depending on the profile being shown.
+7. Operator runtime panel as read-only status/config guidance; do not present it
+   as a deploy or shell control surface.
 
 ## Do Not Present As Complete
 
@@ -23,7 +25,8 @@ the short presentation guardrail for the DB-primary demo.
 - Arbitrage scanner.
 - Semantic matching or ontology.
 - Production durable query API.
-- WebSocket/SSE realtime frontend.
+- Production-grade live trading frontend.
+- Product-level replay session controls.
 - Full alerting.
 - Automated live order-book recovery or full order-book depth restore.
 

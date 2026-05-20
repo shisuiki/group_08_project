@@ -53,6 +53,8 @@
         runtimeUptime: document.getElementById('runtime-uptime'),
         runtimeRefreshTotal: document.getElementById('runtime-refresh-total'),
         runtimeRefreshErrors: document.getElementById('runtime-refresh-errors'),
+        runtimePipelineStatus: document.getElementById('runtime-pipeline-status'),
+        runtimeCursorLag: document.getElementById('runtime-cursor-lag'),
         runtimeQuoteStreams: document.getElementById('runtime-quote-streams'),
         runtimeQuoteWaits: document.getElementById('runtime-quote-waits'),
         freshnessAgeMs: document.getElementById('freshness-age-ms'),
@@ -63,6 +65,7 @@
         freshnessStoreSequence: document.getElementById('freshness-store-sequence'),
         freshnessStatusClass: document.getElementById('freshness-status-class'),
         featureplantLagEvents: document.getElementById('featureplant-lag-events'),
+        canonicalMaxSeq: document.getElementById('canonical-max-seq'),
         operatorPlanState: document.getElementById('operator-plan-state'),
         operatorDeployProfile: document.getElementById('operator-deploy-profile'),
         operatorKalshiKeyId: document.getElementById('operator-kalshi-key-id'),
@@ -638,11 +641,19 @@
         const refresh = body.feature_output_refresh || {};
         const streams = body.quote_streams || {};
         const updates = body.quote_updates || {};
+        const pipeline = body.operator_pipeline || {};
         dom.runtimeSourceMode.textContent = body.source_mode || '-';
         dom.runtimeFeatureSource.textContent = body.feature_source || '-';
         dom.runtimeUptime.textContent = formatAge(Number(body.uptime_ms || 0));
         dom.runtimeRefreshTotal.textContent = String(refresh.total_loaded ?? 0);
         dom.runtimeRefreshErrors.textContent = String(refresh.refresh_errors ?? 0);
+        dom.runtimePipelineStatus.textContent = pipeline.status || '-';
+        dom.runtimePipelineStatus.className = pipeline.status === 'ok' ? 'fresh'
+            : pipeline.status === 'disabled' ? ''
+            : 'stale';
+        dom.runtimeCursorLag.textContent = pipeline.cursor_lag_events == null
+            ? '-'
+            : `${pipeline.cursor_lag_events} event(s)`;
         dom.runtimeQuoteStreams.textContent =
             `${streams.active_streams || 0}/${streams.max_streams || 0} active, ${streams.events || 0} events`;
         dom.runtimeQuoteWaits.textContent =
@@ -653,6 +664,7 @@
         const freshness = body.data_freshness || {};
         const fp = body.feature_plant || {};
         const store = body.store || {};
+        const pipeline = body.operator_pipeline || {};
         const age = freshness.latest_event_age_ms;
         const state = dataFreshnessLiveState(freshness);
         dom.freshnessStatusClass.textContent = state;
@@ -670,6 +682,9 @@
         } else {
             dom.featureplantLagEvents.textContent = '-';
         }
+        dom.canonicalMaxSeq.textContent = pipeline.canonical_max_commit_seq == null
+            ? '-'
+            : String(pipeline.canonical_max_commit_seq);
     }
 
     function adapterStatusText(body) {
@@ -998,6 +1013,7 @@
         const source = new EventSource(base + `/quotes/stream?symbols=${encodeURIComponent(symbol)}`);
         quotesEventSource = source;
         renderQuoteUpdateState('SSE connecting', '');
+        pollQuotes(generation, symbol, base);
         const onQuote = event => handleQuoteStreamMessage(generation, symbol, base, event);
         source.addEventListener('quotes', onQuote);
         source.onmessage = onQuote;

@@ -195,7 +195,8 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
                 for (FeatureOutput output : collectOutputs(envelope)) {
                     FeatureOutputDbEvent dbEvent = outputMapper.toDbEvent(output);
                     outputs.add(dbEvent);
-                    latestStateFor(output, dbEvent, event.canonicalCommitSeq()).ifPresent(latestStates::add);
+                    latestStateFor(output, dbEvent, event.canonicalCommitSeq(), event.replayId())
+                        .ifPresent(latestStates::add);
                 }
                 nextCursor = event.nextCursor();
                 projectedEvents++;
@@ -286,8 +287,12 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
     private java.util.Optional<LatestMarketState> latestStateFor(
         FeatureOutput output,
         FeatureOutputDbEvent dbEvent,
-        long canonicalCommitSeq
+        long canonicalCommitSeq,
+        String replayId
     ) {
+        if (replayId != null && !replayId.isBlank()) {
+            return java.util.Optional.empty();
+        }
         if (!BestBidOfferFeatureModule.FEATURE_NAME.equals(output.featureName())) {
             return java.util.Optional.empty();
         }

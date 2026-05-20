@@ -16,6 +16,8 @@ DEPLOY_DB_PREFLIGHT_REQUIRED="${DEPLOY_DB_PREFLIGHT_REQUIRED:-false}"
 LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"
 REQUIRE_LIVE_PRODUCT_DATA="${REQUIRE_LIVE_PRODUCT_DATA:-false}"
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
+FRONTEND_ADAPTER_BASIC_AUTH_USER="${FRONTEND_ADAPTER_BASIC_AUTH_USER:-}"
+FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD="${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD:-}"
 KALSHI_APP_IMAGE="${KALSHI_APP_IMAGE:-}"
 CANDIDATE_IMAGE_TAR="${CANDIDATE_IMAGE_TAR:-}"
 KALSHI_RELEASE_SHA="${KALSHI_RELEASE_SHA:-}"
@@ -67,6 +69,14 @@ compose_profile() {
 
 log() {
     printf '%s\n' "$*"
+}
+
+frontend_curl() {
+    if [ -n "$FRONTEND_ADAPTER_BASIC_AUTH_USER" ] && [ -n "$FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD" ]; then
+        curl --user "${FRONTEND_ADAPTER_BASIC_AUTH_USER}:${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD}" "$@"
+    else
+        curl "$@"
+    fi
 }
 
 reset_gate_statuses() {
@@ -287,7 +297,7 @@ frontend_release_health_json() {
     mkdir -p "$DEPLOY_STATE_DIR"
     tmp_health="$DEPLOY_STATE_DIR/.frontend-health.$$"
     rm -f "$tmp_health"
-    if ! curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 3 "$url" > "$tmp_health" 2>/dev/null; then
+    if ! frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 3 "$url" > "$tmp_health" 2>/dev/null; then
         rm -f "$tmp_health"
         printf '{"checked":true,"status":"failed","url":'
         json_string "$url"
@@ -761,6 +771,27 @@ validate_live_product_frontend_feature_source() {
     esac
 }
 
+is_loopback_bind_ip() {
+    case "$1" in
+        ""|127.*|localhost|::1|"[::1]") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_live_product_frontend_auth() {
+    env_file="$1"
+    bind_ip="$(env_file_value "$env_file" COMPOSE_HOST_BIND_IP)"
+    if [ -z "$bind_ip" ]; then
+        bind_ip="127.0.0.1"
+    fi
+    auth_user="$(env_file_value "$env_file" FRONTEND_ADAPTER_BASIC_AUTH_USER)"
+    auth_password="$(env_file_value "$env_file" FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD)"
+    if ! is_loopback_bind_ip "$bind_ip" && { [ -z "$auth_user" ] || [ -z "$auth_password" ]; }; then
+        log "live-product public frontend bind requires FRONTEND_ADAPTER_BASIC_AUTH_USER and FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD."
+        return 1
+    fi
+}
+
 run_db_release_preflight() {
     env_file="$1"
     service="$(db_preflight_service)"
@@ -789,6 +820,10 @@ run_db_release_preflight() {
                 DB_PREFLIGHT_STATUS="failed"
                 return 1
             fi
+            if ! validate_live_product_frontend_auth "$env_file"; then
+                DB_PREFLIGHT_STATUS="failed"
+                return 1
+            fi
             db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
             db_user="$(env_file_value "$env_file" DB_WRITER_DATABASE_USER)"
             db_password="$(env_file_value "$env_file" DB_WRITER_DATABASE_PASSWORD)"
@@ -806,6 +841,10 @@ run_db_release_preflight() {
                 return 1
             fi
             if ! validate_live_product_frontend_feature_source "$env_file"; then
+                DB_PREFLIGHT_STATUS="failed"
+                return 1
+            fi
+            if ! validate_live_product_frontend_auth "$env_file"; then
                 DB_PREFLIGHT_STATUS="failed"
                 return 1
             fi
@@ -873,7 +912,14 @@ health_smoke_services() {
             index=$((index + 1))
             eval "url=\${$index}"
             index=$((index + 1))
-            if curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 2 "$url" >/dev/null 2>&1; then
+            if [ "$name" = "frontend-adapter-db-primary" ]; then
+                if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 2 "$url" >/dev/null 2>&1; then
+                    log "$name health check passed: $url"
+                else
+                    all_ok=0
+                    pending="${pending}${pending:+,}$name"
+                fi
+            elif curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 2 "$url" >/dev/null 2>&1; then
                 log "$name health check passed: $url"
             else
                 all_ok=0
@@ -1150,6 +1196,11 @@ run_live_product_semantic_smoke() {
     if ! validate_live_product_frontend_feature_source "$env_file"; then
         LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
         LIVE_PRODUCT_SMOKE_JSON='{"checked":true,"status":"failed","reason":"frontend_feature_source"}'
+        return 1
+    fi
+    if ! validate_live_product_frontend_auth "$env_file"; then
+        LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
+        LIVE_PRODUCT_SMOKE_JSON='{"checked":true,"status":"failed","reason":"frontend_auth_required"}'
         return 1
     fi
 

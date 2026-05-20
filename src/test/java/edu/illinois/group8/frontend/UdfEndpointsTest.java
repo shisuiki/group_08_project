@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -621,6 +622,70 @@ class UdfEndpointsTest {
         assertEquals(4, body.path("quote_updates").path("max_waits").asInt());
         assertEquals(0L, body.path("quote_streams").path("rejected").asLong());
         assertEquals(2, body.path("quote_streams").path("max_streams").asInt());
+        assertEquals("disabled", body.path("operator_pipeline").path("status").asText());
+    }
+
+    @Test
+    void healthReportsOperatorPipelineStatus() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            () -> new OperatorPipelineStatus("degraded", "featureplant-prod", 8L, 13L, 5L, 7L, 250L, null),
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode pipeline = getJson("/health").path("operator_pipeline");
+
+        assertEquals("degraded", pipeline.path("status").asText());
+        assertEquals("featureplant-prod", pipeline.path("cursor_name").asText());
+        assertEquals(8L, pipeline.path("cursor_commit_seq").asLong());
+        assertEquals(13L, pipeline.path("canonical_max_commit_seq").asLong());
+        assertEquals(5L, pipeline.path("cursor_lag_events").asLong());
+        assertEquals(7L, pipeline.path("latest_market_state_commit_seq").asLong());
+        assertEquals(250L, pipeline.path("latest_state_age_ms").asLong());
+    }
+
+    @Test
+    void healthRedactsOperatorVisibleErrors() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        String sensitive = "jdbc:postgresql://user:secret@db/kalshi?password=hunter2 Authorization: Basic abcdef "
+            + "-----BEGIN PRIVATE KEY-----secret-key-----END PRIVATE KEY-----";
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.unavailable("db", sensitive),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            () -> new FeatureOutputRefreshStatus(
+                true,
+                false,
+                null,
+                Instant.parse("2026-05-20T00:00:02Z"),
+                sensitive,
+                0,
+                0L,
+                1L
+            ),
+            () -> OperatorPipelineStatus.unavailable("featureplant-prod", sensitive),
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        String body = get("/health").body();
+
+        assertFalse(body.contains("hunter2"));
+        assertFalse(body.contains("secret@"));
+        assertFalse(body.contains("abcdef"));
+        assertFalse(body.contains("secret-key"));
+        assertTrue(body.contains("[redacted]"));
     }
 
     @Test
@@ -646,6 +711,7 @@ class UdfEndpointsTest {
             FrontendMarketMetadataCatalog.disabled("test"),
             () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
             FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
             new FrontendReleaseInfo("abcdef1234567890", "kalshi-project:abcdef", "live-product", "261", "2")
         );
         server.start();

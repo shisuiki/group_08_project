@@ -138,6 +138,8 @@ STATE_EXPR = r"""
   const quoteStatus = text('quote-update-health');
   const statusLine = text('status-line');
   const historyMatch = statusLine.match(/Rendered\s+(\d+)\s+bar\(s\)/);
+  const quoteValuesRendered = [text('live-bid'), text('live-ask'), text('live-midpoint')]
+    .every((value) => value && value !== '-');
   return {
     title: document.body?.innerText.includes('Kalshi Product Dashboard') || false,
     marketSearch: !!document.getElementById('market-search'),
@@ -162,6 +164,7 @@ STATE_EXPR = r"""
     quoteUpdateHealth: quoteStatus,
     statusLine,
     historyBars: historyMatch ? Number(historyMatch[1]) : 0,
+    quoteValuesRendered,
     productMarketPanel: !!document.getElementById('product-market-panel'),
     researchFeaturesPanel: !!document.getElementById('research-features-panel'),
     runtimeOperatorPanel: !!document.getElementById('runtime-operator-panel'),
@@ -245,6 +248,7 @@ def wait_for_state(cdp, timeout_seconds):
             and last.get("noHorizontalOverflow")
             and last.get("freshnessState") in ("waiting", "fresh", "stale")
             and last.get("quoteFeedVisible")
+            and last.get("quoteValuesRendered")
             and not last.get("quoteError")
             and not last.get("lightweightChartsMissing")
         )
@@ -328,6 +332,12 @@ def main():
         cdp = Cdp(page["webSocketDebuggerUrl"])
         cdp.call("Page.enable")
         cdp.call("Runtime.enable")
+        auth_user = os.environ.get("FRONTEND_ADAPTER_BASIC_AUTH_USER") or ""
+        auth_password = os.environ.get("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD") or ""
+        if auth_user and auth_password:
+            token = base64.b64encode(f"{auth_user}:{auth_password}".encode("utf-8")).decode("ascii")
+            cdp.call("Network.enable")
+            cdp.call("Network.setExtraHTTPHeaders", {"headers": {"Authorization": "Basic " + token}})
         cdp.call("Page.navigate", {"url": args.url})
         wait_for_state(cdp, args.timeout_seconds)
         interaction = evaluate(cdp, INTERACTION_EXPR) or {}
