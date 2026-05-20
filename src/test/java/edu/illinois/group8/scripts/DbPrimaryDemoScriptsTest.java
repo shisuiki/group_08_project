@@ -585,6 +585,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("assert_published_ports_loopback \"live-product-local-db\" --profile live-product-local-db"));
         assertTrue(script.contains("assert_no_default_network \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_no_default_network \"live-product-local-db\" --profile live-product-local-db"));
+        assertTrue(script.contains("assert_cluster_dynamic_ip_range_aligned"));
+        assertTrue(script.contains("ip_range: 172.20.128.0/17"));
         assertTrue(script.contains("assert_live_product_manual_smoke_contract"));
         assertTrue(script.contains("assert_kalshi_app_image_contract"));
         assertTrue(script.contains("assert_frontend_release_health_contract"));
@@ -776,6 +778,7 @@ class DbPrimaryDemoScriptsTest {
                 "missing KALSHI_APP_IMAGE contract for " + service);
         }
         assertTrue(compose.contains("  s3-recording-sync:\n    build:\n      context: .\n      dockerfile: ops/docker/s3-recording-sync.Dockerfile\n    image: group_08_project-s3-recording-sync"));
+        assertTrue(compose.contains("ip_range: ${CLUSTER_DYNAMIC_IP_RANGE:-172.20.128.0/17}"));
     }
 
     @Test

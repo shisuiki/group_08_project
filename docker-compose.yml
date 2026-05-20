@@ -738,6 +738,7 @@ networks:
     ipam:
       config:
         - subnet: ${CLUSTER_SUBNET:-172.20.0.0/16}
+          ip_range: ${CLUSTER_DYNAMIC_IP_RANGE:-172.20.128.0/17}
 
 volumes:
   timescale_data:

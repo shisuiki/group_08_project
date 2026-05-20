@@ -830,6 +830,15 @@ assert_no_default_network() {
     printf 'PASS compose_no_default_network profiles=%s\n' "$label"
 }
 
+assert_cluster_dynamic_ip_range_aligned() {
+    rendered="$(compose --profile live-product-local-db config)"
+    if ! printf '%s\n' "$rendered" | grep -q 'ip_range: 172.20.128.0/17'; then
+        printf 'cluster_net dynamic ip_range must not overlap static cluster node addresses\n' >&2
+        exit 1
+    fi
+    printf 'PASS cluster_dynamic_ip_range avoids_static_cluster_addresses\n'
+}
+
 assert_raw_replay_table_defaults_aligned() {
     rendered="$(service_config_for raw-ingress-replay --profile raw-replay)"
     if ! printf '%s\n' "$rendered" | grep -q '^      RAW_REPLAY_TABLE: raw_ws_events$'; then
@@ -1235,6 +1244,7 @@ assert_no_default_network "raw-replay" --profile raw-replay
 assert_no_default_network "db-primary-product" --profile db-primary-product
 assert_no_default_network "live-product" --profile live-product
 assert_no_default_network "live-product-local-db" --profile live-product-local-db
+assert_cluster_dynamic_ip_range_aligned
 assert_raw_replay_table_defaults_aligned
 assert_ws_reconnect_defaults_aligned
 assert_release_gate_defaults_aligned
