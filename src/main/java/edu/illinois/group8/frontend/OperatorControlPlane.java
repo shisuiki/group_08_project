@@ -127,7 +127,7 @@ final class OperatorControlPlane {
         body.put("can_replay", canReplay);
         body.put("checklist", checklist);
         body.put("redacted_env", redactedEnv(input));
-        body.put("commands", commands(input, canDeploy, canReplay));
+        body.put("commands", commands(input, supportedProfile, canDeploy, canReplay));
         return body;
     }
 
@@ -196,8 +196,17 @@ final class OperatorControlPlane {
         return envPlan;
     }
 
-    private static List<String> commands(PlanInput input, boolean canDeploy, boolean canReplay) {
+    private static List<String> commands(
+        PlanInput input,
+        boolean supportedProfile,
+        boolean canDeploy,
+        boolean canReplay
+    ) {
         List<String> commands = new ArrayList<>();
+        if (!supportedProfile) {
+            commands.add("choose a supported profile before generating commands");
+            return commands;
+        }
         if (canReplay) {
             commands.add("PRODUCT_DEMO_SCENARIO=long-replay FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs "
                 + "scripts/db-primary-product-smoke.sh");

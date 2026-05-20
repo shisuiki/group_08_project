@@ -830,6 +830,26 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void operatorPlanDoesNotRenderCommandsForUnsupportedProfiles() throws Exception {
+        restartWithOperatorControl(true);
+        String request = "{\"profile\":\"live-product; touch /tmp/pwn\"}";
+
+        JsonNode body = MAPPER.readTree(postJsonWithBasicAuth(
+            "/operator/plan",
+            request,
+            "operator",
+            "secret"
+        ).body());
+
+        assertEquals("blocked", body.path("status").asText());
+        assertFalse(checkPassed(body, "profile_supported"));
+        String commandPlan = body.path("commands").toString();
+        assertFalse(commandPlan.contains("touch"));
+        assertFalse(commandPlan.contains("docker compose"));
+        assertTrue(commandPlan.contains("supported profile"));
+    }
+
+    @Test
     void operatorPlanIsProtectedByBasicAuthWhenConfigured() throws Exception {
         restartWithOperatorControl(true);
         String request = "{\"profile\":\"long-replay-demo\"}";
