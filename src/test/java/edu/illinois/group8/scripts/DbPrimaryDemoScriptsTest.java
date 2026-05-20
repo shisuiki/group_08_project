@@ -170,6 +170,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("PASS catalog_sync_smoke"));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
         assertTrue(script.contains("reason=secret_leaked"));
+        assertTrue(script.contains("if len(value) < 8:"));
         assertFalse(script.contains("docker compose up"));
         assertFalse(script.contains("db-primary-product-smoke.sh"));
     }

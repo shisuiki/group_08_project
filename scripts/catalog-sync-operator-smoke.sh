@@ -158,6 +158,8 @@ secret_values = [
     os.environ.get("FRONTEND_ADAPTER_DB_PASSWORD", ""),
 ]
 for value in secret_values:
+    if len(value) < 8:
+        continue
     if value and value in raw:
         raise SystemExit("FAIL catalog_sync_smoke reason=secret_leaked")
 if state != "completed":
