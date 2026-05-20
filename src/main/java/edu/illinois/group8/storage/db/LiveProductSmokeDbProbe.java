@@ -77,6 +77,57 @@ public final class LiveProductSmokeDbProbe {
         order by ce.canonical_commit_seq desc, fo.created_at desc, fo.feature_event_id desc
         limit 1
         """;
+    static final String RAW_PROGRESS_SQL = """
+        select
+            count(*),
+            coalesce(max(receive_ts_ns), 0),
+            coalesce((extract(epoch from (now() - max(created_at))) * 1000)::bigint, -1)
+        from (
+            select receive_ts_ns, created_at
+            from raw_ws_events
+            where created_at >= now() - (? * interval '1 second')
+            order by created_at desc
+            limit ?
+        ) recent_raw
+        """;
+    static final String CANONICAL_PROGRESS_SQL = """
+        select
+            count(*),
+            coalesce(max(canonical_commit_seq), 0),
+            coalesce((extract(epoch from (now() - max(created_at))) * 1000)::bigint, -1)
+        from (
+            select canonical_commit_seq, created_at
+            from canonical_events
+            where created_at >= now() - (? * interval '1 second')
+            order by canonical_commit_seq desc
+            limit ?
+        ) recent_canonical
+        """;
+    static final String FEATURE_PROGRESS_SQL = """
+        select
+            count(*),
+            coalesce(max(event_ts_ms), 0),
+            coalesce((extract(epoch from (now() - max(created_at))) * 1000)::bigint, -1)
+        from (
+            select event_ts_ms, created_at
+            from feature_outputs
+            where created_at >= now() - (? * interval '1 second')
+            order by created_at desc, feature_event_id desc
+            limit ?
+        ) recent_feature
+        """;
+    static final String RAW_WITHOUT_CANONICAL_SQL = """
+        select count(*)
+        from (
+            select raw_event_id
+            from raw_ws_events
+            where created_at >= now() - (? * interval '1 second')
+            order by created_at desc
+            limit ?
+        ) raw_recent
+        left join canonical_events canonical on canonical.raw_event_id = raw_recent.raw_event_id
+        where canonical.raw_event_id is null
+        """;
     static final String UPSERT_MARKET_METADATA_SQL = """
         insert into market_metadata (
             market_ticker,
@@ -277,6 +328,53 @@ public final class LiveProductSmokeDbProbe {
         }
     }
 
+    public PipelineReliabilitySnapshot pipelineReliabilitySnapshot(
+        String cursorName,
+        long windowSeconds,
+        int rowLimit
+    ) {
+        String normalizedCursorName = normalize(cursorName, "cursorName");
+        validatePositive(windowSeconds, "windowSeconds");
+        if (rowLimit < 1) {
+            throw new IllegalArgumentException("rowLimit must be positive");
+        }
+
+        ProgressSummary raw = progressSummary(RAW_PROGRESS_SQL, windowSeconds, rowLimit, "raw progress");
+        ProgressSummary canonical = progressSummary(
+            CANONICAL_PROGRESS_SQL,
+            windowSeconds,
+            rowLimit,
+            "canonical progress"
+        );
+        ProgressSummary feature = progressSummary(FEATURE_PROGRESS_SQL, windowSeconds, rowLimit, "feature progress");
+        long rawWithoutCanonical = boundedCount(
+            RAW_WITHOUT_CANONICAL_SQL,
+            windowSeconds,
+            rowLimit,
+            "raw without canonical count"
+        );
+        long cursorCommitSeq = cursorCommitSeq(normalizedCursorName);
+        long cursorLagEvents = Math.max(0L, canonical.maxSequenceOrEventTs() - cursorCommitSeq);
+        String status = pipelineStatus(raw, canonical, feature, cursorLagEvents);
+        return new PipelineReliabilitySnapshot(
+            status,
+            windowSeconds,
+            rowLimit,
+            raw.count(),
+            raw.maxSequenceOrEventTs(),
+            raw.latestAgeMs(),
+            canonical.count(),
+            canonical.maxSequenceOrEventTs(),
+            canonical.latestAgeMs(),
+            cursorCommitSeq,
+            cursorLagEvents,
+            feature.count(),
+            feature.maxSequenceOrEventTs(),
+            feature.latestAgeMs(),
+            rawWithoutCanonical
+        );
+    }
+
     private void upsertMarketMetadata(Connection connection, String runId, String marketTicker) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(UPSERT_MARKET_METADATA_SQL)) {
             ObjectNode payload = mapper.createObjectNode();
@@ -412,6 +510,58 @@ public final class LiveProductSmokeDbProbe {
         }
     }
 
+    private ProgressSummary progressSummary(String sql, long windowSeconds, int rowLimit, String label) {
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, windowSeconds);
+            statement.setInt(2, rowLimit);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new IllegalStateException(label + " query returned no rows");
+                }
+                return new ProgressSummary(
+                    resultSet.getLong(1),
+                    resultSet.getLong(2),
+                    resultSet.getLong(3)
+                );
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read " + label, e);
+        }
+    }
+
+    private long boundedCount(String sql, long windowSeconds, int rowLimit, String label) {
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, windowSeconds);
+            statement.setInt(2, rowLimit);
+            return singleLong(statement, label);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read " + label, e);
+        }
+    }
+
+    private static String pipelineStatus(
+        ProgressSummary raw,
+        ProgressSummary canonical,
+        ProgressSummary feature,
+        long cursorLagEvents
+    ) {
+        if (raw.count() == 0L && canonical.count() == 0L && feature.count() == 0L) {
+            return "stale";
+        }
+        if (raw.count() > 0L && canonical.count() == 0L) {
+            return "degraded";
+        }
+        if (canonical.count() > 0L && feature.count() == 0L) {
+            return "degraded";
+        }
+        if (cursorLagEvents > 0L) {
+            return "degraded";
+        }
+        return "ok";
+    }
+
     private static void rollback(Connection connection, Exception cause) {
         try {
             connection.rollback();
@@ -430,6 +580,12 @@ public final class LiveProductSmokeDbProbe {
     private static void validateNonNegative(long value, String label) {
         if (value < 0) {
             throw new IllegalArgumentException(label + " must be non-negative");
+        }
+    }
+
+    private static void validatePositive(long value, String label) {
+        if (value < 1) {
+            throw new IllegalArgumentException(label + " must be positive");
         }
     }
 
@@ -465,6 +621,28 @@ public final class LiveProductSmokeDbProbe {
         String streamName,
         long commitSeq
     ) {
+    }
+
+    public record PipelineReliabilitySnapshot(
+        String status,
+        long windowSeconds,
+        int rowLimit,
+        long rawRecentCount,
+        long rawLatestReceiveTsNs,
+        long rawLatestAgeMs,
+        long canonicalRecentCount,
+        long canonicalMaxCommitSeq,
+        long canonicalLatestAgeMs,
+        long cursorCommitSeq,
+        long cursorLagEvents,
+        long featureRecentCount,
+        long featureLatestEventTsMs,
+        long featureLatestAgeMs,
+        long rawWithoutCanonicalCount
+    ) {
+    }
+
+    private record ProgressSummary(long count, long maxSequenceOrEventTs, long latestAgeMs) {
     }
 
     private record SeedEvent(

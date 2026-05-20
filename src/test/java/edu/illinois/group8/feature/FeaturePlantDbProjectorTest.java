@@ -8,6 +8,7 @@ import edu.illinois.group8.storage.db.CanonicalDbReadEvent;
 import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
 import edu.illinois.group8.storage.db.FeatureOutputDbEvent;
 import edu.illinois.group8.storage.db.FeatureOutputProjectionStore;
+import edu.illinois.group8.storage.db.FeaturePlantProjectorLease;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
@@ -143,6 +144,91 @@ class FeaturePlantDbProjectorTest {
         assertEquals(6L, store.cursor.orElseThrow().lastCommitSeq());
     }
 
+    @Test
+    void closeReleasesProjectorLease() {
+        FakeReader reader = new FakeReader(List.of());
+        FakeProjectionStore store = new FakeProjectionStore(new CanonicalDbCursor(5L));
+        RecordingLease lease = new RecordingLease();
+        FeaturePlantDbProjector projector = new FeaturePlantDbProjector(
+            reader,
+            store,
+            List.of("derived.top_of_book"),
+            List.of(new BestBidOfferFeatureModule()),
+            0L,
+            false,
+            "",
+            "featureplant-prod",
+            new BackendMetrics(),
+            new edu.illinois.group8.canonical.JsonCanonicalSerializer().mapper(),
+            new FeatureOutputDbEventMapper(),
+            lease
+        );
+
+        projector.close();
+
+        assertEquals(1, lease.closeCalls);
+    }
+
+    @Test
+    void emptyPollDoesNotCheckLeaseHealth() {
+        FakeReader reader = new FakeReader(List.of());
+        FakeProjectionStore store = new FakeProjectionStore(new CanonicalDbCursor(5L));
+        RecordingLease lease = new RecordingLease();
+        lease.failEnsure = true;
+        FeaturePlantDbProjector projector = new FeaturePlantDbProjector(
+            reader,
+            store,
+            List.of("derived.top_of_book"),
+            List.of(new BestBidOfferFeatureModule()),
+            0L,
+            false,
+            "",
+            "featureplant-prod",
+            new BackendMetrics(),
+            new edu.illinois.group8.canonical.JsonCanonicalSerializer().mapper(),
+            new FeatureOutputDbEventMapper(),
+            lease
+        );
+
+        assertEquals(0, projector.poll(10));
+
+        assertEquals(0, lease.ensureCalls);
+        assertEquals(1, reader.requests.size());
+        assertEquals(List.of(), store.actions);
+        assertEquals(5L, projector.cursor().lastCommitSeq());
+    }
+
+    @Test
+    void lostLeaseBeforeCommitDoesNotWriteOutputsOrAdvanceCursor() {
+        FakeReader reader = new FakeReader(List.of(bboEvent(6L, "bbo-6")));
+        FakeProjectionStore store = new FakeProjectionStore(new CanonicalDbCursor(5L));
+        RecordingLease lease = new RecordingLease();
+        lease.failOnEnsureCall = 1;
+        FeaturePlantDbProjector projector = new FeaturePlantDbProjector(
+            reader,
+            store,
+            List.of("derived.top_of_book"),
+            List.of(new BestBidOfferFeatureModule()),
+            0L,
+            false,
+            "",
+            "featureplant-prod",
+            new BackendMetrics(),
+            new edu.illinois.group8.canonical.JsonCanonicalSerializer().mapper(),
+            new FeatureOutputDbEventMapper(),
+            lease
+        );
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> projector.poll(10));
+
+        assertTrue(thrown.getMessage().contains("lease lost"));
+        assertEquals(1, lease.ensureCalls);
+        assertEquals(1, reader.requests.size());
+        assertEquals(List.of(), store.actions);
+        assertEquals(5L, store.cursor.orElseThrow().lastCommitSeq());
+        assertEquals(5L, projector.cursor().lastCommitSeq());
+    }
+
     private static FeaturePlantDbProjector newProjector(
         FakeReader reader,
         FakeProjectionStore store,
@@ -227,6 +313,26 @@ class FeaturePlantDbProjectorTest {
             }
             actions.add("commit outputs=" + outputs.size() + " cursor=" + cursor.lastCommitSeq());
             this.cursor = Optional.of(cursor);
+        }
+    }
+
+    private static final class RecordingLease implements FeaturePlantProjectorLease {
+        private int closeCalls;
+        private int ensureCalls;
+        private boolean failEnsure;
+        private int failOnEnsureCall;
+
+        @Override
+        public void ensureHeld() {
+            ensureCalls++;
+            if (failEnsure || ensureCalls == failOnEnsureCall) {
+                throw new IllegalStateException("lease lost");
+            }
+        }
+
+        @Override
+        public void close() {
+            closeCalls++;
         }
     }
 

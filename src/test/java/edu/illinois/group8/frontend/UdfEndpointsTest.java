@@ -402,6 +402,9 @@ class UdfEndpointsTest {
         assertEquals("feature.bbo", body.path("data_freshness").path("feature_name").asText());
         assertEquals("evt-5000", body.path("data_freshness").path("source_event_id").asText());
         assertTrue(body.path("data_freshness").path("latest_event_age_ms").asLong() >= 0L);
+        assertEquals("stale", body.path("product_readiness").path("status").asText());
+        assertTrue(body.path("product_readiness").path("stale").asBoolean());
+        assertTrue(body.path("product_readiness").path("reasons").toString().contains("stale_feature_output"));
         assertEquals(0L, body.path("quote_updates").path("timeouts").asLong());
         assertEquals(0L, body.path("quote_updates").path("rejected").asLong());
         assertEquals(4, body.path("quote_updates").path("max_waits").asInt());
@@ -448,6 +451,11 @@ class UdfEndpointsTest {
         assertEquals("evt-release", freshness.path("source_event_id").asText());
         assertEquals(1L, freshness.path("store_sequence").asLong());
         assertTrue(freshness.path("latest_event_age_ms").asLong() >= 0L);
+        JsonNode readiness = body.path("product_readiness");
+        assertEquals("ok", readiness.path("status").asText());
+        assertFalse(readiness.path("stale").asBoolean());
+        assertFalse(readiness.path("degraded").asBoolean());
+        assertEquals(15_000L, readiness.path("stale_after_ms").asLong());
     }
 
     @Test
@@ -477,7 +485,8 @@ class UdfEndpointsTest {
         server.start();
         baseUrl = "http://127.0.0.1:" + server.boundPort();
 
-        JsonNode refresh = getJson("/health").path("feature_output_refresh");
+        JsonNode body = getJson("/health");
+        JsonNode refresh = body.path("feature_output_refresh");
 
         assertTrue(refresh.path("enabled").asBoolean());
         assertTrue(refresh.path("running").asBoolean());
@@ -486,6 +495,9 @@ class UdfEndpointsTest {
         assertEquals(7, refresh.path("last_row_count").asInt());
         assertEquals(11L, refresh.path("total_loaded").asLong());
         assertEquals(2L, refresh.path("refresh_errors").asLong());
+        assertEquals("stale", body.path("product_readiness").path("status").asText());
+        assertTrue(body.path("product_readiness").path("reasons").toString().contains("no_feature_output"));
+        assertTrue(body.path("product_readiness").path("reasons").toString().contains("feature_refresh_errors"));
     }
 
     @Test

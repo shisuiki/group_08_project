@@ -15,6 +15,8 @@ SMOKE_HTTP_RETRY_SLEEP_SECONDS="${SMOKE_HTTP_RETRY_SLEEP_SECONDS:-1}"
 SMOKE_DB_ATTEMPTS="${SMOKE_DB_ATTEMPTS:-90}"
 SMOKE_DB_RETRY_SLEEP_SECONDS="${SMOKE_DB_RETRY_SLEEP_SECONDS:-1}"
 LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="${LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA:-false}"
+LIVE_PRODUCT_RELIABILITY_WINDOW_SECONDS="${LIVE_PRODUCT_RELIABILITY_WINDOW_SECONDS:-300}"
+LIVE_PRODUCT_RELIABILITY_ROW_LIMIT="${LIVE_PRODUCT_RELIABILITY_ROW_LIMIT:-1000}"
 LIVE_PRODUCT_BROWSER_SMOKE_ENABLED="${LIVE_PRODUCT_BROWSER_SMOKE_ENABLED:-false}"
 FRONTEND_BROWSER_SMOKE_SCRIPT="${FRONTEND_BROWSER_SMOKE_SCRIPT:-scripts/frontend-product-browser-smoke.sh}"
 EXPECTED_KALSHI_RELEASE_SHA="${EXPECTED_KALSHI_RELEASE_SHA:-}"
@@ -329,6 +331,20 @@ if not isinstance(freshness, dict):
 for key in ("latest_event_ts_ms", "latest_event_age_ms", "symbol", "feature_name", "source_event_id", "store_sequence"):
     if key not in freshness:
         raise SystemExit(f"frontend data_freshness.{key} is missing")
+readiness = body.get("product_readiness")
+if not isinstance(readiness, dict):
+    raise SystemExit("health check failed: product_readiness is missing")
+readiness_status = readiness.get("status")
+if readiness_status not in ("ok", "stale", "degraded"):
+    raise SystemExit(f"frontend product_readiness.status is invalid: {readiness_status!r}")
+if not isinstance(readiness.get("stale"), bool):
+    raise SystemExit("frontend product_readiness.stale is not a boolean")
+if not isinstance(readiness.get("degraded"), bool):
+    raise SystemExit("frontend product_readiness.degraded is not a boolean")
+if not isinstance(readiness.get("reasons"), list):
+    raise SystemExit("frontend product_readiness.reasons is not a list")
+if isinstance(readiness.get("stale_after_ms"), bool) or not isinstance(readiness.get("stale_after_ms"), int):
+    raise SystemExit("frontend product_readiness.stale_after_ms is not an integer")
 store_sequence = freshness.get("store_sequence")
 if isinstance(store_sequence, bool) or not isinstance(store_sequence, int):
     raise SystemExit("frontend data_freshness.store_sequence is not an integer")
@@ -348,6 +364,9 @@ print(freshness.get("latest_event_ts_ms") if freshness.get("latest_event_ts_ms")
 print(freshness.get("latest_event_age_ms") if freshness.get("latest_event_age_ms") is not None else "")
 print(freshness.get("symbol") or "")
 print(freshness.get("source_event_id") or "")
+print(readiness_status)
+print(str(readiness.get("stale")).lower())
+print(str(readiness.get("degraded")).lower())
 PY
         then
             cat "$selection"
@@ -365,6 +384,72 @@ PY
 
 cursor_commit_seq() {
     db_probe cursorCommitSeq --cursor-name="$FEATUREPLANT_DB_CURSOR_NAME"
+}
+
+pipeline_reliability_snapshot() {
+    db_probe pipelineReliabilitySnapshot \
+        --cursor-name="$FEATUREPLANT_DB_CURSOR_NAME" \
+        --window-seconds="$LIVE_PRODUCT_RELIABILITY_WINDOW_SECONDS" \
+        --row-limit="$LIVE_PRODUCT_RELIABILITY_ROW_LIMIT"
+}
+
+check_pipeline_reliability_snapshot() {
+    snapshot_file="$tmpdir/pipeline-reliability.txt"
+    pipeline_reliability_snapshot > "$snapshot_file"
+    python3 - "$snapshot_file" <<'PY'
+import sys
+
+path = sys.argv[1]
+line = open(path, "r", encoding="utf-8").read().strip()
+fields = line.split("|")
+names = (
+    "status",
+    "window_seconds",
+    "row_limit",
+    "raw_recent_count",
+    "raw_latest_receive_ts_ns",
+    "raw_latest_age_ms",
+    "canonical_recent_count",
+    "canonical_max_commit_seq",
+    "canonical_latest_age_ms",
+    "cursor_commit_seq",
+    "cursor_lag_events",
+    "feature_recent_count",
+    "feature_latest_event_ts_ms",
+    "feature_latest_age_ms",
+    "raw_without_canonical_count",
+)
+if len(fields) != len(names):
+    raise SystemExit(f"pipelineReliabilitySnapshot returned {len(fields)} fields, expected {len(names)}: {line!r}")
+values = dict(zip(names, fields))
+if values["status"] not in ("ok", "stale", "degraded"):
+    raise SystemExit(f"pipelineReliabilitySnapshot status is invalid: {values['status']!r}")
+for name in names[1:]:
+    try:
+        parsed = int(values[name])
+    except ValueError as exc:
+        raise SystemExit(f"pipelineReliabilitySnapshot {name} is not an integer: {values[name]!r}") from exc
+    if name.endswith("_age_ms"):
+        if parsed < -1:
+            raise SystemExit(f"pipelineReliabilitySnapshot {name} is below -1: {parsed}")
+    elif parsed < 0:
+        raise SystemExit(f"pipelineReliabilitySnapshot {name} is negative: {parsed}")
+
+print(
+    "PASS pipeline_reliability "
+    f"status={values['status']} "
+    f"window_seconds={values['window_seconds']} "
+    f"row_limit={values['row_limit']} "
+    f"raw_recent={values['raw_recent_count']} "
+    f"raw_latest_receive_ts_ns={values['raw_latest_receive_ts_ns']} "
+    f"canonical_recent={values['canonical_recent_count']} "
+    f"canonical_max_commit_seq={values['canonical_max_commit_seq']} "
+    f"cursor_commit_seq={values['cursor_commit_seq']} "
+    f"cursor_lag_events={values['cursor_lag_events']} "
+    f"feature_recent={values['feature_recent_count']} "
+    f"raw_without_canonical={values['raw_without_canonical_count']}"
+)
+PY
 }
 
 latest_non_smoke_canonical_after() {
@@ -831,8 +916,11 @@ frontend_freshness_event_ts_ms="$(printf '%s\n' "$frontend_before" | sed -n '7p'
 frontend_freshness_age_ms="$(printf '%s\n' "$frontend_before" | sed -n '8p')"
 frontend_freshness_symbol="$(printf '%s\n' "$frontend_before" | sed -n '9p')"
 frontend_freshness_source_event_id="$(printf '%s\n' "$frontend_before" | sed -n '10p')"
-printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s\n' \
-    "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id"
+frontend_readiness_status="$(printf '%s\n' "$frontend_before" | sed -n '11p')"
+frontend_readiness_stale="$(printf '%s\n' "$frontend_before" | sed -n '12p')"
+frontend_readiness_degraded="$(printf '%s\n' "$frontend_before" | sed -n '13p')"
+printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
+    "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded"
 check_product_static_ui
 check_product_browser_ui
 
@@ -843,6 +931,7 @@ if [ "$cursor_before" -gt "$max_commit_before" ]; then
         "$cursor_before" "$max_commit_before" >&2
     exit 1
 fi
+check_pipeline_reliability_snapshot
 check_optional_live_data "$max_commit_before"
 
 run_id="${LIVE_PRODUCT_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)-$$}"

@@ -9,6 +9,7 @@ import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcConnectionFactory;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputProjectionStore;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputStore;
+import edu.illinois.group8.storage.db.JdbcFeaturePlantProjectorLease;
 import edu.illinois.group8.storage.db.JdbcFeaturePlantCursorStore;
 
 import java.nio.file.Path;
@@ -401,17 +402,26 @@ public final class FeaturePlantCli {
             BackendMetrics metrics
         ) {
             JdbcConnectionFactory connectionFactory = JdbcConnectionFactories.fromDriverManager(dbUrl, dbUser, dbPassword);
-            return new FeaturePlantDbProjector(
-                new JdbcCanonicalEventReader(connectionFactory),
-                new JdbcFeatureOutputProjectionStore(connectionFactory),
-                streams,
-                modules,
-                maxEvents,
-                includeReplayEvents,
-                replayId,
-                cursorName,
-                metrics
-            );
+            JdbcFeaturePlantProjectorLease lease = JdbcFeaturePlantProjectorLease.acquire(connectionFactory, cursorName);
+            try {
+                return new FeaturePlantDbProjector(
+                    new JdbcCanonicalEventReader(connectionFactory),
+                    new JdbcFeatureOutputProjectionStore(connectionFactory),
+                    streams.stream().map(StreamContract::streamName).toList(),
+                    modules,
+                    maxEvents,
+                    includeReplayEvents,
+                    replayId,
+                    cursorName,
+                    metrics,
+                    new edu.illinois.group8.canonical.JsonCanonicalSerializer().mapper(),
+                    new FeatureOutputDbEventMapper(),
+                    lease
+                );
+            } catch (RuntimeException e) {
+                lease.close();
+                throw e;
+            }
         }
 
         CanonicalEnvelopeSource source() {

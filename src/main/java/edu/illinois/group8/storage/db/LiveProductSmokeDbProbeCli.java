@@ -100,6 +100,29 @@ public final class LiveProductSmokeDbProbeCli {
                             + "|" + output.eventTsMs() + "|" + output.streamName() + "|" + output.commitSeq());
                     }
                 }
+                case "pipelineReliabilitySnapshot" -> {
+                    LiveProductSmokeDbProbe.PipelineReliabilitySnapshot snapshot =
+                        probe.pipelineReliabilitySnapshot(
+                            required(config, "cursor-name"),
+                            optionalLong(config, "window-seconds", 300L),
+                            optionalInt(config, "row-limit", 1000)
+                        );
+                    out.println(snapshot.status()
+                        + "|" + snapshot.windowSeconds()
+                        + "|" + snapshot.rowLimit()
+                        + "|" + snapshot.rawRecentCount()
+                        + "|" + snapshot.rawLatestReceiveTsNs()
+                        + "|" + snapshot.rawLatestAgeMs()
+                        + "|" + snapshot.canonicalRecentCount()
+                        + "|" + snapshot.canonicalMaxCommitSeq()
+                        + "|" + snapshot.canonicalLatestAgeMs()
+                        + "|" + snapshot.cursorCommitSeq()
+                        + "|" + snapshot.cursorLagEvents()
+                        + "|" + snapshot.featureRecentCount()
+                        + "|" + snapshot.featureLatestEventTsMs()
+                        + "|" + snapshot.featureLatestAgeMs()
+                        + "|" + snapshot.rawWithoutCanonicalCount());
+                }
                 default -> throw new IllegalArgumentException("Unknown command: " + config.command());
             }
             return 0;
@@ -122,6 +145,7 @@ public final class LiveProductSmokeDbProbeCli {
               latestNonSmokeCanonicalAfter --after-commit-seq=<seq>
               featureOutputsForSourceEvent --source-event-id=<event-id>
               latestNonSmokeFeatureOutputAfter --after-commit-seq=<seq>
+              pipelineReliabilitySnapshot --cursor-name=<name> [--window-seconds=300] [--row-limit=1000]
 
             DB options:
               --db-url=<jdbc-url>        Overrides LIVE_PRODUCT_SMOKE_DB_URL / DB_WRITER_DATABASE_URL
@@ -141,9 +165,26 @@ public final class LiveProductSmokeDbProbeCli {
 
     private static long requiredLong(Config config, String option) {
         String value = required(config, option);
+        return parseLongOption(option, value);
+    }
+
+    private static long optionalLong(Config config, String option, long defaultValue) {
+        String value = config.options().get(option);
+        return value == null || value.isBlank() ? defaultValue : parseLongOption(option, value);
+    }
+
+    private static int optionalInt(Config config, String option, int defaultValue) {
+        long value = optionalLong(config, option, defaultValue);
+        if (value > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("--" + option + " is too large");
+        }
+        return (int) value;
+    }
+
+    private static long parseLongOption(String option, String value) {
         try {
             long parsed = Long.parseLong(value);
-            if (parsed < 0) {
+            if (parsed < 0L) {
                 throw new IllegalArgumentException("--" + option + " must be non-negative");
             }
             return parsed;

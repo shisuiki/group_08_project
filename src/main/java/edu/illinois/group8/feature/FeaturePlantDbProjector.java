@@ -8,6 +8,7 @@ import edu.illinois.group8.storage.db.CanonicalDbCursor;
 import edu.illinois.group8.storage.db.CanonicalDbEventReader;
 import edu.illinois.group8.storage.db.CanonicalDbReadEvent;
 import edu.illinois.group8.storage.db.CanonicalDbReadRequest;
+import edu.illinois.group8.storage.db.FeaturePlantProjectorLease;
 import edu.illinois.group8.storage.db.FeatureOutputDbEvent;
 import edu.illinois.group8.storage.db.FeatureOutputProjectionStore;
 
@@ -37,6 +38,7 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
     private final String replayId;
     private final String cursorName;
     private final BackendMetrics metrics;
+    private final FeaturePlantProjectorLease lease;
     private final ConcurrentHashMap<FeatureMetricKey, FeatureMetricHandles> metricHandles = new ConcurrentHashMap<>();
     private final BackendMetrics.Counter dbOutputAccepted;
     private final BackendMetrics.Counter dbOutputWritten;
@@ -73,7 +75,8 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
             cursorName,
             metrics,
             new JsonCanonicalSerializer().mapper(),
-            new FeatureOutputDbEventMapper()
+            new FeatureOutputDbEventMapper(),
+            FeaturePlantProjectorLease.NOOP
         );
     }
 
@@ -90,6 +93,36 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
         ObjectMapper mapper,
         FeatureOutputDbEventMapper outputMapper
     ) {
+        this(
+            reader,
+            projectionStore,
+            streams,
+            modules,
+            maxEvents,
+            includeReplayEvents,
+            replayId,
+            cursorName,
+            metrics,
+            mapper,
+            outputMapper,
+            FeaturePlantProjectorLease.NOOP
+        );
+    }
+
+    FeaturePlantDbProjector(
+        CanonicalDbEventReader reader,
+        FeatureOutputProjectionStore projectionStore,
+        List<String> streams,
+        List<FeatureModule> modules,
+        long maxEvents,
+        boolean includeReplayEvents,
+        String replayId,
+        String cursorName,
+        BackendMetrics metrics,
+        ObjectMapper mapper,
+        FeatureOutputDbEventMapper outputMapper,
+        FeaturePlantProjectorLease lease
+    ) {
         this.reader = Objects.requireNonNull(reader, "reader");
         this.projectionStore = Objects.requireNonNull(projectionStore, "projectionStore");
         this.streams = List.copyOf(Objects.requireNonNull(streams, "streams"));
@@ -101,6 +134,7 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.mapper = Objects.requireNonNull(mapper, "mapper");
         this.outputMapper = Objects.requireNonNull(outputMapper, "outputMapper");
+        this.lease = Objects.requireNonNull(lease, "lease");
         this.cursor = projectionStore.loadCursor(this.cursorName).orElse(CanonicalDbCursor.start());
         this.dbOutputAccepted = counter(DB_OUTPUT_EVENTS, "result", "accepted");
         this.dbOutputWritten = counter(DB_OUTPUT_EVENTS, "result", "written");
@@ -171,6 +205,7 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
             if (!outputs.isEmpty()) {
                 dbOutputAccepted.add(outputs.size());
             }
+            lease.ensureHeld();
             commitProjection(nextCursor, outputs);
             cursor = nextCursor;
             consumedEvents += projectedEvents;
@@ -208,6 +243,7 @@ public final class FeaturePlantDbProjector implements AutoCloseable {
 
     @Override
     public void close() {
+        lease.close();
     }
 
     private List<FeatureOutput> collectOutputs(CanonicalEnvelope envelope) {

@@ -152,6 +152,67 @@ class LiveProductSmokeDbProbeCliTest {
     }
 
     @Test
+    void probePipelineReliabilitySnapshotSummarizesBoundedProgress() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.RAW_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {12L, 555L, 800L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.CANONICAL_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {10L, 44L, 900L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.FEATURE_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {9L, 1_700_000_000_000L, 1_000L})
+            )
+            .withScalar(LiveProductSmokeDbProbe.RAW_WITHOUT_CANONICAL_SQL, 2L)
+            .withScalar(LiveProductSmokeDbProbe.CURSOR_COMMIT_SEQ_SQL, 44L);
+        LiveProductSmokeDbProbe probe = new LiveProductSmokeDbProbe(jdbc::openConnection);
+
+        LiveProductSmokeDbProbe.PipelineReliabilitySnapshot snapshot =
+            probe.pipelineReliabilitySnapshot("cursor", 120L, 500);
+
+        assertEquals("ok", snapshot.status());
+        assertEquals(120L, snapshot.windowSeconds());
+        assertEquals(500, snapshot.rowLimit());
+        assertEquals(12L, snapshot.rawRecentCount());
+        assertEquals(555L, snapshot.rawLatestReceiveTsNs());
+        assertEquals(10L, snapshot.canonicalRecentCount());
+        assertEquals(44L, snapshot.canonicalMaxCommitSeq());
+        assertEquals(44L, snapshot.cursorCommitSeq());
+        assertEquals(0L, snapshot.cursorLagEvents());
+        assertEquals(9L, snapshot.featureRecentCount());
+        assertEquals(2L, snapshot.rawWithoutCanonicalCount());
+    }
+
+    @Test
+    void pipelineReliabilitySnapshotReportsDegradedWhenCursorLagsCanonical() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.RAW_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {12L, 555L, 800L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.CANONICAL_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {10L, 44L, 900L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.FEATURE_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {9L, 1_700_000_000_000L, 1_000L})
+            )
+            .withScalar(LiveProductSmokeDbProbe.RAW_WITHOUT_CANONICAL_SQL, 2L)
+            .withScalar(LiveProductSmokeDbProbe.CURSOR_COMMIT_SEQ_SQL, 41L);
+        LiveProductSmokeDbProbe probe = new LiveProductSmokeDbProbe(jdbc::openConnection);
+
+        LiveProductSmokeDbProbe.PipelineReliabilitySnapshot snapshot =
+            probe.pipelineReliabilitySnapshot("cursor", 120L, 500);
+
+        assertEquals("degraded", snapshot.status());
+        assertEquals(3L, snapshot.cursorLagEvents());
+    }
+
+    @Test
     void cliPrintsSeedResultShape() {
         RecordingJdbc jdbc = new RecordingJdbc();
         Output output = new Output();
@@ -233,6 +294,38 @@ class LiveProductSmokeDbProbeCliTest {
             latestFeature.err()
         ));
         assertEquals("live-event-1|feature.bbo|MKT-1|1700000000000|derived.top_of_book|42\n", latestFeature.stdout());
+    }
+
+    @Test
+    void cliPrintsPipelineReliabilitySnapshotShape() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.RAW_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {12L, 555L, 800L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.CANONICAL_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {10L, 44L, 900L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.FEATURE_PROGRESS_SQL,
+                List.<Object[]>of(new Object[] {9L, 1_700_000_000_000L, 1_000L})
+            )
+            .withScalar(LiveProductSmokeDbProbe.RAW_WITHOUT_CANONICAL_SQL, 2L)
+            .withScalar(LiveProductSmokeDbProbe.CURSOR_COMMIT_SEQ_SQL, 44L);
+        Output output = new Output();
+        LiveProductSmokeDbProbeCli.Config config = new LiveProductSmokeDbProbeCli.Config(
+            "pipelineReliabilitySnapshot",
+            "jdbc:postgresql://live/db",
+            "user",
+            "password",
+            Map.of("cursor-name", "cursor", "window-seconds", "120", "row-limit", "500"),
+            false
+        );
+
+        assertEquals(0, LiveProductSmokeDbProbeCli.run(config, jdbc::openConnection, output.out(), output.err()));
+
+        assertEquals("ok|120|500|12|555|800|10|44|900|44|0|9|1700000000000|1000|2\n", output.stdout());
     }
 
     private static final class Output {

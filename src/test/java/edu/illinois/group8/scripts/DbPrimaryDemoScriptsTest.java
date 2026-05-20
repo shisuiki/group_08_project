@@ -128,6 +128,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("EXPECTED_KALSHI_DEPLOY_PROFILE"));
         assertTrue(script.contains("health check failed: release is missing"));
         assertTrue(script.contains("freshness = body.get(\"data_freshness\")"));
+        assertTrue(script.contains("readiness = body.get(\"product_readiness\")"));
         assertTrue(script.contains("latest_event_ts_ms"));
         assertTrue(script.contains("latest_event_age_ms"));
         assertProductStaticSmokeContract(script);
@@ -145,6 +146,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("latestNonSmokeCanonicalAfter"));
         assertTrue(script.contains("featureOutputsForSourceEvent"));
         assertTrue(script.contains("latestNonSmokeFeatureOutputAfter"));
+        assertTrue(script.contains("pipelineReliabilitySnapshot"));
+        assertTrue(script.contains("PASS pipeline_reliability"));
         assertTrue(script.contains("wait_featureplant_cursor_caught_up"));
         assertTrue(script.contains("wait_frontend_live_feature_output"));
         assertTrue(script.contains("wait_frontend_health_non_smoke_freshness"));
@@ -159,6 +162,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(probe.contains("FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL"));
         assertTrue(probe.contains("LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL"));
         assertTrue(script.contains("if [ \"$cursor_before\" -gt \"$max_commit_before\" ]; then"));
+        assertTrue(script.contains("check_pipeline_reliability_snapshot"));
         assertTrue(script.contains("if [ \"$seeded_count\" -ne 3 ] || [ \"$target_commit_seq\" -le \"$cursor_before\" ]; then"));
         assertTrue(script.contains("wait_featureplant_followed_seed \"$seed_prefix\" \"$target_commit_seq\""));
         assertTrue(script.contains("wait_featureplant_metrics \"$feature_outputs_after\""));
@@ -166,6 +170,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("wait_frontend_feature_output \"$market_ticker\" \"$bbo_event_id\""));
         assertTrue(script.contains("wait_frontend_quote \"$market_ticker\""));
         assertTrue(script.contains("check_optional_live_data \"$max_commit_before\""));
+        assertTrue(script.contains("product_readiness_status"));
         assertTrue(
             script.indexOf("check_optional_live_data \"$max_commit_before\"")
                 < script.indexOf("seed_result=\"$(seed_canonical_events"),

@@ -42,6 +42,7 @@ public class FrontendAdapterServer {
     private static final int QUOTE_UPDATE_MAX_WAITERS = 4;
     private static final long DEFAULT_QUOTE_UPDATE_TIMEOUT_MS = 15_000L;
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
+    private static final long DATA_FRESHNESS_STALE_AFTER_MS = 15_000L;
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
         "app.js",
@@ -498,7 +499,10 @@ public class FrontendAdapterServer {
         storeView.put("total_features", store.totalAccepted());
         storeView.put("sequence", store.sequence());
         health.put("store", storeView);
-        health.put("data_freshness", dataFreshnessBody(store.latestFreshness(nowMs)));
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(nowMs);
+        FeatureOutputRefreshStatus refreshStatus = featureOutputRefreshStatus.get();
+        health.put("data_freshness", dataFreshnessBody(freshness));
+        health.put("product_readiness", productReadinessBody(freshness, refreshStatus));
         Map<String, Object> quoteUpdatesView = new LinkedHashMap<>();
         quoteUpdatesView.put("requests", quoteUpdateRequests.sum());
         quoteUpdatesView.put("changed", quoteUpdateChanged.sum());
@@ -521,7 +525,7 @@ public class FrontendAdapterServer {
         fp.put("events_out", stats.eventsOut());
         fp.put("errors", stats.errors());
         health.put("feature_plant", fp);
-        health.put("feature_output_refresh", featureOutputRefreshBody(featureOutputRefreshStatus.get()));
+        health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
         writeJson(exchange, 200, health);
     }
 
@@ -640,6 +644,44 @@ public class FrontendAdapterServer {
         body.put("source_event_id", freshness.sourceEventId());
         body.put("store_sequence", freshness.storeSequence());
         return body;
+    }
+
+    private static Map<String, Object> productReadinessBody(
+        FrontendFeatureStore.DataFreshness freshness,
+        FeatureOutputRefreshStatus status
+    ) {
+        FeatureOutputRefreshStatus refresh = status == null ? FeatureOutputRefreshStatus.disabled() : status;
+        List<String> reasons = new ArrayList<>();
+        boolean stale = false;
+        if (freshness.latestEventTsMs() == null) {
+            stale = true;
+            reasons.add("no_feature_output");
+        } else if (freshness.latestEventAgeMs() == null
+            || freshness.latestEventAgeMs() > DATA_FRESHNESS_STALE_AFTER_MS) {
+            stale = true;
+            reasons.add("stale_feature_output");
+        }
+        if (refresh.enabled() && !refresh.running()) {
+            reasons.add("feature_refresh_stopped");
+        }
+        if (refresh.refreshErrors() > 0L && latestRefreshAttemptFailed(refresh)) {
+            reasons.add("feature_refresh_errors");
+        }
+        boolean degraded = !reasons.isEmpty() && !stale;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", reasons.isEmpty() ? "ok" : stale ? "stale" : "degraded");
+        body.put("stale", stale);
+        body.put("degraded", degraded);
+        body.put("stale_after_ms", DATA_FRESHNESS_STALE_AFTER_MS);
+        body.put("reasons", reasons);
+        return body;
+    }
+
+    private static boolean latestRefreshAttemptFailed(FeatureOutputRefreshStatus status) {
+        if (status.lastErrorAt() == null) {
+            return false;
+        }
+        return status.lastSuccessAt() == null || status.lastErrorAt().isAfter(status.lastSuccessAt());
     }
 
     private static Map<String, Object> marketMetadataBody(MarketMetadata metadata) {
