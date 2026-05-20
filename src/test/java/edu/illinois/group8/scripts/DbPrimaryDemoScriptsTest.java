@@ -169,6 +169,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("wait_frontend_refresh_progress \"$frontend_started_at_before\" \"$frontend_loaded_before\" \"$frontend_errors_before\""));
         assertTrue(script.contains("wait_frontend_feature_output \"$market_ticker\" \"$bbo_event_id\""));
         assertTrue(script.contains("wait_frontend_quote \"$market_ticker\""));
+        assertTrue(script.contains("wait_frontend_quote_stream \"$market_ticker\" 461500"));
         assertTrue(script.contains("check_optional_live_data \"$max_commit_before\""));
         assertTrue(script.contains("product_readiness_status"));
         assertTrue(
@@ -183,10 +184,15 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("live data requirement failed: no feature-eligible non-smoke canonical_events after baseline_commit_seq"));
         assertTrue(script.contains("PASS live_product_smoke"));
         assertTrue(browserSmoke.contains("--headless=new"));
+        assertTrue(browserSmoke.contains("--disable-background-networking"));
+        assertTrue(browserSmoke.contains("--disable-component-update"));
+        assertTrue(browserSmoke.contains("--no-first-run"));
         assertTrue(browserSmoke.contains("--dump-dom"));
         assertTrue(browserSmoke.contains("id=\"chart-container\""));
         assertTrue(browserSmoke.contains("<canvas"));
         assertTrue(browserSmoke.contains("id=\"quote-update-health\""));
+        assertTrue(browserSmoke.contains("quote feed status did not show active SSE/fallback traffic"));
+        assertTrue(browserSmoke.contains("(SSE|long-poll) error"));
         assertTrue(browserSmoke.contains("No markets indexed yet"));
         assertTrue(browserSmoke.contains("no feature outputs"));
         assertTrue(browserSmoke.contains("freshness-state"));
@@ -460,8 +466,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"quote-update-health\""));
         assertTrue(app.contains("body.release"));
         assertTrue(app.contains("body.data_freshness"));
+        assertTrue(app.contains("body.quote_streams"));
         assertTrue(app.contains("body.quote_updates"));
+        assertTrue(app.contains("EventSource"));
+        assertTrue(app.contains("/quotes/stream?symbols="));
         assertTrue(app.contains("long-poll timeout"));
+        assertTrue(app.contains("long-poll fallback"));
         assertTrue(app.contains("fallback polling"));
         assertTrue(app.contains("latest_event_ts_ms"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));
@@ -628,6 +638,15 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("release-identity"));
         assertTrue(script.contains("health-data-age"));
         assertTrue(script.contains("quote-update-health"));
+        assertTrue(script.contains("/quotes/stream"));
+        assertTrue(script.contains("curl -fsS -N --max-time 3"));
+        assertTrue(script.contains("/quotes/stream?symbols=${encoded"));
+        assertTrue(script.contains("SSE data event"));
+        assertTrue(script.contains("server_ts_ms"));
+        assertTrue(script.contains("changed"));
+        assertTrue(script.contains("quotes_stream"));
+        assertTrue(script.contains("EventSource"));
+        assertTrue(script.contains("body.quote_streams"));
         assertTrue(script.contains("body.release"));
         assertTrue(script.contains("body.data_freshness"));
         assertTrue(script.contains("latest_event_ts_ms"));

@@ -39,7 +39,10 @@ browser_log="$tmpdir/browser.log"
 if ! NO_PROXY="$FRONTEND_NO_PROXY" no_proxy="$FRONTEND_NO_PROXY" "$browser" \
     --headless=new \
     --disable-gpu \
+    --disable-background-networking \
+    --disable-component-update \
     --no-sandbox \
+    --no-first-run \
     --disable-dev-shm-usage \
     --window-size=1440,1000 \
     --virtual-time-budget="$FRONTEND_BROWSER_SMOKE_VIRTUAL_TIME_MS" \
@@ -91,6 +94,20 @@ if re.search(r'id="adapter-health"[^>]*>\s*-\s*<', html):
     raise SystemExit("runtime health did not update adapter status")
 if re.search(r'id="quote-update-health"[^>]*>\s*-\s*<', html):
     raise SystemExit("quote update status did not render")
+quote_status = re.search(r'id="quote-update-health"[^>]*>\s*([^<]+)\s*<', html)
+status_text = quote_status.group(1).strip() if quote_status else ""
+stream_metrics = re.search(r'SSE req\s+(\d+)\s+/ events\s+(\d+)', status_text)
+poll_metrics = re.search(r'long-poll req\s+(\d+)\s+/ changed\s+(\d+)\s+/ timeout\s+(\d+)', status_text)
+stream_events = int(stream_metrics.group(2)) if stream_metrics else 0
+poll_activity = sum(int(value) for value in poll_metrics.groups()) if poll_metrics else 0
+active_message = re.search(
+    r'(SSE (connected|snapshot|changed)|long-poll (changed|timeout|fallback)|fallback polling)',
+    status_text,
+)
+if not (active_message or stream_events > 0 or poll_activity > 0):
+    raise SystemExit("quote feed status did not show active SSE/fallback traffic")
+if re.search(r'id="quote-update-health"[^>]*>\s*(SSE|long-poll) error', html):
+    raise SystemExit("quote update status entered an error state")
 if "LightweightCharts is not defined" in html:
     raise SystemExit("vendored LightweightCharts asset did not load")
 

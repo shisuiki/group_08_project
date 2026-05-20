@@ -4,6 +4,7 @@
     const QUOTES_POLL_MS = 2000;
     const QUOTES_UPDATE_TIMEOUT_MS = 15000;
     const QUOTES_UPDATE_ERROR_LIMIT = 3;
+    const QUOTES_STREAM_ERROR_LIMIT = 2;
     const QUOTES_UPDATE_RETRY_MS = 500;
     const HEALTH_POLL_MS = 5000;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
@@ -90,6 +91,7 @@
 
     let quotesTimer = null;
     let quotesAbortController = null;
+    let quotesEventSource = null;
     let quotesLoopGeneration = 0;
     let quoteSequence = null;
     let quoteUpdateErrors = 0;
@@ -246,12 +248,16 @@
     }
 
     async function loadMarketDetails(symbol) {
+        const base = adapterBase();
         const cached = marketEntries.find(entry => entry.symbol === symbol);
         if (cached) {
             renderMarketDetails(cached);
         }
         try {
-            const data = await fetchJson(`/datafeed/symbols?symbol=${encodeURIComponent(symbol)}`);
+            const data = await fetchJsonFromBase(base, `/datafeed/symbols?symbol=${encodeURIComponent(symbol)}`);
+            if (symbol !== dom.symbolSelect.value || base !== adapterBase()) {
+                return;
+            }
             renderMarketDetails({
                 symbol,
                 eventTicker: data.event_ticker || cached?.eventTicker || '-',
@@ -281,12 +287,20 @@
             renderFeatures([]);
             return;
         }
+        const base = adapterBase();
         try {
-            const data = await fetchJson(
+            const data = await fetchJsonFromBase(
+                base,
                 `/features?symbol=${encodeURIComponent(symbol)}&feature=feature.bbo&limit=5`
             );
+            if (symbol !== dom.symbolSelect.value || base !== adapterBase()) {
+                return;
+            }
             renderFeatures(Array.isArray(data.outputs) ? data.outputs.slice().reverse() : []);
         } catch (err) {
+            if (symbol !== dom.symbolSelect.value || base !== adapterBase()) {
+                return;
+            }
             dom.featureList.innerHTML = `<div class="empty">features unavailable: ${escapeHtml(err.message)}</div>`;
             dom.featureCount.textContent = '0';
         }
@@ -321,13 +335,20 @@
         }
         const toSec = Math.floor(Date.now() / 1000);
         const fromSec = toSec - lookbackSeconds;
+        const base = adapterBase();
         setStatus(`Loading history ${symbol} @ ${resolution}...`);
         try {
-            const data = await fetchJson(
+            const data = await fetchJsonFromBase(
+                base,
                 `/datafeed/history?symbol=${encodeURIComponent(symbol)}` +
                 `&resolution=${encodeURIComponent(resolution)}` +
                 `&from=${fromSec}&to=${toSec}`
             );
+            if (symbol !== dom.symbolSelect.value ||
+                resolution !== dom.resolutionSelect.value ||
+                base !== adapterBase()) {
+                return;
+            }
             if (data.s !== 'ok') {
                 candleSeries.setData([]);
                 volumeSeries.setData([]);
@@ -358,6 +379,11 @@
             chart.timeScale().fitContent();
             setStatus(`Rendered ${candles.length} bar(s) for ${symbol}`, 'ok');
         } catch (err) {
+            if (symbol !== dom.symbolSelect.value ||
+                resolution !== dom.resolutionSelect.value ||
+                base !== adapterBase()) {
+                return;
+            }
             setStatus(`Failed to load history: ${err.message}`, 'error');
         }
     }
@@ -455,7 +481,7 @@
             dom.healthSequence.textContent = body.store ? String(body.store.sequence) : '-';
             dom.refreshHealth.textContent = refreshStatusText(body.feature_output_refresh);
             dom.refreshHealth.className = refreshStatusClass(body.feature_output_refresh);
-            dom.quoteUpdateHealth.textContent = quoteUpdateStatusText(body.quote_updates);
+            dom.quoteUpdateHealth.textContent = quoteUpdateStatusText(body.quote_updates, body.quote_streams);
             dom.metadataHealth.textContent = body.market_metadata
                 ? `${body.market_metadata.status || '-'} / ${body.market_metadata.markets || 0}`
                 : '-';
@@ -539,14 +565,20 @@
         return 'fresh';
     }
 
-    function quoteUpdateStatusText(status) {
-        if (!status) {
+    function quoteUpdateStatusText(updates, streams) {
+        if (!updates && !streams) {
             return 'unavailable';
         }
-        const active = status.active_waits || 0;
-        const max = status.max_waits || 0;
-        return `long-poll req ${status.requests || 0} / changed ${status.changed || 0}` +
-            ` / timeout ${status.timeouts || 0} / rejected ${status.rejected || 0}` +
+        const active = updates ? updates.active_waits || 0 : 0;
+        const max = updates ? updates.max_waits || 0 : 0;
+        const streamActive = streams ? streams.active_streams || 0 : 0;
+        const streamMax = streams ? streams.max_streams || 0 : 0;
+        return `SSE req ${streams ? streams.requests || 0 : 0} / events ${streams ? streams.events || 0 : 0}` +
+            ` / active ${streamActive}/${streamMax}` +
+            ` / long-poll req ${updates ? updates.requests || 0 : 0}` +
+            ` / changed ${updates ? updates.changed || 0 : 0}` +
+            ` / timeout ${updates ? updates.timeouts || 0 : 0}` +
+            ` / rejected ${updates ? updates.rejected || 0 : 0}` +
             ` / active ${active}/${max}`;
     }
 
@@ -608,6 +640,10 @@
             quotesAbortController.abort();
             quotesAbortController = null;
         }
+        if (quotesEventSource != null) {
+            quotesEventSource.close();
+            quotesEventSource = null;
+        }
     }
 
     function startQuotesFallback(generation, symbol, base) {
@@ -620,9 +656,9 @@
         quotesTimer = setInterval(() => pollQuotes(generation, symbol, base), QUOTES_POLL_MS);
     }
 
-    async function runQuotesLongPoll(generation) {
-        const symbol = dom.symbolSelect.value;
-        const base = adapterBase();
+    async function runQuotesLongPoll(generation, symbol, base) {
+        symbol = symbol || dom.symbolSelect.value;
+        base = base || adapterBase();
         if (!symbol) {
             return;
         }
@@ -667,13 +703,80 @@
         }
     }
 
+    function handleQuoteStreamMessage(generation, symbol, base, event) {
+        if (staleQuoteLoop(generation, symbol, base)) {
+            return;
+        }
+        try {
+            const data = JSON.parse(event.data);
+            quoteUpdateErrors = 0;
+            if (applyQuoteResponse(data, symbol)) {
+                renderQuoteUpdateState(data.changed ? 'SSE changed' : 'SSE snapshot', 'fresh');
+            }
+        } catch (err) {
+            quoteUpdateErrors += 1;
+            renderQuoteUpdateState(`SSE parse error ${quoteUpdateErrors}`, 'stale');
+        }
+    }
+
+    function scheduleQuoteStreamReconnect(generation, symbol, base) {
+        if (staleQuoteLoop(generation, symbol, base)) {
+            return;
+        }
+        if (quoteUpdateErrors >= QUOTES_STREAM_ERROR_LIMIT) {
+            renderQuoteUpdateState('long-poll fallback', 'stale');
+            runQuotesLongPoll(generation, symbol, base);
+            return;
+        }
+        quotesTimer = setTimeout(() => {
+            quotesTimer = null;
+            startQuotesStream(generation, symbol, base);
+        }, QUOTES_UPDATE_RETRY_MS);
+    }
+
+    function startQuotesStream(generation, symbol, base) {
+        symbol = symbol || dom.symbolSelect.value;
+        base = base || adapterBase();
+        if (!symbol) {
+            return;
+        }
+        if (typeof window.EventSource !== 'function') {
+            renderQuoteUpdateState('EventSource unavailable; long-poll fallback', 'stale');
+            runQuotesLongPoll(generation, symbol, base);
+            return;
+        }
+        const source = new EventSource(base + `/quotes/stream?symbols=${encodeURIComponent(symbol)}`);
+        quotesEventSource = source;
+        renderQuoteUpdateState('SSE connecting', '');
+        const onQuote = event => handleQuoteStreamMessage(generation, symbol, base, event);
+        source.addEventListener('quotes', onQuote);
+        source.onmessage = onQuote;
+        source.onopen = () => {
+            if (!staleQuoteLoop(generation, symbol, base)) {
+                renderQuoteUpdateState('SSE connected', 'fresh');
+            }
+        };
+        source.onerror = () => {
+            if (quotesEventSource === source) {
+                quotesEventSource = null;
+            }
+            source.close();
+            if (staleQuoteLoop(generation, symbol, base)) {
+                return;
+            }
+            quoteUpdateErrors += 1;
+            renderQuoteUpdateState(`SSE error ${quoteUpdateErrors}`, 'stale');
+            scheduleQuoteStreamReconnect(generation, symbol, base);
+        };
+    }
+
     function restartQuotesPolling() {
         quotesLoopGeneration += 1;
         stopQuotesLoop();
         quoteSequence = null;
         quoteUpdateErrors = 0;
-        renderQuoteUpdateState('long-poll starting', '');
-        runQuotesLongPoll(quotesLoopGeneration);
+        renderQuoteUpdateState('SSE starting', '');
+        startQuotesStream(quotesLoopGeneration);
     }
 
     function onSelectedSymbolChanged() {

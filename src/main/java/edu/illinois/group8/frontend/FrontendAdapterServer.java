@@ -40,8 +40,10 @@ public class FrontendAdapterServer {
     private static final int MAX_MARKET_LIMIT = 500;
     private static final int HTTP_WORKER_THREADS = 8;
     private static final int QUOTE_UPDATE_MAX_WAITERS = 4;
+    private static final int QUOTE_STREAM_MAX_STREAMS = 2;
     private static final long DEFAULT_QUOTE_UPDATE_TIMEOUT_MS = 15_000L;
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
+    private static final long QUOTE_STREAM_HEARTBEAT_MS = 1_000L;
     private static final long DATA_FRESHNESS_STALE_AFTER_MS = 15_000L;
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
@@ -72,6 +74,13 @@ public class FrontendAdapterServer {
     private final LongAdder quoteUpdateRejected = new LongAdder();
     private final AtomicLong quoteUpdateActiveWaits = new AtomicLong();
     private final Semaphore quoteUpdateWaitSlots = new Semaphore(QUOTE_UPDATE_MAX_WAITERS);
+    private final LongAdder quoteStreamRequests = new LongAdder();
+    private final LongAdder quoteStreamEvents = new LongAdder();
+    private final LongAdder quoteStreamHeartbeats = new LongAdder();
+    private final LongAdder quoteStreamClientDisconnects = new LongAdder();
+    private final LongAdder quoteStreamRejected = new LongAdder();
+    private final AtomicLong quoteStreamActiveStreams = new AtomicLong();
+    private final Semaphore quoteStreamSlots = new Semaphore(QUOTE_STREAM_MAX_STREAMS);
     private final long startedAtMs = System.currentTimeMillis();
     private HttpServer httpServer;
     private ExecutorService httpExecutor;
@@ -138,6 +147,7 @@ public class FrontendAdapterServer {
         bind("/datafeed/history", this::handleDatafeedHistory);
         bind("/datafeed/time", this::handleDatafeedTime);
         bind("/symbols", this::handleSymbols);
+        bind("/quotes/stream", this::handleQuoteStream);
         bind("/quotes/updates", this::handleQuoteUpdates);
         bind("/quotes", this::handleQuotes);
         bind("/features", this::handleFeatures);
@@ -342,6 +352,48 @@ public class FrontendAdapterServer {
         writeJson(exchange, 200, quotesBody(symbols, store.sequence()));
     }
 
+    private void handleQuoteStream(HttpExchange exchange) throws IOException {
+        quoteStreamRequests.increment();
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        List<String> symbols = parseSymbols(params.getOrDefault("symbols", ""));
+        if (!quoteStreamSlots.tryAcquire()) {
+            quoteStreamRejected.increment();
+            writeError(exchange, 429, "too many active quote streams");
+            return;
+        }
+        quoteStreamActiveStreams.incrementAndGet();
+        try {
+            exchange.getResponseHeaders().set("content-type", "text/event-stream; charset=utf-8");
+            exchange.getResponseHeaders().set("cache-control", "no-cache");
+            exchange.getResponseHeaders().set("x-accel-buffering", "no");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                long sequence = store.sequence();
+                writeQuoteStreamEvent(out, symbols, sequence, false);
+                while (!Thread.currentThread().isInterrupted()) {
+                    long nextSequence;
+                    try {
+                        nextSequence = store.waitForSequenceAfter(sequence, QUOTE_STREAM_HEARTBEAT_MS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    if (nextSequence > sequence) {
+                        sequence = nextSequence;
+                        writeQuoteStreamEvent(out, symbols, sequence, true);
+                    } else {
+                        writeQuoteStreamHeartbeat(out);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            quoteStreamClientDisconnects.increment();
+        } finally {
+            quoteStreamActiveStreams.decrementAndGet();
+            quoteStreamSlots.release();
+        }
+    }
+
     private void handleQuoteUpdates(HttpExchange exchange) throws IOException {
         quoteUpdateRequests.increment();
         Map<String, String> params = parseQuery(exchange.getRequestURI());
@@ -512,6 +564,15 @@ public class FrontendAdapterServer {
         quoteUpdatesView.put("active_waits", quoteUpdateActiveWaits.get());
         quoteUpdatesView.put("max_waits", QUOTE_UPDATE_MAX_WAITERS);
         health.put("quote_updates", quoteUpdatesView);
+        Map<String, Object> quoteStreamsView = new LinkedHashMap<>();
+        quoteStreamsView.put("requests", quoteStreamRequests.sum());
+        quoteStreamsView.put("events", quoteStreamEvents.sum());
+        quoteStreamsView.put("heartbeats", quoteStreamHeartbeats.sum());
+        quoteStreamsView.put("client_disconnects", quoteStreamClientDisconnects.sum());
+        quoteStreamsView.put("rejected", quoteStreamRejected.sum());
+        quoteStreamsView.put("active_streams", quoteStreamActiveStreams.get());
+        quoteStreamsView.put("max_streams", QUOTE_STREAM_MAX_STREAMS);
+        health.put("quote_streams", quoteStreamsView);
         Map<String, Object> metadataView = new LinkedHashMap<>();
         metadataView.put("source", metadataCatalog.source());
         metadataView.put("status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT));
@@ -552,6 +613,24 @@ public class FrontendAdapterServer {
             .append('\n');
         body.append("frontend_adapter_quote_update_active ")
             .append(quoteUpdateActiveWaits.get())
+            .append('\n');
+        body.append("frontend_adapter_quote_stream_requests_total ")
+            .append(quoteStreamRequests.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_stream_events_total ")
+            .append(quoteStreamEvents.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_stream_heartbeats_total ")
+            .append(quoteStreamHeartbeats.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_stream_client_disconnects_total ")
+            .append(quoteStreamClientDisconnects.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_stream_rejected_total ")
+            .append(quoteStreamRejected.sum())
+            .append('\n');
+        body.append("frontend_adapter_quote_stream_active ")
+            .append(quoteStreamActiveStreams.get())
             .append('\n');
         requestCounters.forEach((path, counter) -> body
             .append("frontend_adapter_http_requests_total{path=\"")
@@ -855,6 +934,28 @@ public class FrontendAdapterServer {
 
     private void writeJson(HttpExchange exchange, int status, Object body) throws IOException {
         write(exchange, status, "application/json; charset=utf-8", mapper.writeValueAsString(body));
+    }
+
+    private void writeQuoteStreamEvent(
+        OutputStream out,
+        List<String> symbols,
+        long sequence,
+        boolean changed
+    ) throws IOException {
+        Map<String, Object> body = quotesBody(symbols, sequence);
+        body.put("changed", changed);
+        writeSseFrame(out, "event: quotes\n" + "data: " + mapper.writeValueAsString(body) + "\n\n");
+        quoteStreamEvents.increment();
+    }
+
+    private void writeQuoteStreamHeartbeat(OutputStream out) throws IOException {
+        writeSseFrame(out, ": heartbeat " + System.currentTimeMillis() + "\n\n");
+        quoteStreamHeartbeats.increment();
+    }
+
+    private static void writeSseFrame(OutputStream out, String frame) throws IOException {
+        out.write(frame.getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     private void writeError(HttpExchange exchange, int status, String message) throws IOException {

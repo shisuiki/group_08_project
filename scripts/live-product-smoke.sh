@@ -128,6 +128,27 @@ print(quote(sys.argv[1], safe=""))
 PY
 }
 
+fetch_sse_stream() {
+    endpoint="$1"
+    output="$2"
+    error_output="${output}.err"
+    set +e
+    curl -fsS -N --max-time 3 --noproxy "$FRONTEND_NO_PROXY" \
+        "${FRONTEND_BASE_URL}${endpoint}" \
+        -o "$output" \
+        2> "$error_output"
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ] && [ "$status" -ne 28 ]; then
+        cat "$error_output" >&2 || true
+        return 1
+    fi
+    if [ ! -s "$output" ]; then
+        cat "$error_output" >&2 || true
+        return 1
+    fi
+}
+
 require_same_db_value() {
     label="$1"
     expected="$2"
@@ -543,12 +564,15 @@ check_product_static_ui() {
     grep -q 'health-data-age' "$index_file"
     grep -q 'quote-update-health' "$index_file"
     grep -q 'same origin' "$index_file"
+    grep -q '/quotes/stream' "$app_file"
     grep -q '/quotes/updates' "$app_file"
+    grep -q 'EventSource' "$app_file"
     grep -q '/markets?limit=100' "$app_file"
     grep -q '/features?symbol=' "$app_file"
     grep -q '/health' "$app_file"
     grep -q 'body.release' "$app_file"
     grep -q 'body.data_freshness' "$app_file"
+    grep -q 'body.quote_streams' "$app_file"
     grep -q 'body.quote_updates' "$app_file"
     grep -q 'latest_event_ts_ms' "$app_file"
     grep -q 'chart-container' "$css_file"
@@ -649,6 +673,72 @@ PY
         fi
         if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
             printf 'frontend quote did not reflect seeded BBO: market=%s\n' "$market" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_frontend_quote_stream() {
+    market="$1"
+    expected_midpoint_micros="$2"
+    encoded_market="$(urlencode "$market")"
+    output="$tmpdir/frontend.quotes.sse"
+    attempt=1
+    while :; do
+        if fetch_sse_stream "/quotes/stream?symbols=${encoded_market}" "$output" \
+            && python3 - "$output" "$market" "$expected_midpoint_micros" <<'PY'
+import json
+import sys
+
+path, market = sys.argv[1:3]
+expected_midpoint = int(sys.argv[3])
+with open(path, "r", encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+
+data_lines = []
+events = []
+for line in lines:
+    if not line:
+        if data_lines:
+            events.append("\n".join(data_lines))
+            data_lines = []
+        continue
+    if line.startswith("data:"):
+        value = line[len("data:"):]
+        if value.startswith(" "):
+            value = value[1:]
+        data_lines.append(value)
+if data_lines:
+    events.append("\n".join(data_lines))
+if not events:
+    raise SystemExit("quote stream missing SSE data event")
+body = json.loads(events[0])
+for key in ("sequence", "server_ts_ms"):
+    value = body.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SystemExit(f"quote stream {key} is not an integer")
+if not isinstance(body.get("changed"), bool):
+    raise SystemExit("quote stream changed is not a boolean")
+quotes = body.get("quotes")
+if not isinstance(quotes, list):
+    raise SystemExit("quote stream quotes missing")
+for quote in quotes:
+    if isinstance(quote, dict) and quote.get("symbol") == market:
+        if quote.get("midpoint_micros") == expected_midpoint:
+            raise SystemExit(0)
+        raise SystemExit("quote stream midpoint mismatch")
+raise SystemExit("quote stream market quote not visible")
+PY
+        then
+            printf 'PASS frontend_quotes_stream market=%s midpoint_micros=%s\n' "$market" "$expected_midpoint_micros"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'frontend quote stream did not expose seeded BBO: market=%s midpoint_micros=%s\n' \
+                "$market" "$expected_midpoint_micros" >&2
             print_diagnostics
             return 1
         fi
@@ -977,6 +1067,7 @@ frontend_readiness_stale_after="$(printf '%s\n' "$frontend_after" | sed -n '5p')
 frontend_readiness_degraded_after="$(printf '%s\n' "$frontend_after" | sed -n '6p')"
 wait_frontend_feature_output "$market_ticker" "$bbo_event_id"
 wait_frontend_quote "$market_ticker"
+wait_frontend_quote_stream "$market_ticker" 461500
 
 wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health

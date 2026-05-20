@@ -282,6 +282,14 @@ assert_frontend_release_health_contract() {
             'release-identity' \
             'health-data-age' \
             'quote-update-health' \
+            '/quotes/stream' \
+            'curl -fsS -N --max-time 3' \
+            'SSE data event' \
+            'server_ts_ms' \
+            'changed' \
+            'quotes_stream' \
+            'EventSource' \
+            'body.quote_streams' \
             'body.quote_updates'; do
             if ! grep -Fq "$expected" "$smoke_script"; then
                 printf '%s missing release/data freshness contract: %s\n' "$smoke_script" "$expected" >&2
@@ -296,7 +304,10 @@ assert_frontend_release_health_contract() {
         'id="quote-update-health"' \
         'body.release' \
         'body.data_freshness' \
+        'body.quote_streams' \
         'body.quote_updates' \
+        '/quotes/stream' \
+        'EventSource' \
         'latest_event_ts_ms'; do
         if ! grep -Fq "$expected" frontend/tradingview-lightweight/index.html frontend/tradingview-lightweight/app.js; then
             printf 'frontend static UI missing release/data freshness contract: %s\n' "$expected" >&2
@@ -806,6 +817,7 @@ assert_live_product_manual_smoke_contract() {
         'wait_featureplant_cursor_caught_up' \
         'wait_frontend_live_feature_output' \
         'wait_frontend_health_non_smoke_freshness' \
+        'wait_frontend_quote_stream' \
         'FEATUREPLANT_DB_CURSOR_NAME' \
         'LIVE_PRODUCT_BROWSER_SMOKE_ENABLED' \
         'check_product_browser_ui' \
@@ -845,10 +857,15 @@ assert_live_product_manual_smoke_contract() {
     for expected in \
         'chromium chromium-browser google-chrome google-chrome-stable' \
         '--headless=new' \
+        '--disable-background-networking' \
+        '--disable-component-update' \
+        '--no-first-run' \
         '--dump-dom' \
         'id="chart-container"' \
         '<canvas' \
         'id="quote-update-health"' \
+        'quote feed status did not show active SSE/fallback traffic' \
+        '(SSE|long-poll) error' \
         'No markets indexed yet' \
         'no feature outputs' \
         'freshness-state' \

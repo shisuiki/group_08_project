@@ -13,6 +13,11 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -231,8 +236,12 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('quote-update-health')"));
         assertTrue(js.body().contains("body.release"));
         assertTrue(js.body().contains("body.data_freshness"));
+        assertTrue(js.body().contains("body.quote_streams"));
         assertTrue(js.body().contains("quote_updates"));
+        assertTrue(js.body().contains("EventSource"));
+        assertTrue(js.body().contains("/quotes/stream?symbols="));
         assertTrue(js.body().contains("long-poll timeout"));
+        assertTrue(js.body().contains("long-poll fallback"));
         assertTrue(js.body().contains("fallback polling"));
         assertTrue(js.body().contains("latest_event_ts_ms"));
         assertTrue(js.body().contains("nextSequence < quoteSequence"));
@@ -323,6 +332,69 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void quoteStreamSendsSnapshotThenPushesChangedQuotes() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature("MKT-1", 1_000L, "seed", 500_000L));
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        try (SseStream stream = openSse("/quotes/stream?symbols=MKT-1")) {
+            JsonNode snapshot = stream.readJsonEvent();
+            assertFalse(snapshot.path("changed").asBoolean());
+            assertEquals(1L, snapshot.path("sequence").asLong());
+            assertEquals(1, snapshot.path("quotes").size());
+            assertEquals(500_000L, snapshot.path("quotes").get(0).path("midpoint_micros").asLong());
+
+            store.accept(feature("MKT-1", 2_000L, "refresh", 600_000L));
+
+            JsonNode changed = stream.readJsonEvent();
+            assertTrue(changed.path("changed").asBoolean());
+            assertEquals(2L, changed.path("sequence").asLong());
+            assertEquals(600_000L, changed.path("quotes").get(0).path("midpoint_micros").asLong());
+            assertEquals("refresh", changed.path("quotes").get(0).path("source_event_id").asText());
+            assertFalse(changed.path("server_ts_ms").isMissingNode());
+        }
+    }
+
+    @Test
+    void quoteStreamRejectsWhenSlotsAreExhausted() throws Exception {
+        List<SseStream> streams = new ArrayList<>();
+        try {
+            for (int i = 0; i < 2; i++) {
+                streams.add(openSse("/quotes/stream?symbols=MKT-1"));
+            }
+
+            HttpResponse<String> rejected = get("/quotes/stream?symbols=MKT-1");
+
+            assertEquals(429, rejected.statusCode());
+            assertTrue(rejected.body().contains("too many active quote streams"));
+            JsonNode health = getJson("/health");
+            assertEquals(2L, health.path("quote_streams").path("active_streams").asLong());
+            assertEquals(2, health.path("quote_streams").path("max_streams").asInt());
+            assertTrue(health.path("quote_streams").path("rejected").asLong() >= 1L);
+
+            streams.remove(0).close();
+            JsonNode released = waitForQuoteStreamActiveAtMost(1L);
+            assertTrue(released.path("quote_streams").path("active_streams").asLong() <= 1L);
+            try (SseStream replacement = openSse("/quotes/stream?symbols=MKT-1")) {
+                assertEquals(1L, replacement.readJsonEvent().path("quotes").size());
+            }
+        } finally {
+            for (SseStream stream : streams) {
+                stream.close();
+            }
+        }
+    }
+
+    @Test
     void quoteUpdateLongPollsDoNotStarveHealthEndpoint() throws Exception {
         long sequence = getJson("/quotes?symbols=MKT-1").path("sequence").asLong();
         List<CompletableFuture<HttpResponse<String>>> pending = new ArrayList<>();
@@ -408,6 +480,8 @@ class UdfEndpointsTest {
         assertEquals(0L, body.path("quote_updates").path("timeouts").asLong());
         assertEquals(0L, body.path("quote_updates").path("rejected").asLong());
         assertEquals(4, body.path("quote_updates").path("max_waits").asInt());
+        assertEquals(0L, body.path("quote_streams").path("rejected").asLong());
+        assertEquals(2, body.path("quote_streams").path("max_streams").asInt());
     }
 
     @Test
@@ -690,6 +764,10 @@ class UdfEndpointsTest {
         assertTrue(body.contains("frontend_adapter_quote_update_timeouts_total"));
         assertTrue(body.contains("frontend_adapter_quote_update_rejected_total"));
         assertTrue(body.contains("frontend_adapter_quote_update_active"));
+        assertTrue(body.contains("frontend_adapter_quote_stream_requests_total"));
+        assertTrue(body.contains("frontend_adapter_quote_stream_events_total"));
+        assertTrue(body.contains("frontend_adapter_quote_stream_rejected_total"));
+        assertTrue(body.contains("frontend_adapter_quote_stream_active"));
         assertTrue(body.contains("frontend_adapter_http_requests_total{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_sum{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_count{path=\"/symbols\"}"));
@@ -730,6 +808,47 @@ class UdfEndpointsTest {
                 .GET()
                 .build(),
             HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
+    private JsonNode waitForQuoteStreamActiveAtMost(long expectedMax) throws Exception {
+        JsonNode health = null;
+        for (int attempt = 0; attempt < 40; attempt++) {
+            health = getJson("/health");
+            if (health.path("quote_streams").path("active_streams").asLong() <= expectedMax) {
+                return health;
+            }
+            Thread.sleep(25L);
+        }
+        assertNotNull(health);
+        return health;
+    }
+
+    private SseStream openSse(String path) throws Exception {
+        HttpResponse<InputStream> response = client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .timeout(Duration.ofSeconds(2))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofInputStream()
+        );
+        assertEquals(200, response.statusCode(), "for " + path);
+        assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/event-stream"));
+        return new SseStream(response.body());
+    }
+
+    private static FeatureOutput feature(String market, long eventTsMs, String sourceEventId, long midpointMicros) {
+        return new FeatureOutput(
+            FrontendFeatureStore.BBO_FEATURE,
+            FrontendFeatureStore.BBO_FEATURE,
+            market,
+            eventTsMs,
+            sourceEventId,
+            Map.of(
+                "bid_price_micros", midpointMicros - 10_000L,
+                "ask_price_micros", midpointMicros + 10_000L,
+                "midpoint_micros", midpointMicros
+            )
         );
     }
 
@@ -787,5 +906,44 @@ class UdfEndpointsTest {
                 )
             )
         );
+    }
+
+    private static final class SseStream implements AutoCloseable {
+        private final InputStream input;
+        private final BufferedReader reader;
+
+        private SseStream(InputStream input) {
+            this.input = input;
+            this.reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
+        }
+
+        private JsonNode readJsonEvent() throws IOException {
+            StringBuilder data = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty()) {
+                    if (data.length() > 0) {
+                        return MAPPER.readTree(data.toString());
+                    }
+                    continue;
+                }
+                if (line.startsWith("data:")) {
+                    String value = line.substring("data:".length());
+                    if (value.startsWith(" ")) {
+                        value = value.substring(1);
+                    }
+                    if (data.length() > 0) {
+                        data.append('\n');
+                    }
+                    data.append(value);
+                }
+            }
+            throw new IOException("SSE stream ended before a data event");
+        }
+
+        @Override
+        public void close() throws IOException {
+            input.close();
+        }
     }
 }

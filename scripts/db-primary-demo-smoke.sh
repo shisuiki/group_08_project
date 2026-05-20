@@ -60,6 +60,27 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 PY
 }
 
+fetch_sse_stream() {
+    endpoint="$1"
+    output="$2"
+    error_output="${output}.err"
+    set +e
+    curl -fsS -N --max-time 3 --noproxy "$FRONTEND_NO_PROXY" \
+        "${FRONTEND_BASE_URL}${endpoint}" \
+        -o "$output" \
+        2> "$error_output"
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ] && [ "$status" -ne 28 ]; then
+        cat "$error_output" >&2 || true
+        return 1
+    fi
+    if [ ! -s "$output" ]; then
+        cat "$error_output" >&2 || true
+        return 1
+    fi
+}
+
 check_product_static_ui() {
     index_file="$tmpdir/frontend-index.html"
     app_file="$tmpdir/frontend-app.js"
@@ -81,12 +102,15 @@ check_product_static_ui() {
     grep -q 'health-data-age' "$index_file"
     grep -q 'quote-update-health' "$index_file"
     grep -q 'same origin' "$index_file"
+    grep -q '/quotes/stream' "$app_file"
     grep -q '/quotes/updates' "$app_file"
+    grep -q 'EventSource' "$app_file"
     grep -q '/markets?limit=100' "$app_file"
     grep -q '/features?symbol=' "$app_file"
     grep -q '/health' "$app_file"
     grep -q 'body.release' "$app_file"
     grep -q 'body.data_freshness' "$app_file"
+    grep -q 'body.quote_streams' "$app_file"
     grep -q 'body.quote_updates' "$app_file"
     grep -q 'latest_event_ts_ms' "$app_file"
     grep -q 'chart-container' "$css_file"
@@ -511,6 +535,67 @@ for key, expected in (
         raise SystemExit(f"quotes check failed: {key} is {value!r}, expected {expected!r}")
 PY
 printf 'PASS quotes symbol=%s midpoint_micros=%s source_event_id=%s event_ts_ms=%s\n' \
+    "$selected_symbol" "$feature_midpoint_micros" "$feature_source_event_id" "$feature_event_ts_ms"
+
+quotes_sse="$tmpdir/quotes.sse"
+fetch_sse_stream "/quotes/stream?symbols=${encoded_symbol}" "$quotes_sse"
+python3 - "$quotes_sse" "$selected_symbol" "$feature_source_event_id" "$feature_event_ts_ms" "$feature_midpoint_micros" "$feature_bid_micros" "$feature_ask_micros" <<'PY'
+import json
+import sys
+
+path, expected_symbol, expected_source = sys.argv[1:4]
+expected_event_ts = int(sys.argv[4])
+expected_midpoint = int(sys.argv[5])
+expected_bid = int(sys.argv[6])
+expected_ask = int(sys.argv[7])
+with open(path, "r", encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+
+data_lines = []
+events = []
+for line in lines:
+    if not line:
+        if data_lines:
+            events.append("\n".join(data_lines))
+            data_lines = []
+        continue
+    if line.startswith("data:"):
+        value = line[len("data:"):]
+        if value.startswith(" "):
+            value = value[1:]
+        data_lines.append(value)
+if data_lines:
+    events.append("\n".join(data_lines))
+if not events:
+    raise SystemExit("quote stream check failed: no SSE data event")
+body = json.loads(events[0])
+for key in ("sequence", "server_ts_ms"):
+    value = body.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SystemExit(f"quote stream check failed: {key} is not an integer")
+if not isinstance(body.get("changed"), bool):
+    raise SystemExit("quote stream check failed: changed is not a boolean")
+quotes = body.get("quotes")
+if not isinstance(quotes, list) or not quotes:
+    raise SystemExit("quote stream check failed: quotes are empty")
+quote = quotes[0]
+if quote.get("symbol") != expected_symbol:
+    raise SystemExit("quote stream check failed: selected symbol is missing")
+if quote.get("source_event_id") != expected_source:
+    raise SystemExit(
+        f"quote stream check failed: source_event_id is {quote.get('source_event_id')!r}, expected {expected_source!r}"
+    )
+for key, expected in (
+    ("event_ts_ms", expected_event_ts),
+    ("midpoint_micros", expected_midpoint),
+    ("bid_micros", expected_bid),
+    ("ask_micros", expected_ask),
+):
+    value = quote.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value != expected:
+        raise SystemExit(f"quote stream check failed: {key} is {value!r}, expected {expected!r}")
+PY
+printf 'PASS quotes_stream symbol=%s midpoint_micros=%s source_event_id=%s event_ts_ms=%s\n' \
     "$selected_symbol" "$feature_midpoint_micros" "$feature_source_event_id" "$feature_event_ts_ms"
 
 history_window="$tmpdir/history-window.txt"
