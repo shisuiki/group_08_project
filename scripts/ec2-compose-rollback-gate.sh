@@ -547,6 +547,19 @@ build_or_verify_app_image() {
     fi
 }
 
+build_profile_sidecar_images() {
+    env_file="$1"
+    case "$DEPLOY_PROFILE" in
+        recording-capture)
+            log "Building recording-capture sidecar images before prebuilt Compose up."
+            if ! compose_profile "$env_file" build s3-recording-sync; then
+                log "Docker Compose sidecar build failed."
+                return 1
+            fi
+            ;;
+    esac
+}
+
 is_true() {
     case "$1" in
         true|TRUE|True|1|yes|YES|Yes) return 0 ;;
@@ -1280,6 +1293,10 @@ deploy_env() {
         return 1
     fi
     APP_IMAGE_STATUS="passed"
+
+    if ! build_profile_sidecar_images "$env_file"; then
+        return 1
+    fi
 
     if ! run_db_release_preflight "$env_file"; then
         return 1
