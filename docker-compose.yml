@@ -620,6 +620,9 @@ services:
       KALSHI_DEPLOY_PROFILE: ${KALSHI_DEPLOY_PROFILE:-}
       KALSHI_GITHUB_RUN_ID: ${KALSHI_GITHUB_RUN_ID:-}
       KALSHI_GITHUB_RUN_ATTEMPT: ${KALSHI_GITHUB_RUN_ATTEMPT:-}
+      KALSHI_BASE_URL: ${KALSHI_BASE_URL:-https://api.elections.kalshi.com}
+      KALSHI_KEY_ID: ${KALSHI_KEY_ID:-}
+      KALSHI_KEY_PATH: ${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}
       AERON_EXTERNAL_CHANNEL: ${AERON_EXTERNAL_CHANNEL:-aeron:udp?endpoint=224.0.1.1:40456}
       FRONTEND_ADAPTER_HOST: ${FRONTEND_ADAPTER_HOST:-0.0.0.0}
       FRONTEND_ADAPTER_PORT: ${FRONTEND_ADAPTER_PORT:-8090}
@@ -656,6 +659,7 @@ services:
       - "${COMPOSE_HOST_BIND_IP:-127.0.0.1}:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-8090}:8090"
     volumes:
       - ./recordings:/app/recordings:ro
+      - ${KALSHI_KEY_HOST_PATH:-/dev/null}:${KALSHI_KEY_PATH:-/run/secrets/kalshi_private_key}:ro
     shm_size: "512mb"
     command: >
       sh -c "java -cp /app/app.jar edu.illinois.group8.frontend.FrontendAdapterMain"

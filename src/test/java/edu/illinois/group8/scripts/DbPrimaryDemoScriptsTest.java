@@ -716,6 +716,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: \\${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}"));
         assertTrue(script.contains("FRONTEND_ADAPTER_BASIC_AUTH_USER"));
         assertTrue(script.contains("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD"));
+        assertTrue(script.contains("KALSHI_BASE_URL KALSHI_KEY_ID KALSHI_KEY_PATH"));
+        assertTrue(script.contains("Kalshi key default mount should not create repo files"));
+        assertTrue(script.contains("catalog-sync-kalshi.pem"));
         assertTrue(script.contains("'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE'"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));

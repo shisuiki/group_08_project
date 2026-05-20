@@ -250,6 +250,29 @@ assert_frontend_adapter_db_primary_static_root() {
             printf '%s frontend-adapter-db-primary missing feature_outputs fallback override\n' "$profile" >&2
             exit 1
         fi
+        for env_name in KALSHI_BASE_URL KALSHI_KEY_ID KALSHI_KEY_PATH; do
+            if ! printf '%s\n' "$rendered" | grep -q "^      ${env_name}:"; then
+                printf '%s frontend-adapter-db-primary missing Kalshi catalog sync env %s\n' "$profile" "$env_name" >&2
+                exit 1
+            fi
+        done
+        if ! printf '%s\n' "$rendered" | grep -q '^        source: /dev/null$'; then
+            printf '%s frontend-adapter-db-primary Kalshi key default mount should not create repo files\n' "$profile" >&2
+            exit 1
+        fi
+        key_mount_rendered="$(
+            KALSHI_KEY_HOST_PATH=/tmp/catalog-sync-kalshi.pem \
+            KALSHI_KEY_PATH=/run/secrets/catalog-sync-kalshi.pem \
+                service_config_for frontend-adapter-db-primary --profile "$profile"
+        )"
+        if ! printf '%s\n' "$key_mount_rendered" | grep -q '^        source: /tmp/catalog-sync-kalshi.pem$'; then
+            printf '%s frontend-adapter-db-primary missing Kalshi key host mount override\n' "$profile" >&2
+            exit 1
+        fi
+        if ! printf '%s\n' "$key_mount_rendered" | grep -q '^        target: /run/secrets/catalog-sync-kalshi.pem$'; then
+            printf '%s frontend-adapter-db-primary missing Kalshi key target mount override\n' "$profile" >&2
+            exit 1
+        fi
     done
     printf 'PASS frontend_adapter_db_primary_frontend_contract\n'
 }

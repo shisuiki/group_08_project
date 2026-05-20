@@ -1465,7 +1465,7 @@ class UdfEndpointsTest {
     }
 
     @Test
-    void operatorCatalogSyncRejectsMissingKalshiCredentials() throws Exception {
+    void operatorCatalogSyncAllowsPublicCatalogWithoutKalshiCredentials() throws Exception {
         restartWithCatalogSyncOperator(
             Map.of("KALSHI_KEY_ID", "", "KALSHI_KEY_PATH", ""),
             config -> catalogSummary(0, 0, 0, 0, 0)
@@ -1478,8 +1478,10 @@ class UdfEndpointsTest {
             "secret"
         );
 
-        assertEquals(400, response.statusCode());
-        assertTrue(response.body().contains("KALSHI_KEY_ID"));
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForCatalogSyncRunState("completed");
+        assertFalse(completed.path("kalshi_key_id_configured").asBoolean());
+        assertFalse(completed.path("kalshi_private_key_path_configured").asBoolean());
     }
 
     @Test

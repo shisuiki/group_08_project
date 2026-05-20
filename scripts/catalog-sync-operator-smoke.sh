@@ -76,8 +76,6 @@ FRONTEND_USER_VALUE="$(env_or_file FRONTEND_ADAPTER_BASIC_AUTH_USER)"
 FRONTEND_PASSWORD_VALUE="$(env_or_file FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD)"
 
 missing=""
-[ -n "$KALSHI_KEY_ID_VALUE" ] || missing="${missing}KALSHI_KEY_ID,"
-[ -n "$KALSHI_KEY_PATH_VALUE" ] || missing="${missing}KALSHI_KEY_PATH,"
 [ -n "$DB_URL_VALUE" ] || missing="${missing}DB_WRITER_DATABASE_URL,"
 [ -n "$DB_USER_VALUE" ] || missing="${missing}DB_WRITER_DATABASE_USER,"
 [ -n "$DB_PASSWORD_VALUE" ] || missing="${missing}DB_WRITER_DATABASE_PASSWORD,"

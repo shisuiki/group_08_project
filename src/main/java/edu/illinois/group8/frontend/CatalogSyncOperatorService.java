@@ -308,12 +308,6 @@ final class CatalogSyncOperatorService implements AutoCloseable {
             if (kalshiBaseUrl.isBlank()) {
                 throw new IllegalArgumentException("KALSHI_BASE_URL is required for catalog sync");
             }
-            if (kalshiKeyId.isBlank()) {
-                throw new IllegalArgumentException("KALSHI_KEY_ID is required for catalog sync");
-            }
-            if (kalshiKeyPath.isBlank()) {
-                throw new IllegalArgumentException("KALSHI_KEY_PATH is required for catalog sync");
-            }
             if (!request.dryRun() && dbUrl.isBlank()) {
                 throw new IllegalArgumentException(
                     "FRONTEND_ADAPTER_DB_URL or DB_WRITER_DATABASE_URL is required when dry_run=false"
