@@ -166,11 +166,34 @@ STATE_EXPR = r"""
     historyBars: historyMatch ? Number(historyMatch[1]) : 0,
     quoteValuesRendered,
     productMarketPanel: !!document.getElementById('product-market-panel'),
+    viewerTab: !!document.getElementById('viewer-tab'),
+    traderTab: !!document.getElementById('trader-tab'),
+    researchTab: !!document.getElementById('research-tab'),
+    operatorTab: !!document.getElementById('operator-tab'),
+    traderMonitorPanel: !!document.getElementById('trader-monitor-panel'),
+    traderBid: text('trader-bid'),
+    traderAsk: text('trader-ask'),
+    traderMidpoint: text('trader-midpoint'),
+    traderSseStatus: text('trader-sse-status'),
     researchFeaturesPanel: !!document.getElementById('research-features-panel'),
+    researchFeatureLimit: !!document.getElementById('research-feature-limit'),
+    researchFeatureWindow: !!document.getElementById('research-feature-window'),
+    researchExportCsv: !!document.getElementById('research-export-csv'),
     runtimeOperatorPanel: !!document.getElementById('runtime-operator-panel'),
+    runtimePipelineStatus: text('runtime-pipeline-status'),
+    runtimeCursorLag: text('runtime-cursor-lag'),
+    runtimeQuoteStreams: text('runtime-quote-streams'),
+    runtimeQuoteWaits: text('runtime-quote-waits'),
     latencyFreshnessPanel: !!document.getElementById('latency-freshness-panel'),
     operatorPlanPanel: !!document.getElementById('operator-plan-panel'),
+    operatorPlanState: text('operator-plan-state'),
     operatorControlState: text('operator-control-enabled'),
+    operatorDbStatus: text('operator-db-status'),
+    operatorKalshiStatus: text('operator-kalshi-status'),
+    operatorAuthStatus: text('operator-auth-status'),
+    operatorDataSource: text('operator-data-source'),
+    operatorE2eLatency: text('operator-e2e-latency'),
+    operatorPipelineCounts: text('operator-pipeline-counts'),
     operatorProfileSelector: !!document.getElementById('operator-deploy-profile'),
     operatorGeneratePlan: !!document.getElementById('operator-generate-plan'),
     operatorPlanOutput: text('operator-env-plan'),
@@ -243,11 +266,30 @@ def wait_for_state(cdp, timeout_seconds):
             and last.get("healthDataAge") not in ("", "-")
             and last.get("quoteUpdateHealth") not in ("", "-")
             and last.get("productMarketPanel")
+            and last.get("viewerTab")
+            and last.get("traderTab")
+            and last.get("researchTab")
+            and last.get("operatorTab")
+            and last.get("traderMonitorPanel")
+            and last.get("traderSseStatus") not in ("", "-")
             and last.get("researchFeaturesPanel")
+            and last.get("researchFeatureLimit")
+            and last.get("researchFeatureWindow")
+            and last.get("researchExportCsv")
             and last.get("runtimeOperatorPanel")
+            and last.get("runtimePipelineStatus") not in ("", "-")
+            and last.get("runtimeCursorLag") not in ("", "-")
+            and last.get("runtimeQuoteStreams") not in ("", "-")
+            and last.get("runtimeQuoteWaits") not in ("", "-")
             and last.get("latencyFreshnessPanel")
             and last.get("operatorPlanPanel")
+            and last.get("operatorPlanState") not in ("", "-", "unavailable")
             and last.get("operatorControlState") not in ("", "-")
+            and last.get("operatorDbStatus") not in ("", "-")
+            and last.get("operatorKalshiStatus") not in ("", "-")
+            and last.get("operatorAuthStatus") not in ("", "-")
+            and last.get("operatorE2eLatency") not in ("", "-")
+            and last.get("operatorPipelineCounts") not in ("", "-")
             and last.get("operatorProfileSelector")
             and last.get("operatorGeneratePlan")
             and last.get("noHorizontalOverflow")

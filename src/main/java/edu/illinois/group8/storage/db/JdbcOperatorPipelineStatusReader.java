@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.util.Objects;
 
 public final class JdbcOperatorPipelineStatusReader {
+    static final long RECENT_WINDOW_SECONDS = 900L;
     static final String STATUS_SQL = """
         select
             coalesce((
@@ -31,7 +32,23 @@ public final class JdbcOperatorPipelineStatusReader {
                     else greatest(0, (extract(epoch from (now() - max(updated_at))) * 1000)::bigint)
                 end
                 from latest_market_state
-            ) as latest_state_age_ms
+            ) as latest_state_age_ms,
+            (
+                select count(*)
+                from canonical_events
+                where replay_id is null
+                  and created_at >= now() - (? * interval '1 second')
+            ) as recent_canonical_events,
+            (
+                select count(*)
+                from feature_outputs
+                where created_at >= now() - (? * interval '1 second')
+            ) as recent_feature_outputs,
+            (
+                select count(*)
+                from latest_market_state
+                where updated_at >= now() - (? * interval '1 second')
+            ) as recent_latest_market_states
         """;
 
     private final JdbcConnectionFactory connectionFactory;
@@ -49,6 +66,9 @@ public final class JdbcOperatorPipelineStatusReader {
         try (Connection connection = connectionFactory.openConnection();
              PreparedStatement statement = connection.prepareStatement(STATUS_SQL)) {
             statement.setString(1, normalizedCursorName);
+            statement.setLong(2, RECENT_WINDOW_SECONDS);
+            statement.setLong(3, RECENT_WINDOW_SECONDS);
+            statement.setLong(4, RECENT_WINDOW_SECONDS);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
                     throw new IllegalStateException("operator pipeline status query returned no rows");
@@ -57,6 +77,9 @@ public final class JdbcOperatorPipelineStatusReader {
                 long canonicalMaxCommitSeq = longValue(resultSet, "canonical_max_commit_seq");
                 Long latestMarketStateCommitSeq = longOrNull(resultSet, "latest_market_state_commit_seq");
                 Long latestStateAgeMs = longOrNull(resultSet, "latest_state_age_ms");
+                long recentCanonicalEvents = longValue(resultSet, "recent_canonical_events");
+                long recentFeatureOutputs = longValue(resultSet, "recent_feature_outputs");
+                long recentLatestMarketStates = longValue(resultSet, "recent_latest_market_states");
                 long cursorLagEvents = Math.max(0L, canonicalMaxCommitSeq - cursorCommitSeq);
                 return new OperatorPipelineStatus(
                     status(canonicalMaxCommitSeq, cursorLagEvents, latestMarketStateCommitSeq),
@@ -66,6 +89,10 @@ public final class JdbcOperatorPipelineStatusReader {
                     cursorLagEvents,
                     latestMarketStateCommitSeq,
                     latestStateAgeMs,
+                    recentCanonicalEvents,
+                    recentFeatureOutputs,
+                    recentLatestMarketStates,
+                    RECENT_WINDOW_SECONDS,
                     null
                 );
             }

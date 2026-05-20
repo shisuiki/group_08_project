@@ -9,6 +9,7 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 
 import java.io.IOException;
@@ -35,6 +36,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class FrontendAdapterServer {
@@ -66,6 +68,7 @@ public class FrontendAdapterServer {
     private final Supplier<FeaturePlantStats> featurePlantStats;
     private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
     private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
+    private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
     private final FrontendReleaseInfo releaseInfo;
     private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -122,6 +125,7 @@ public class FrontendAdapterServer {
             featurePlantStats,
             featureOutputRefreshStatus,
             OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
             FrontendReleaseInfo.fromEnvironment()
         );
     }
@@ -133,6 +137,28 @@ public class FrontendAdapterServer {
         Supplier<FeaturePlantStats> featurePlantStats,
         Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
         Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        FrontendReleaseInfo releaseInfo
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            releaseInfo
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
         FrontendReleaseInfo releaseInfo
     ) {
         this.config = config;
@@ -147,6 +173,9 @@ public class FrontendAdapterServer {
         this.operatorPipelineStatus = operatorPipelineStatus == null
             ? OperatorPipelineStatus::disabled
             : operatorPipelineStatus;
+        this.operatorLatencyStatus = operatorLatencyStatus == null
+            ? sourceEventId -> OperatorLatencyStatus.disabled()
+            : operatorLatencyStatus;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
     }
@@ -166,6 +195,8 @@ public class FrontendAdapterServer {
         bind("/markets", this::handleMarkets);
         bind("/health", this::handleHealth);
         bind("/metrics", this::handleMetrics);
+        bind("/ops/pipeline", this::handleOpsPipeline);
+        bind("/ops/latency", this::handleOpsLatency);
         bind("/operator/status", this::handleOperatorStatus);
         bind("/operator/plan", this::handleOperatorPlan);
         bind("/", this::handleStaticAsset);
@@ -570,7 +601,20 @@ public class FrontendAdapterServer {
             return;
         }
 
-        List<FeatureOutput> snapshot = store.snapshot(symbol, feature);
+        Long fromMs;
+        Long toMs;
+        try {
+            fromMs = parseOptionalMillis(params.get("from_ms"), "from_ms");
+            toMs = parseOptionalMillis(params.get("to_ms"), "to_ms");
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+
+        List<FeatureOutput> snapshot = store.snapshot(symbol, feature).stream()
+            .filter(output -> fromMs == null || (output.eventTsMs() != null && output.eventTsMs() >= fromMs))
+            .filter(output -> toMs == null || (output.eventTsMs() != null && output.eventTsMs() <= toMs))
+            .toList();
         int fromIndex = Math.max(0, snapshot.size() - limit);
         List<Map<String, Object>> outputs = new ArrayList<>();
         for (FeatureOutput output : snapshot.subList(fromIndex, snapshot.size())) {
@@ -644,6 +688,46 @@ public class FrontendAdapterServer {
         health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
         health.put("operator_pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
         writeJson(exchange, 200, health);
+    }
+
+    private void handleOpsPipeline(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        OperatorPipelineStatus pipeline = operatorPipelineStatus.get();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", pipeline == null ? "disabled" : pipeline.status());
+        body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
+        body.put("pipeline", operatorPipelineStatusBody(pipeline));
+        writeJson(exchange, 200, body);
+    }
+
+    private void handleOpsLatency(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        String sourceEventId = params.getOrDefault("source_event_id", "").trim();
+        if (sourceEventId.isBlank()) {
+            sourceEventId = store.latestFreshness(System.currentTimeMillis()).sourceEventId();
+        }
+        OperatorLatencyStatus latency;
+        if (sourceEventId == null || sourceEventId.isBlank()) {
+            latency = OperatorLatencyStatus.missing("", "missing_source_event_id");
+        } else {
+            try {
+                latency = operatorLatencyStatus.apply(sourceEventId);
+            } catch (IllegalArgumentException e) {
+                latency = OperatorLatencyStatus.missing(sourceEventId, e.getMessage());
+            } catch (RuntimeException e) {
+                latency = OperatorLatencyStatus.unavailable(sourceEventId, e.getMessage());
+            }
+        }
+        Map<String, Object> body = operatorLatencyStatusBody(latency);
+        body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
+        writeJson(exchange, 200, body);
     }
 
     private void handleOperatorStatus(HttpExchange exchange) throws IOException {
@@ -869,6 +953,28 @@ public class FrontendAdapterServer {
         body.put("cursor_lag_events", view.cursorLagEvents());
         body.put("latest_market_state_commit_seq", view.latestMarketStateCommitSeq());
         body.put("latest_state_age_ms", view.latestStateAgeMs());
+        body.put("recent_canonical_events", view.recentCanonicalEvents());
+        body.put("recent_feature_outputs", view.recentFeatureOutputs());
+        body.put("recent_latest_market_states", view.recentLatestMarketStates());
+        body.put("recent_window_seconds", view.recentWindowSeconds());
+        if (view.error() != null) {
+            body.put("error", operatorVisibleError(view.error()));
+        }
+        return body;
+    }
+
+    private static Map<String, Object> operatorLatencyStatusBody(OperatorLatencyStatus status) {
+        OperatorLatencyStatus view = status == null ? OperatorLatencyStatus.disabled() : status;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", view.status());
+        body.put("source_event_id", view.sourceEventId());
+        body.put("market_ticker", view.marketTicker());
+        body.put("canonical_commit_seq", view.canonicalCommitSeq());
+        body.put("latest_market_state_commit_seq", view.latestMarketStateCommitSeq());
+        body.put("canonical_to_feature_ms", view.canonicalToFeatureMs());
+        body.put("feature_to_latest_state_ms", view.featureToLatestStateMs());
+        body.put("canonical_to_latest_state_ms", view.canonicalToLatestStateMs());
+        body.put("reason", view.reason());
         if (view.error() != null) {
             body.put("error", operatorVisibleError(view.error()));
         }
@@ -1054,6 +1160,13 @@ public class FrontendAdapterServer {
             throw new IllegalArgumentException(name + " must be non-negative");
         }
         return parsed;
+    }
+
+    private static Long parseOptionalMillis(String raw, String name) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return parseNonNegativeLong(raw, name);
     }
 
     private static long toMillis(long timestamp) {

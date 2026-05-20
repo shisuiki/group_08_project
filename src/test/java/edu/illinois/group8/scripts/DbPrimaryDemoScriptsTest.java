@@ -318,6 +318,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(browserSmoke.contains("<canvas"));
         assertTrue(browserSmoke.contains("id=\"quote-update-health\""));
         assertTrue(browserSmoke.contains("id=\"product-market-panel\""));
+        assertTrue(browserSmoke.contains("id=\"trader-monitor-panel\""));
+        assertTrue(browserSmoke.contains("id=\"research-feature-limit\""));
+        assertTrue(browserSmoke.contains("id=\"operator-e2e-latency\""));
+        assertTrue(browserSmoke.contains("id=\"operator-pipeline-counts\""));
         assertTrue(browserSmoke.contains("id=\"operator-plan-panel\""));
         assertTrue(browserSmoke.contains("quote feed status did not show active SSE/fallback traffic"));
         assertTrue(browserSmoke.contains("release identity did not render"));
@@ -904,9 +908,16 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("health-data-age"));
         assertTrue(script.contains("quote-update-health"));
         assertTrue(script.contains("product-market-panel"));
+        assertTrue(script.contains("trader-monitor-panel"));
+        assertTrue(script.contains("research-feature-limit"));
         assertTrue(script.contains("runtime-operator-panel"));
+        assertTrue(script.contains("runtime-pipeline-status"));
         assertTrue(script.contains("latency-freshness-panel"));
+        assertTrue(script.contains("operator-e2e-latency"));
+        assertTrue(script.contains("operator-pipeline-counts"));
         assertTrue(script.contains("operator-plan-panel"));
+        assertTrue(script.contains("/ops/pipeline"));
+        assertTrue(script.contains("/ops/latency"));
         assertTrue(script.contains("/quotes/stream"));
         assertTrue(script.contains("curl -fsS -N --max-time 3"));
         assertTrue(script.contains("/quotes/stream?symbols=${encoded"));

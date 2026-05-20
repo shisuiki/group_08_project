@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -308,6 +309,18 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"runtime-operator-panel\""));
         assertTrue(root.body().contains("id=\"latency-freshness-panel\""));
         assertTrue(root.body().contains("id=\"operator-plan-panel\""));
+        assertTrue(root.body().contains("id=\"viewer-tab\""));
+        assertTrue(root.body().contains("id=\"trader-tab\""));
+        assertTrue(root.body().contains("id=\"research-tab\""));
+        assertTrue(root.body().contains("id=\"operator-tab\""));
+        assertTrue(root.body().contains("id=\"trader-monitor-panel\""));
+        assertTrue(root.body().contains("id=\"trader-bid\""));
+        assertTrue(root.body().contains("id=\"trader-sse-status\""));
+        assertTrue(root.body().contains("id=\"research-feature-limit\""));
+        assertTrue(root.body().contains("id=\"research-feature-window\""));
+        assertTrue(root.body().contains("id=\"research-export-csv\""));
+        assertTrue(root.body().contains("id=\"operator-e2e-latency\""));
+        assertTrue(root.body().contains("id=\"operator-pipeline-counts\""));
         assertTrue(root.body().contains("Operator Control"));
         assertTrue(root.body().contains("id=\"operator-control-enabled\""));
         assertTrue(root.body().contains("id=\"operator-private-key-pem-present\""));
@@ -346,7 +359,7 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("market-search-apply"));
         assertTrue(js.body().contains("market-state"));
         assertTrue(js.body().contains("markets.markets.length > 0"));
-        assertTrue(js.body().contains("/features?symbol="));
+        assertTrue(js.body().contains("/features?"));
         assertTrue(js.body().contains("/health"));
         assertTrue(js.body().contains("document.getElementById('release-identity')"));
         assertTrue(js.body().contains("document.getElementById('health-data-age')"));
@@ -357,11 +370,16 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('operator-env-plan')"));
         assertTrue(js.body().contains("document.getElementById('operator-control-enabled')"));
         assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
+        assertTrue(js.body().contains("document.getElementById('trader-bid')"));
+        assertTrue(js.body().contains("document.getElementById('research-feature-limit')"));
+        assertTrue(js.body().contains("document.getElementById('operator-e2e-latency')"));
         assertTrue(js.body().contains("body.release"));
         assertTrue(js.body().contains("body.data_freshness"));
         assertTrue(js.body().contains("body.quote_streams"));
         assertTrue(js.body().contains("/operator/status"));
         assertTrue(js.body().contains("/operator/plan"));
+        assertTrue(js.body().contains("/ops/pipeline"));
+        assertTrue(js.body().contains("/ops/latency"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("quote_updates"));
@@ -606,6 +624,14 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void featuresEndpointSupportsEventTimeWindow() throws Exception {
+        JsonNode body = getJson("/features?symbol=MKT-1&feature=feature.bbo&limit=10&from_ms=4500&to_ms=4500");
+
+        assertEquals(1, body.path("count").asInt());
+        assertEquals(4_500L, body.path("outputs").get(0).path("event_ts_ms").asLong());
+    }
+
+    @Test
     void featuresEndpointRejectsMissingRequiredParamsAndBadLimit() throws Exception {
         HttpResponse<String> missing = get("/features?symbol=MKT-1");
         assertEquals(400, missing.statusCode());
@@ -673,6 +699,69 @@ class UdfEndpointsTest {
         assertEquals(5L, pipeline.path("cursor_lag_events").asLong());
         assertEquals(7L, pipeline.path("latest_market_state_commit_seq").asLong());
         assertEquals(250L, pipeline.path("latest_state_age_ms").asLong());
+    }
+
+    @Test
+    void opsPipelineAndLatencyExposeStructuredTelemetry() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature("MKT-1", System.currentTimeMillis() - 100L, "evt-5000", 500_000L));
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            () -> new OperatorPipelineStatus("ok", "featureplant-prod", 12L, 12L, 0L, 12L, 25L,
+                5L, 4L, 3L, 900L, null),
+            sourceEventId -> new OperatorLatencyStatus("ok", sourceEventId, "MKT-1", 12L, 12L,
+                5L, 7L, 12L, null, null),
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode pipeline = getJson("/ops/pipeline");
+
+        assertEquals("ok", pipeline.path("status").asText());
+        JsonNode pipelineBody = pipeline.path("pipeline");
+        assertEquals("featureplant-prod", pipelineBody.path("cursor_name").asText());
+        assertEquals(12L, pipelineBody.path("canonical_max_commit_seq").asLong());
+        assertEquals(0L, pipelineBody.path("cursor_lag_events").asLong());
+        assertEquals(5L, pipelineBody.path("recent_canonical_events").asLong());
+        assertEquals(4L, pipelineBody.path("recent_feature_outputs").asLong());
+        assertEquals(3L, pipelineBody.path("recent_latest_market_states").asLong());
+        assertEquals(900L, pipelineBody.path("recent_window_seconds").asLong());
+
+        JsonNode latency = getJson("/ops/latency?source_event_id=evt-5000");
+
+        assertEquals("ok", latency.path("status").asText());
+        assertEquals("evt-5000", latency.path("source_event_id").asText());
+        assertEquals(12L, latency.path("canonical_commit_seq").asLong());
+        assertEquals(12L, latency.path("latest_market_state_commit_seq").asLong());
+        assertEquals(5L, latency.path("canonical_to_feature_ms").asLong());
+        assertEquals(7L, latency.path("feature_to_latest_state_ms").asLong());
+        assertEquals(12L, latency.path("canonical_to_latest_state_ms").asLong());
+    }
+
+    @Test
+    void opsLatencyReturnsMissingWhenNoSourceEventIsAvailable() throws Exception {
+        server.stop();
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode latency = getJson("/ops/latency");
+
+        assertEquals("missing", latency.path("status").asText());
+        assertEquals("missing_source_event_id", latency.path("reason").asText());
+        assertTrue(latency.path("canonical_commit_seq").isNull());
     }
 
     @Test

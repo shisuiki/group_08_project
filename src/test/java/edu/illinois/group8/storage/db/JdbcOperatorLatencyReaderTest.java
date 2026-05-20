@@ -15,91 +15,83 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class JdbcOperatorPipelineStatusReaderTest {
+class JdbcOperatorLatencyReaderTest {
     @Test
-    void readsLiveScopedPipelineStatusAndLag() {
+    void readsLatencyForSourceEvent() {
         RecordingJdbc jdbc = new RecordingJdbc(List.of(row(
-            "cursor_commit_seq", 8L,
-            "canonical_max_commit_seq", 13L,
-            "latest_market_state_commit_seq", 7L,
-            "latest_state_age_ms", 250L,
-            "recent_canonical_events", 3L,
-            "recent_feature_outputs", 2L,
-            "recent_latest_market_states", 1L
+            "event_id", "evt-1",
+            "market_ticker", "MKT",
+            "canonical_commit_seq", 42L,
+            "latest_market_state_commit_seq", 42L,
+            "canonical_to_feature_ms", 5L,
+            "feature_to_latest_state_ms", 7L,
+            "canonical_to_latest_state_ms", 12L
         )));
-        JdbcOperatorPipelineStatusReader reader = new JdbcOperatorPipelineStatusReader(jdbc::openConnection);
+        JdbcOperatorLatencyReader reader = new JdbcOperatorLatencyReader(jdbc::openConnection);
 
-        OperatorPipelineStatus status = reader.read(" featureplant-prod ");
+        OperatorLatencyStatus status = reader.read(" evt-1 ");
 
         String sql = jdbc.preparedSql.toLowerCase(Locale.ROOT);
-        assertTrue(sql.contains("from featureplant_cursors"));
         assertTrue(sql.contains("from canonical_events"));
-        assertTrue(sql.contains("replay_id is null"));
+        assertTrue(sql.contains("from feature_outputs"));
         assertTrue(sql.contains("from latest_market_state"));
-        assertEquals("featureplant-prod", jdbc.parameters.get(1));
-        assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, jdbc.parameters.get(2));
-        assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, jdbc.parameters.get(3));
-        assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, jdbc.parameters.get(4));
-        assertEquals("degraded", status.status());
-        assertEquals("featureplant-prod", status.cursorName());
-        assertEquals(8L, status.cursorCommitSeq());
-        assertEquals(13L, status.canonicalMaxCommitSeq());
-        assertEquals(5L, status.cursorLagEvents());
-        assertEquals(7L, status.latestMarketStateCommitSeq());
-        assertEquals(250L, status.latestStateAgeMs());
-        assertEquals(3L, status.recentCanonicalEvents());
-        assertEquals(2L, status.recentFeatureOutputs());
-        assertEquals(1L, status.recentLatestMarketStates());
-        assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, status.recentWindowSeconds());
+        assertEquals("evt-1", jdbc.parameters.get(1));
+        assertEquals("ok", status.status());
+        assertEquals("evt-1", status.sourceEventId());
+        assertEquals("MKT", status.marketTicker());
+        assertEquals(42L, status.canonicalCommitSeq());
+        assertEquals(42L, status.latestMarketStateCommitSeq());
+        assertEquals(5L, status.canonicalToFeatureMs());
+        assertEquals(7L, status.featureToLatestStateMs());
+        assertEquals(12L, status.canonicalToLatestStateMs());
+        assertNull(status.reason());
     }
 
     @Test
-    void mapsOkAndStaleStatus() {
-        JdbcOperatorPipelineStatusReader okReader = new JdbcOperatorPipelineStatusReader(
+    void mapsMissingAndDegradedLatency() {
+        OperatorLatencyStatus missing = new JdbcOperatorLatencyReader(
+            new RecordingJdbc(List.of())::openConnection
+        ).read("missing");
+        OperatorLatencyStatus degraded = new JdbcOperatorLatencyReader(
             new RecordingJdbc(List.of(row(
-                "cursor_commit_seq", 13L,
-                "canonical_max_commit_seq", 13L,
-                "latest_market_state_commit_seq", 13L,
-                "latest_state_age_ms", 15L,
-                "recent_canonical_events", 1L,
-                "recent_feature_outputs", 1L,
-                "recent_latest_market_states", 1L
+                "event_id", "evt-2",
+                "market_ticker", "MKT",
+                "canonical_commit_seq", 43L,
+                "latest_market_state_commit_seq", -1L,
+                "canonical_to_feature_ms", 4L,
+                "feature_to_latest_state_ms", -1L,
+                "canonical_to_latest_state_ms", -1L
             )))::openConnection
-        );
-        JdbcOperatorPipelineStatusReader staleReader = new JdbcOperatorPipelineStatusReader(
-            new RecordingJdbc(List.of(row(
-                "cursor_commit_seq", 0L,
-                "canonical_max_commit_seq", 0L,
-                "latest_market_state_commit_seq", null,
-                "latest_state_age_ms", null,
-                "recent_canonical_events", 0L,
-                "recent_feature_outputs", 0L,
-                "recent_latest_market_states", 0L
-            )))::openConnection
-        );
+        ).read("evt-2");
 
-        assertEquals("ok", okReader.read("cursor").status());
-        assertEquals("stale", staleReader.read("cursor").status());
+        assertEquals("missing", missing.status());
+        assertEquals("missing_canonical_event", missing.reason());
+        assertEquals("degraded", degraded.status());
+        assertEquals("missing_latest_market_state", degraded.reason());
+        assertEquals(4L, degraded.canonicalToFeatureMs());
+        assertNull(degraded.latestMarketStateCommitSeq());
+        assertNull(degraded.canonicalToLatestStateMs());
     }
 
     @Test
-    void validatesCursorNameAndWrapsSqlFailure() {
+    void validatesSourceEventAndWrapsSqlFailure() {
         assertThrows(
             IllegalArgumentException.class,
-            () -> new JdbcOperatorPipelineStatusReader(new RecordingJdbc(List.of())::openConnection).read(" ")
+            () -> new JdbcOperatorLatencyReader(new RecordingJdbc(List.of())::openConnection).read(" ")
         );
 
         RecordingJdbc jdbc = new RecordingJdbc(List.of());
         jdbc.failExecuteQuery = true;
         IllegalStateException thrown = assertThrows(
             IllegalStateException.class,
-            () -> new JdbcOperatorPipelineStatusReader(jdbc::openConnection).read("featureplant-prod")
+            () -> new JdbcOperatorLatencyReader(jdbc::openConnection).read("evt")
         );
 
-        assertTrue(thrown.getMessage().contains("operator pipeline status"));
+        assertTrue(thrown.getMessage().contains("operator latency"));
         assertInstanceOf(SQLException.class, thrown.getCause());
     }
 
@@ -155,10 +147,6 @@ class JdbcOperatorPipelineStatusReaderTest {
                     parameters.put((Integer) args[0], args[1]);
                     yield null;
                 }
-                case "setLong" -> {
-                    parameters.put((Integer) args[0], args[1]);
-                    yield null;
-                }
                 case "executeQuery" -> {
                     if (failExecuteQuery) {
                         throw new SQLException("query failed");
@@ -185,6 +173,10 @@ class JdbcOperatorPipelineStatusReaderTest {
                     yield rowIndex < rows.size();
                 }
                 case "getObject" -> rows.get(rowIndex).get((String) args[0]);
+                case "getString" -> {
+                    Object value = rows.get(rowIndex).get((String) args[0]);
+                    yield value == null ? null : String.valueOf(value);
+                }
                 case "close" -> null;
                 default -> defaultValue(method.getReturnType());
             };

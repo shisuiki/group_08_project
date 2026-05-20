@@ -9,6 +9,7 @@
     const HEALTH_POLL_MS = 5000;
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
     const MARKET_CATALOG_LIMIT = 200;
+    const OPERATOR_LATENCY_BUDGET_MS = 30000;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
 
     const dom = {
@@ -32,12 +33,24 @@
         marketSeries: document.getElementById('market-series'),
         marketOpen: document.getElementById('market-open'),
         marketClose: document.getElementById('market-close'),
+        traderQuoteMode: document.getElementById('trader-quote-mode'),
+        traderSymbol: document.getElementById('trader-symbol'),
+        traderMarketStatus: document.getElementById('trader-market-status'),
+        traderBid: document.getElementById('trader-bid'),
+        traderAsk: document.getElementById('trader-ask'),
+        traderMidpoint: document.getElementById('trader-midpoint'),
+        traderSseStatus: document.getElementById('trader-sse-status'),
+        traderSourceEvent: document.getElementById('trader-source-event'),
         productReadinessState: document.getElementById('product-readiness-state'),
         productReadinessReasons: document.getElementById('product-readiness-reasons'),
         marketSourceKind: document.getElementById('market-source-kind'),
         marketLiveObserved: document.getElementById('market-live-observed'),
         marketSyntheticState: document.getElementById('market-synthetic-state'),
         researchFeatureSelect: document.getElementById('research-feature-select'),
+        researchFeatureLimit: document.getElementById('research-feature-limit'),
+        researchFeatureWindow: document.getElementById('research-feature-window'),
+        researchExportCsv: document.getElementById('research-export-csv'),
+        researchExportLink: document.getElementById('research-export-link'),
         featureCount: document.getElementById('feature-count'),
         featureList: document.getElementById('feature-list'),
         adapterHealth: document.getElementById('adapter-health'),
@@ -57,6 +70,14 @@
         runtimeCursorLag: document.getElementById('runtime-cursor-lag'),
         runtimeQuoteStreams: document.getElementById('runtime-quote-streams'),
         runtimeQuoteWaits: document.getElementById('runtime-quote-waits'),
+        operatorReleaseProfile: document.getElementById('operator-release-profile'),
+        operatorProductReadiness: document.getElementById('operator-product-readiness'),
+        operatorDataSourceSummary: document.getElementById('operator-data-source-summary'),
+        operatorFeatureSourceSummary: document.getElementById('operator-feature-source-summary'),
+        operatorFreshnessSummary: document.getElementById('operator-freshness-summary'),
+        operatorPipelineCounts: document.getElementById('operator-pipeline-counts'),
+        operatorE2eLatency: document.getElementById('operator-e2e-latency'),
+        operatorLatencyBudget: document.getElementById('operator-latency-budget'),
         freshnessAgeMs: document.getElementById('freshness-age-ms'),
         freshnessEventTsMs: document.getElementById('freshness-event-ts-ms'),
         freshnessSymbol: document.getElementById('freshness-symbol'),
@@ -157,6 +178,9 @@
     let marketEntries = [];
     let marketSearchTimer = null;
     let lastHealthBody = null;
+    let lastOpsPipeline = null;
+    let lastOpsLatency = null;
+    let lastResearchOutputs = [];
 
     function setStatus(message, tone) {
         dom.statusLine.textContent = message;
@@ -406,6 +430,7 @@
         dom.marketSeries.textContent = entry.seriesTicker || '-';
         dom.marketOpen.textContent = formatIso(entry.openTime);
         dom.marketClose.textContent = formatIso(entry.closeTime);
+        dom.traderMarketStatus.textContent = entry.status || '-';
         for (const button of dom.marketList.querySelectorAll('button')) {
             button.classList.toggle('selected', button.dataset.symbol === entry.symbol);
         }
@@ -418,10 +443,20 @@
         }
         const base = adapterBase();
         const feature = dom.researchFeatureSelect?.value || 'feature.bbo';
+        const limit = Math.max(1, Math.min(500, Number(dom.researchFeatureLimit?.value || 8) || 8));
+        const windowSeconds = Number(dom.researchFeatureWindow?.value || 0) || 0;
+        const params = [
+            `symbol=${encodeURIComponent(symbol)}`,
+            `feature=${encodeURIComponent(feature)}`,
+            `limit=${limit}`
+        ];
+        if (windowSeconds > 0) {
+            params.push(`from_ms=${Date.now() - windowSeconds * 1000}`);
+        }
         try {
             const data = await fetchJsonFromBase(
                 base,
-                `/features?symbol=${encodeURIComponent(symbol)}&feature=${encodeURIComponent(feature)}&limit=8`
+                `/features?${params.join('&')}`
             );
             if (symbol !== dom.symbolSelect.value || base !== adapterBase()) {
                 return;
@@ -437,7 +472,9 @@
     }
 
     function renderFeatures(outputs) {
+        lastResearchOutputs = outputs.slice();
         dom.featureCount.textContent = String(outputs.length);
+        dom.researchExportLink.style.display = 'none';
         dom.featureList.innerHTML = '';
         if (outputs.length === 0) {
             dom.featureList.innerHTML = '<div class="empty">no feature outputs</div>';
@@ -454,6 +491,37 @@
                 `<small>${escapeHtml(output.source_event_id || '-')}</small>`;
             dom.featureList.appendChild(row);
         }
+    }
+
+    function exportResearchCsv() {
+        if (lastResearchOutputs.length === 0) {
+            dom.researchExportLink.style.display = 'none';
+            return;
+        }
+        const rows = [['feature_name', 'market_ticker', 'event_ts_ms', 'source_event_id', 'values_json']];
+        for (const output of lastResearchOutputs) {
+            rows.push([
+                output.feature_name || '',
+                output.market_ticker || '',
+                output.event_ts_ms == null ? '' : String(output.event_ts_ms),
+                output.source_event_id || '',
+                JSON.stringify(output.values || {})
+            ]);
+        }
+        const csv = rows.map(row => row.map(escapeCsv).join(',')).join('\n') + '\n';
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        if (dom.researchExportLink.href && dom.researchExportLink.href.startsWith('blob:')) {
+            URL.revokeObjectURL(dom.researchExportLink.href);
+        }
+        dom.researchExportLink.href = URL.createObjectURL(blob);
+        dom.researchExportLink.download =
+            `${dom.symbolSelect.value || 'market'}-${dom.researchFeatureSelect.value || 'feature'}-features.csv`;
+        dom.researchExportLink.style.display = 'inline-block';
+    }
+
+    function escapeCsv(value) {
+        const text = value == null ? '' : String(value);
+        return `"${text.replaceAll('"', '""')}"`;
     }
 
     async function loadHistory() {
@@ -529,6 +597,11 @@
         dom.live.sourceEvent.textContent = '-';
         dom.live.freshness.textContent = 'waiting';
         dom.live.updated.textContent = new Date().toLocaleTimeString();
+        dom.traderSymbol.textContent = symbol || '-';
+        dom.traderBid.textContent = '-';
+        dom.traderAsk.textContent = '-';
+        dom.traderMidpoint.textContent = '-';
+        dom.traderSourceEvent.textContent = '-';
     }
 
     function renderQuote(symbol, quote, serverTsMs) {
@@ -543,6 +616,11 @@
         dom.live.ts.textContent = formatEventTs(quote.event_ts_ms);
         dom.live.sourceEvent.textContent = quote.source_event_id || '-';
         dom.live.updated.textContent = new Date().toLocaleTimeString();
+        dom.traderSymbol.textContent = quote.symbol || symbol || '-';
+        dom.traderBid.textContent = formatMicros(quote.bid_micros);
+        dom.traderAsk.textContent = formatMicros(quote.ask_micros);
+        dom.traderMidpoint.textContent = formatMicros(quote.midpoint_micros);
+        dom.traderSourceEvent.textContent = quote.source_event_id || '-';
         renderFreshness(quote.event_ts_ms, serverTsMs);
     }
 
@@ -623,6 +701,7 @@
             renderProductReadiness(body);
             renderRuntimeOperator(body);
             renderLatencyFreshness(body);
+            renderOpsTelemetry();
         } catch (err) {
             dom.adapterHealth.textContent = 'unavailable';
             dom.adapterHealth.className = 'stale';
@@ -634,6 +713,22 @@
             dom.quoteUpdateHealth.textContent = 'unavailable';
             dom.quoteUpdateHealth.className = 'stale';
         }
+    }
+
+    async function loadOpsTelemetry() {
+        const sourceEventId = lastHealthBody?.data_freshness?.source_event_id || '';
+        try {
+            lastOpsPipeline = await fetchJson('/ops/pipeline');
+        } catch (err) {
+            lastOpsPipeline = { status: 'unavailable', error: err.message, pipeline: { status: 'unavailable' } };
+        }
+        try {
+            const suffix = sourceEventId ? `?source_event_id=${encodeURIComponent(sourceEventId)}` : '';
+            lastOpsLatency = await fetchJson('/ops/latency' + suffix);
+        } catch (err) {
+            lastOpsLatency = { status: 'unavailable', error: err.message };
+        }
+        renderOpsTelemetry();
     }
 
     async function loadOperatorStatus() {
@@ -721,6 +816,14 @@
             `${streams.active_streams || 0}/${streams.max_streams || 0} active, ${streams.events || 0} events`;
         dom.runtimeQuoteWaits.textContent =
             `${updates.active_waits || 0}/${updates.max_waits || 0} active, ${updates.timeouts || 0} timeout`;
+        dom.traderQuoteMode.textContent = streams.active_streams > 0 ? 'SSE' : 'long-poll';
+        dom.traderSseStatus.textContent =
+            `${streams.active_streams || 0}/${streams.max_streams || 0} active, ${streams.events || 0} events`;
+        dom.operatorReleaseProfile.textContent = releaseStatusText(body.release);
+        dom.operatorProductReadiness.textContent = readinessText(body.product_readiness);
+        dom.operatorDataSourceSummary.textContent = dataFreshnessText(body.data_freshness);
+        dom.operatorFeatureSourceSummary.textContent = body.feature_source || '-';
+        dom.operatorFreshnessSummary.textContent = dataFreshnessText(body.data_freshness);
     }
 
     function renderLatencyFreshness(body) {
@@ -748,6 +851,27 @@
         dom.canonicalMaxSeq.textContent = pipeline.canonical_max_commit_seq == null
             ? '-'
             : String(pipeline.canonical_max_commit_seq);
+    }
+
+    function renderOpsTelemetry() {
+        const pipeline = lastOpsPipeline?.pipeline || lastHealthBody?.operator_pipeline || {};
+        const latency = lastOpsLatency || {};
+        const canonical = pipeline.recent_canonical_events ?? 0;
+        const features = pipeline.recent_feature_outputs ?? 0;
+        const latest = pipeline.recent_latest_market_states ?? 0;
+        const windowSeconds = pipeline.recent_window_seconds ?? 0;
+        dom.operatorPipelineCounts.textContent =
+            `canonical ${canonical} / features ${features} / latest ${latest}` +
+            (windowSeconds ? ` / ${Math.round(windowSeconds / 60)}m` : '');
+        const e2e = latency.canonical_to_latest_state_ms;
+        dom.operatorE2eLatency.textContent = e2e == null
+            ? `${latency.status || 'missing'} / ${latency.reason || latency.error || '-'}`
+            : `${e2e} ms / ${latency.status || 'ok'}`;
+        dom.operatorE2eLatency.className = latency.status === 'ok' ? 'fresh' : 'stale';
+        dom.operatorLatencyBudget.textContent = e2e == null
+            ? `${OPERATOR_LATENCY_BUDGET_MS} ms / missing`
+            : `${OPERATOR_LATENCY_BUDGET_MS} ms / ${e2e <= OPERATOR_LATENCY_BUDGET_MS ? 'within' : 'over'}`;
+        dom.operatorLatencyBudget.className = e2e != null && e2e <= OPERATOR_LATENCY_BUDGET_MS ? 'fresh' : 'stale';
     }
 
     function adapterStatusText(body) {
@@ -788,6 +912,17 @@
         const source = freshness.source_event_id || '-';
         const sourceState = state === kind ? state : `${state} ${kind}`;
         return `${sourceState} / ${age} / ${symbol} / ${source}`;
+    }
+
+    function readinessText(readiness) {
+        if (!readiness) {
+            return '-';
+        }
+        const status = readiness.status || 'unknown';
+        const reasons = Array.isArray(readiness.reasons) && readiness.reasons.length
+            ? readiness.reasons.join(', ')
+            : 'ready';
+        return `${status} / ${reasons}`;
     }
 
     function dataFreshnessLiveState(freshness) {
@@ -926,6 +1061,7 @@
     function renderQuoteUpdateState(message, tone) {
         dom.quoteUpdateHealth.textContent = message;
         dom.quoteUpdateHealth.className = tone || '';
+        dom.traderQuoteMode.textContent = message || '-';
     }
 
     function formatMicros(micros) {
@@ -1144,6 +1280,23 @@
         restartQuotesPolling();
         loadHistory();
         loadHealth();
+        loadOpsTelemetry();
+    }
+
+    function setActiveRole(role) {
+        for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
+            const active = button.dataset.role === role;
+            button.setAttribute('aria-selected', active ? 'true' : 'false');
+        }
+        const button = document.querySelector(`#view-tabs [data-role="${role}"]`);
+        const target = button ? document.getElementById(button.dataset.target) : null;
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        chart.applyOptions({
+            width: dom.chartContainer.clientWidth,
+            height: dom.chartContainer.clientHeight
+        });
     }
 
     dom.refreshSymbols.addEventListener('click', () => {
@@ -1156,14 +1309,12 @@
     dom.loadHistory.addEventListener('click', loadHistory);
     dom.symbolSelect.addEventListener('change', onSelectedSymbolChanged);
     dom.researchFeatureSelect.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
+    dom.researchFeatureLimit.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
+    dom.researchFeatureWindow.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
+    dom.researchExportCsv.addEventListener('click', exportResearchCsv);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
-    for (const button of document.querySelectorAll('#view-tabs [data-target]')) {
-        button.addEventListener('click', () => {
-            const target = document.getElementById(button.dataset.target);
-            if (target) {
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        });
+    for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
+        button.addEventListener('click', () => setActiveRole(button.dataset.role));
     }
     dom.adapterUrl.addEventListener('change', () => {
         quotesLoopGeneration += 1;
@@ -1171,15 +1322,18 @@
         loadConfig();
         loadSymbols();
         loadHealth();
+        loadOpsTelemetry();
         loadOperatorStatus();
     });
 
     setInterval(() => {
         loadHealth();
+        loadOpsTelemetry();
         loadOperatorStatus();
     }, HEALTH_POLL_MS);
     loadConfig().then(loadSymbols).then(() => {
         loadHealth();
+        loadOpsTelemetry();
         loadOperatorStatus();
     });
 })();

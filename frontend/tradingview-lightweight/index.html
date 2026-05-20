@@ -39,12 +39,11 @@
             <button id="refresh-symbols" type="button">Reload</button>
             <button id="load-history" type="button">Load Chart</button>
         </div>
-        <nav id="view-tabs" class="view-tabs" aria-label="dashboard sections">
-            <button type="button" data-target="market-panel">Product/Market</button>
-            <button type="button" data-target="research-features-panel">Research Features</button>
-            <button type="button" data-target="runtime-operator-panel">Runtime/Operator</button>
-            <button type="button" data-target="operator-plan-panel">Operator Control</button>
-            <button type="button" data-target="latency-freshness-panel">Latency/Freshness</button>
+        <nav id="view-tabs" class="view-tabs" aria-label="dashboard roles" role="tablist">
+            <button id="viewer-tab" type="button" data-role="viewer" data-target="market-panel" role="tab" aria-selected="true">Viewer</button>
+            <button id="trader-tab" type="button" data-role="trader" data-target="trader-monitor-panel" role="tab" aria-selected="false">Trader</button>
+            <button id="research-tab" type="button" data-role="research" data-target="research-features-panel" role="tab" aria-selected="false">Research</button>
+            <button id="operator-tab" type="button" data-role="operator" data-target="runtime-operator-panel" role="tab" aria-selected="false">Operator</button>
         </nav>
     </header>
 
@@ -104,6 +103,22 @@
                 </dl>
             </section>
 
+            <section id="trader-monitor-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Quote Monitor</h2>
+                    <span id="trader-quote-mode">-</span>
+                </div>
+                <dl>
+                    <dt>Market</dt><dd id="trader-symbol">-</dd>
+                    <dt>Status</dt><dd id="trader-market-status">-</dd>
+                    <dt>Bid</dt><dd id="trader-bid">-</dd>
+                    <dt>Ask</dt><dd id="trader-ask">-</dd>
+                    <dt>Mid</dt><dd id="trader-midpoint">-</dd>
+                    <dt>SSE</dt><dd id="trader-sse-status">-</dd>
+                    <dt>Source event</dt><dd id="trader-source-event">-</dd>
+                </dl>
+            </section>
+
             <section id="product-market-panel" class="panel">
                 <div class="panel-heading">
                     <h2>Product Readiness</h2>
@@ -143,6 +158,24 @@
                         <option value="feature.trade_tape">Trade tape</option>
                     </select>
                 </label>
+                <div class="research-controls">
+                    <label class="compact-field">
+                        Limit
+                        <input id="research-feature-limit" type="number" min="1" max="500" value="8" />
+                    </label>
+                    <label class="compact-field">
+                        Window
+                        <select id="research-feature-window">
+                            <option value="900">15 min</option>
+                            <option value="3600" selected>1 h</option>
+                            <option value="21600">6 h</option>
+                            <option value="86400">24 h</option>
+                            <option value="0">all</option>
+                        </select>
+                    </label>
+                    <button id="research-export-csv" type="button">Export CSV</button>
+                </div>
+                <a id="research-export-link" class="export-link" href="#" download="feature-outputs.csv">CSV ready</a>
                 <div id="feature-list" class="feature-list"></div>
             </section>
 
@@ -176,6 +209,14 @@
                     <dt>Cursor lag</dt><dd id="runtime-cursor-lag">-</dd>
                     <dt>Quote streams</dt><dd id="runtime-quote-streams">-</dd>
                     <dt>Quote waits</dt><dd id="runtime-quote-waits">-</dd>
+                    <dt>Release/profile</dt><dd id="operator-release-profile">-</dd>
+                    <dt>Readiness</dt><dd id="operator-product-readiness">-</dd>
+                    <dt>Data source</dt><dd id="operator-data-source-summary">-</dd>
+                    <dt>Feature source</dt><dd id="operator-feature-source-summary">-</dd>
+                    <dt>Freshness</dt><dd id="operator-freshness-summary">-</dd>
+                    <dt>Pipeline counts</dt><dd id="operator-pipeline-counts">-</dd>
+                    <dt>E2E latency</dt><dd id="operator-e2e-latency">-</dd>
+                    <dt>Latency budget</dt><dd id="operator-latency-budget">-</dd>
                 </dl>
             </section>
 

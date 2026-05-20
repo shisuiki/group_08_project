@@ -89,6 +89,12 @@ header h1 {
     color: #f4f7f9;
 }
 
+.view-tabs button[aria-selected="true"] {
+    border-color: #2fbf71;
+    background: #182420;
+    color: #f4f7f9;
+}
+
 main {
     display: grid;
     grid-template-columns: 230px minmax(360px, 1fr) 320px;
@@ -302,6 +308,7 @@ main {
 }
 
 .compact-field select,
+.compact-field input,
 .operator-grid input,
 .operator-grid select {
     width: 100%;
@@ -311,6 +318,31 @@ main {
     border: 1px solid #3b444b;
     border-radius: 4px;
     padding: 6px 7px;
+    font-size: 12px;
+}
+
+.research-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+    margin-bottom: 8px;
+}
+
+.research-controls button {
+    background: #2b6d5d;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    padding: 7px 8px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.export-link {
+    display: none;
+    margin-bottom: 8px;
+    color: #7cc7ff;
     font-size: 12px;
 }
 
@@ -461,5 +493,9 @@ footer.ok { color: #2fbf71; }
 
     #quote-strip {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .research-controls {
+        grid-template-columns: 1fr;
     }
 }

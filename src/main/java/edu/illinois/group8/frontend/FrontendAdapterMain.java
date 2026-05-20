@@ -20,10 +20,12 @@ import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcLatestMarketStateReader;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcOperatorLatencyReader;
 import edu.illinois.group8.storage.db.JdbcOperatorPipelineStatusReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.MarketMetadataReader;
+import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 
 import java.util.ArrayList;
@@ -33,6 +35,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.concurrent.locks.LockSupport;
 
 public final class FrontendAdapterMain {
@@ -61,6 +64,7 @@ public final class FrontendAdapterMain {
                 () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
                 refreshService::status,
                 buildOperatorPipelineStatusSupplier(config),
+                buildOperatorLatencyStatusFunction(config),
                 FrontendReleaseInfo.fromEnvironment()
             );
             server.start();
@@ -161,6 +165,26 @@ public final class FrontendAdapterMain {
                 return reader.read(config.featurePlantCursorName());
             } catch (RuntimeException e) {
                 return OperatorPipelineStatus.unavailable(config.featurePlantCursorName(), e.getMessage());
+            }
+        };
+    }
+
+    static Function<String, OperatorLatencyStatus> buildOperatorLatencyStatusFunction(FrontendAdapterConfig config) {
+        if (config.dbUrl().isBlank()) {
+            return sourceEventId -> OperatorLatencyStatus.disabled();
+        }
+        JdbcOperatorLatencyReader reader = JdbcOperatorLatencyReader.fromDriverManager(
+            config.dbUrl(),
+            config.dbUser(),
+            config.dbPassword()
+        );
+        return sourceEventId -> {
+            try {
+                return reader.read(sourceEventId);
+            } catch (IllegalArgumentException e) {
+                return OperatorLatencyStatus.missing(sourceEventId, e.getMessage());
+            } catch (RuntimeException e) {
+                return OperatorLatencyStatus.unavailable(sourceEventId, e.getMessage());
             }
         };
     }

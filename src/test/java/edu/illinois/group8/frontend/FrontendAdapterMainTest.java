@@ -359,8 +359,10 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("market-search-apply"));
         assertTrue(app.contains("market-state"));
         assertTrue(app.contains("markets.markets.length > 0"));
-        assertTrue(app.contains("/features?symbol="));
+        assertTrue(app.contains("/features?"));
         assertTrue(app.contains("/health"));
+        assertTrue(app.contains("/ops/pipeline"));
+        assertTrue(app.contains("/ops/latency"));
     }
 
     @Test

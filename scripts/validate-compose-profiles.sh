@@ -333,10 +333,20 @@ assert_frontend_release_health_contract() {
         'id="release-identity"' \
         'id="health-data-age"' \
         'id="quote-update-health"' \
+        'id="trader-monitor-panel"' \
+        'id="trader-bid"' \
+        'id="research-feature-limit"' \
+        'id="research-export-csv"' \
+        'id="runtime-pipeline-status"' \
+        'id="runtime-cursor-lag"' \
+        'id="operator-e2e-latency"' \
+        'id="operator-pipeline-counts"' \
         'body.release' \
         'body.data_freshness' \
         'body.quote_streams' \
         'body.quote_updates' \
+        '/ops/pipeline' \
+        '/ops/latency' \
         '/quotes/stream' \
         'EventSource' \
         'latest_event_ts_ms'; do
