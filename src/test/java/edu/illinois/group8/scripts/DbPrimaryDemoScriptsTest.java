@@ -364,6 +364,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("validate_live_product_local_db_writer()"));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
+        assertTrue(script.contains("REQUIRE_LIVE_PRODUCT_DATA=\"${REQUIRE_LIVE_PRODUCT_DATA:-false}\""));
         assertTrue(script.contains("FRONTEND_NO_PROXY=\"${FRONTEND_NO_PROXY:-127.0.0.1,localhost}\""));
         assertTrue(script.contains("live-product requires DB_WRITER_ENABLED=true."));
         assertTrue(script.contains("live-product requires DB_WRITER_DATABASE_URL, DB_WRITER_DATABASE_USER, and DB_WRITER_DATABASE_PASSWORD."));
@@ -394,6 +395,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("\"expected_feature_source\","));
         assertTrue(script.contains("> \"$smoke_stdout\" 2> \"$smoke_stderr\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true"));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=\"$REQUIRE_LIVE_PRODUCT_DATA\""));
         assertTrue(script.contains("COMPOSE_PROFILE=\"$DEPLOY_PROFILE\""));
         assertTrue(script.contains("sh scripts/live-product-smoke.sh"));
         assertTrue(script.contains("wsclient \"http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health\""));
@@ -810,6 +812,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("deployment required configuration present: %s"));
         assertTrue(workflow.contains("require_present EC2_SSH_PRIVATE_KEY"));
         assertTrue(workflow.contains("Validate manual live-product rehearsal inputs"));
+        assertTrue(workflow.contains("- name: Check out repository\n        uses: actions/checkout@v6"));
         assertTrue(workflow.contains("if [ \"$GITHUB_EVENT_NAME\" != \"workflow_dispatch\" ]; then"));
         assertTrue(workflow.contains("DEPLOY_PROFILE must be cluster-live, live-product, or live-product-local-db"));
         assertTrue(workflow.contains("require_live_product_data=true requires deploy_profile=live-product or live-product-local-db"));
@@ -826,6 +829,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("sh -n scripts/frontend-product-browser-smoke.sh"));
         assertTrue(workflow.contains("if: (env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db') && env.RUN_LIVE_PRODUCT_SMOKE == 'true'"));
         assertTrue(workflow.contains("COMPOSE_PROFILE=\"$KALSHI_DEPLOY_PROFILE\""));
+        assertTrue(workflow.contains("REQUIRE_LIVE_PRODUCT_DATA=$q_require_live_product_data sh scripts/ec2-compose-rollback-gate.sh"));
         assertTrue(workflow.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=$q_live_product_browser_smoke_enabled"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=$q_require_live_product_data"));
         assertTrue(workflow.contains("FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED=true"));
