@@ -3,7 +3,20 @@ set -eu
 
 SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)"
-SEED_SQL="${DEMO_SEED_SQL:-$SCRIPT_DIR/db-primary-demo-seed.sql}"
+PRODUCT_DEMO_SCENARIO="${PRODUCT_DEMO_SCENARIO:-baseline}"
+case "$PRODUCT_DEMO_SCENARIO" in
+    baseline|"")
+        default_seed_sql="$SCRIPT_DIR/db-primary-demo-seed.sql"
+        ;;
+    long-replay)
+        default_seed_sql="$SCRIPT_DIR/db-primary-demo-long-replay-seed.sql"
+        ;;
+    *)
+        printf 'unsupported PRODUCT_DEMO_SCENARIO: %s\n' "$PRODUCT_DEMO_SCENARIO" >&2
+        exit 2
+        ;;
+esac
+SEED_SQL="${DEMO_SEED_SQL:-$default_seed_sql}"
 
 LOCAL_DB_NAME="${LOCAL_DB_NAME:-kalshi_test}"
 LOCAL_DB_USER="${LOCAL_DB_USER:-kalshi}"
@@ -69,8 +82,8 @@ if [ "$latest_state_count" != "0" ]; then
     exit 1
 fi
 
-printf 'PASS demo_seed canonical_events=%s feature_outputs=%s latest_market_state=%s market_metadata=%s symbols=%s\n' \
-    "$canonical_count" "$feature_count" "$latest_state_count" "$market_count" "$symbols"
+printf 'PASS demo_seed scenario=%s canonical_events=%s feature_outputs=%s latest_market_state=%s market_metadata=%s symbols=%s\n' \
+    "$PRODUCT_DEMO_SCENARIO" "$canonical_count" "$feature_count" "$latest_state_count" "$market_count" "$symbols"
 
 cat <<EOF
 

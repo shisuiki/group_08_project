@@ -69,6 +69,11 @@ class DbPrimaryDemoScriptsTest {
         String script = read("scripts/db-primary-product-smoke.sh");
 
         assertTrue(script.contains("FEATUREPLANT_DB_CURSOR_NAME=\"${FEATUREPLANT_DB_CURSOR_NAME:-db-primary-product-smoke}\""));
+        assertTrue(script.contains("PRODUCT_DEMO_SCENARIO=\"${PRODUCT_DEMO_SCENARIO:-baseline}\""));
+        assertTrue(script.contains("long-replay)"));
+        assertTrue(script.contains("db-primary-demo-long-replay-seed.sql"));
+        assertTrue(script.contains("EXPECTED_FEATURE_COUNT_MIN=\"${EXPECTED_FEATURE_COUNT_MIN:-51}\""));
+        assertTrue(script.contains("EXPECTED_HISTORY_BARS_MIN=\"${EXPECTED_HISTORY_BARS_MIN:-51}\""));
         assertTrue(script.contains("FEATUREPLANT_SOURCE=db"));
         assertTrue(script.contains("FEATUREPLANT_OUTPUT=db"));
         assertTrue(script.contains("FEATUREPLANT_RUN_ONCE=false"));
@@ -98,12 +103,16 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("last_commit_seq"));
         assertTrue(script.contains("feature_outputs"));
         assertTrue(script.contains("latest_market_state"));
-        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=\"${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}\""));
+        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE_RAW=\"${FRONTEND_ADAPTER_FEATURE_SOURCE:-}\""));
+        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=\"${FRONTEND_ADAPTER_FEATURE_SOURCE_RAW:-latest_market_state}\""));
+        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs"));
         assertTrue(script.contains("print(body.get(\"feature_source\") or \"\")"));
-        assertTrue(script.contains("PASS db_primary_product_smoke symbol=%s feature_source=%s expected_feature_source=%s"));
+        assertTrue(script.contains("PASS db_primary_product_smoke scenario=%s symbol=%s feature_source=%s expected_feature_source=%s"));
         assertTrue(script.contains("source_event_id like 'demo-db-primary-canonical-%'"));
         assertTrue(script.contains("EXPECTED_FRONTEND_STARTED_AT"));
-        assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN=1"));
+        assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN=\"$EXPECTED_REFRESH_TOTAL_LOADED_MIN\""));
+        assertTrue(script.contains("EXPECTED_FEATURE_COUNT_MIN=\"$EXPECTED_FEATURE_COUNT_MIN\""));
+        assertTrue(script.contains("EXPECTED_HISTORY_BARS_MIN=\"$EXPECTED_HISTORY_BARS_MIN\""));
         assertFalse(script.contains("db-primary-demo-run-featureplant.sh"));
         assertFalse(script.contains("docker compose --profile featureplant run"));
     }
@@ -121,9 +130,14 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(up.contains("FEATUREPLANT_METRICS_HOST_PORT=\"$featureplant_port\""));
         assertTrue(up.contains("COMPOSE_HOST_BIND_IP=127.0.0.1"));
         assertTrue(up.contains("FEATUREPLANT_DB_CURSOR_NAME=\"$featureplant_cursor\""));
+        assertTrue(up.contains("product_demo_scenario=\"${PRODUCT_DEMO_SCENARIO:-baseline}\""));
+        assertTrue(up.contains("PRODUCT_DEMO_SCENARIO=\"$product_demo_scenario\""));
+        assertTrue(up.contains("FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN=\"$browser_expected_history_bars_min\""));
         assertTrue(up.contains("choose_cluster_subnet()"));
+        assertTrue(up.contains("derive_cluster_ip_range()"));
         assertTrue(up.contains("docker\", \"network\", \"inspect\""));
         assertTrue(up.contains("CLUSTER_SUBNET=\"$cluster_subnet\""));
+        assertTrue(up.contains("CLUSTER_DYNAMIC_IP_RANGE=\"$cluster_ip_range\""));
         assertTrue(up.contains("scripts/db-primary-product-smoke.sh"));
         assertTrue(up.contains("scripts/frontend-product-browser-smoke.sh"));
         assertTrue(up.contains("browser_artifact_dir=\"${PRODUCT_DEMO_BROWSER_ARTIFACT_DIR:-${evidence_dir}/browser-${project}}\""));
@@ -134,10 +148,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(up.contains("SKIP browser_smoke reason=missing_browser"));
         assertTrue(up.contains("\"evidence_type\": \"product_demo\""));
         assertTrue(up.contains("\"compose_profile\": \"db-primary-product\""));
+        assertTrue(up.contains("\"product_demo_scenario\": product_demo_scenario"));
         assertTrue(up.contains("\"compose_project_name\": project"));
         assertTrue(up.contains("\"featureplant_cursor_name\": featureplant_cursor"));
         assertTrue(up.contains("\"dashboard_url\": dashboard_url"));
         assertTrue(up.contains("\"featureplant_metrics_url\": featureplant_metrics_url"));
+        assertTrue(up.contains("\"cluster_ip_range\": cluster_ip_range"));
         assertTrue(up.contains("\"smoke_pass_labels\": labels"));
         assertTrue(up.contains("\"smoke_stdout_sha256\": smoke_sha256"));
         assertTrue(up.contains("\"browser_smoke\": browser_smoke"));
@@ -267,6 +283,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("live data requirement failed: no feature-eligible non-smoke canonical_events after baseline_commit_seq"));
         assertTrue(script.contains("PASS live_product_smoke"));
         assertTrue(browserSmoke.contains("frontend-browser-cdp-smoke.py"));
+        assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN"));
+        assertTrue(browserSmoke.contains("history_bars"));
         assertTrue(cdpSmoke.contains("--headless=new"));
         assertTrue(cdpSmoke.contains("--disable-background-networking"));
         assertTrue(cdpSmoke.contains("--disable-component-update"));
@@ -274,6 +292,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(cdpSmoke.contains("document.documentElement.outerHTML"));
         assertTrue(cdpSmoke.contains("Page.captureScreenshot"));
         assertTrue(cdpSmoke.contains("selectedRowsAfter"));
+        assertTrue(cdpSmoke.contains("historyBars"));
+        assertTrue(cdpSmoke.contains("wait_for_history_bars"));
         assertFalse(cdpSmoke.contains("market row click did not leave a selected row"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_PREFER"));
@@ -294,6 +314,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(browserSmoke.contains("id=\"market-state\""));
         assertTrue(browserSmoke.contains("<canvas"));
         assertTrue(browserSmoke.contains("id=\"quote-update-health\""));
+        assertTrue(browserSmoke.contains("id=\"product-market-panel\""));
+        assertTrue(browserSmoke.contains("id=\"operator-plan-panel\""));
         assertTrue(browserSmoke.contains("quote feed status did not show active SSE/fallback traffic"));
         assertTrue(browserSmoke.contains("release identity did not render"));
         assertTrue(browserSmoke.contains("data freshness did not render"));
@@ -628,6 +650,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("last_success.image"));
         assertTrue(script.contains("last_success.image_tar"));
         assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: \\${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_BASIC_AUTH_USER"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD"));
         assertTrue(script.contains("'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE'"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
@@ -876,6 +900,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("release-identity"));
         assertTrue(script.contains("health-data-age"));
         assertTrue(script.contains("quote-update-health"));
+        assertTrue(script.contains("product-market-panel"));
+        assertTrue(script.contains("runtime-operator-panel"));
+        assertTrue(script.contains("latency-freshness-panel"));
+        assertTrue(script.contains("operator-plan-panel"));
         assertTrue(script.contains("/quotes/stream"));
         assertTrue(script.contains("curl -fsS -N --max-time 3"));
         assertTrue(script.contains("/quotes/stream?symbols=${encoded"));

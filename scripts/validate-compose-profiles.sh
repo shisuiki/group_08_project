@@ -96,6 +96,8 @@ assert_frontend_adapter_metadata_env_present() {
         FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_MAX_ROWS \
         FRONTEND_ADAPTER_METADATA_SOURCE \
         FRONTEND_ADAPTER_METADATA_MAX_ROWS \
+        FRONTEND_ADAPTER_BASIC_AUTH_USER \
+        FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD \
         FRONTEND_ADAPTER_STATIC_ROOT; do
         if ! printf '%s\n' "$rendered" | grep -q "^      ${env_name}:"; then
             printf 'profile %s frontend-adapter is missing environment %s\n' "$label" "$env_name" >&2
@@ -170,7 +172,9 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_STATIC_ROOT: /app/frontend/tradingview-lightweight" \
         "FRONTEND_ADAPTER_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
         "FRONTEND_ADAPTER_DB_USER: kalshi" \
-        "FRONTEND_ADAPTER_DB_PASSWORD: kalshi"; do
+        "FRONTEND_ADAPTER_DB_PASSWORD: kalshi" \
+        "FRONTEND_ADAPTER_BASIC_AUTH_USER: \"\"" \
+        "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD: \"\""; do
         if ! printf '%s\n' "$frontend_rendered" | grep -q "^      ${expected}$"; then
             printf 'db-primary-product frontend-adapter-db-primary missing default %s\n' "$expected" >&2
             exit 1
@@ -198,6 +202,8 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_DB_USER: \${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}" \
         "FRONTEND_ADAPTER_DB_PASSWORD: \${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}" \
         "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}" \
+        "FRONTEND_ADAPTER_BASIC_AUTH_USER: \${{ vars.FRONTEND_ADAPTER_BASIC_AUTH_USER }}" \
+        "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD: \${{ secrets.FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD }}" \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT' \
         'LOCAL_DB_NAME=$LOCAL_DB_NAME' \
         'LOCAL_DB_USER=$LOCAL_DB_USER' \
@@ -206,6 +212,8 @@ assert_db_primary_product_defaults_aligned() {
         'FRONTEND_ADAPTER_DB_USER=$EFFECTIVE_FRONTEND_ADAPTER_DB_USER' \
         'FRONTEND_ADAPTER_DB_PASSWORD=$EFFECTIVE_FRONTEND_ADAPTER_DB_PASSWORD' \
         'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE' \
+        'FRONTEND_ADAPTER_BASIC_AUTH_USER=$FRONTEND_ADAPTER_BASIC_AUTH_USER' \
+        'FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD=$FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD' \
         'EFFECTIVE_BACKEND_PROFILE=production' \
         'EFFECTIVE_BACKEND_PROFILE=recording-capture' \
         'BACKEND_PROFILE=$EFFECTIVE_BACKEND_PROFILE' \
@@ -1117,9 +1125,13 @@ assert_live_product_manual_smoke_contract() {
         'docker_cmd_with_timeout run --rm' \
         'sudo docker "$@"' \
         'frontend-browser-cdp-smoke.py' \
+        'FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN' \
         'id="chart-container"' \
         '<canvas' \
         'id="quote-update-health"' \
+        'id="product-market-panel"' \
+        'id="operator-plan-panel"' \
+        'history_bars' \
         'quote feed status did not show active SSE/fallback traffic' \
         '(SSE|long-poll) error' \
         'No markets indexed yet' \
@@ -1140,6 +1152,8 @@ assert_live_product_manual_smoke_contract() {
         'Page.captureScreenshot' \
         'document.documentElement.outerHTML' \
         'INTERACTION_EXPR' \
+        'wait_for_history_bars' \
+        'historyBars' \
         'market-search' \
         'market-status-filter' \
         'quoteFeedVisible'; do
@@ -1172,8 +1186,13 @@ assert_live_product_manual_smoke_contract() {
 
 assert_latest_market_state_smoke_contract() {
     for script in scripts/db-primary-product-smoke.sh scripts/db-primary-demo-pipeline.sh; do
+        if [ "$script" = "scripts/db-primary-product-smoke.sh" ]; then
+            frontend_source_expected='FRONTEND_ADAPTER_FEATURE_SOURCE="${FRONTEND_ADAPTER_FEATURE_SOURCE_RAW:-latest_market_state}"'
+        else
+            frontend_source_expected='FRONTEND_ADAPTER_FEATURE_SOURCE="${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}"'
+        fi
         for expected in \
-            'FRONTEND_ADAPTER_FEATURE_SOURCE="${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}"' \
+            "$frontend_source_expected" \
             'FRONTEND_ADAPTER_FEATURE_SOURCE="$FRONTEND_ADAPTER_FEATURE_SOURCE"' \
             'EXPECTED_FEATURE_SOURCE="$FRONTEND_ADAPTER_FEATURE_SOURCE"' \
             'expected_feature_source = sys.argv[2].strip().replace("-", "_")'; do

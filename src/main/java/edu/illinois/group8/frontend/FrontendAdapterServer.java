@@ -17,7 +17,9 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -194,12 +196,48 @@ public class FrontendAdapterServer {
                 exchange.close();
                 return;
             }
+            if (!isAuthorized(exchange)) {
+                exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"kalshi-product\"");
+                writeError(exchange, 401, "unauthorized");
+                return;
+            }
             delegate.handle(exchange);
         } catch (RuntimeException e) {
             writeError(exchange, 500, e.getMessage());
         } finally {
             sum.addAndGet(System.nanoTime() - startNs);
         }
+    }
+
+    private boolean isAuthorized(HttpExchange exchange) {
+        if (!config.basicAuthEnabled()) {
+            return true;
+        }
+        String header = exchange.getRequestHeaders().getFirst("Authorization");
+        if (header == null || !header.regionMatches(true, 0, "Basic ", 0, 6)) {
+            return false;
+        }
+        String decoded;
+        try {
+            decoded = new String(Base64.getDecoder().decode(header.substring(6).trim()), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        int separator = decoded.indexOf(':');
+        if (separator < 0) {
+            return false;
+        }
+        String user = decoded.substring(0, separator);
+        String password = decoded.substring(separator + 1);
+        return constantTimeEquals(user, config.basicAuthUser())
+            && constantTimeEquals(password, config.basicAuthPassword());
+    }
+
+    private static boolean constantTimeEquals(String actual, String expected) {
+        return MessageDigest.isEqual(
+            actual.getBytes(StandardCharsets.UTF_8),
+            expected.getBytes(StandardCharsets.UTF_8)
+        );
     }
 
     private void handleDatafeedConfig(HttpExchange exchange) throws IOException {

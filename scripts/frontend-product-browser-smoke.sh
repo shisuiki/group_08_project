@@ -12,6 +12,7 @@ FRONTEND_BROWSER_SMOKE_DOCKER_NETWORK="${FRONTEND_BROWSER_SMOKE_DOCKER_NETWORK:-
 FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS="${FRONTEND_BROWSER_SMOKE_TIMEOUT_SECONDS:-60}"
 FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE="${FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE:-}"
 FRONTEND_BROWSER_SMOKE_OUTPUT_DIR="${FRONTEND_BROWSER_SMOKE_OUTPUT_DIR:-}"
+FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN="${FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN:-0}"
 BROWSER_BIN="${BROWSER_BIN:-}"
 SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
 CDP_SMOKE_SCRIPT="$SCRIPT_DIR/frontend-browser-cdp-smoke.py"
@@ -223,6 +224,7 @@ run_docker_browser() {
         -e NO_PROXY="$FRONTEND_NO_PROXY" \
         -e no_proxy="$FRONTEND_NO_PROXY" \
         -e FRONTEND_BROWSER_SMOKE_VIRTUAL_TIME_MS="$FRONTEND_BROWSER_SMOKE_VIRTUAL_TIME_MS" \
+        -e FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN="$FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN" \
         -v "$CDP_SMOKE_SCRIPT:$CDP_SMOKE_SCRIPT:ro" \
         -v "$artifact_dir:$artifact_dir" \
         --entrypoint /bin/sh \
@@ -313,16 +315,32 @@ if [ "$run_browser_result" -ne 0 ]; then
 fi
 
 if ! python3 - "$dom_file" "$screenshot_file" "$FRONTEND_BASE_URL" "$browser" "$browser_mode" \
-    "$FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE" "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE" <<'PY'
+    "$FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE" "$FRONTEND_BROWSER_SMOKE_DOCKER_IMAGE" \
+    "$tmpdir/cdp-result.json" "$FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN" <<'PY'
 import hashlib
 import json
 import re
 import sys
 from pathlib import Path
 
-dom_path, screenshot_path, base_url, browser, browser_mode, evidence_path, docker_image = sys.argv[1:8]
+(
+    dom_path,
+    screenshot_path,
+    base_url,
+    browser,
+    browser_mode,
+    evidence_path,
+    docker_image,
+    cdp_result_path,
+    expected_history_bars_raw,
+) = sys.argv[1:10]
 with open(dom_path, "r", encoding="utf-8") as handle:
     html = handle.read()
+with open(cdp_result_path, "r", encoding="utf-8") as handle:
+    cdp_result = json.load(handle)
+cdp_state = cdp_result.get("state") or {}
+expected_history_bars = int(expected_history_bars_raw or "0")
+history_bars = int(cdp_state.get("historyBars") or 0)
 
 def require(fragment, label):
     if fragment not in html:
@@ -344,6 +362,17 @@ for fragment, label in (
     ('id="quote-update-health"', "quote update status"),
     ('id="refresh-health"', "refresh health"),
     ('id="featureplant-health"', "featureplant health"),
+    ('id="product-market-panel"', "product readiness panel"),
+    ('id="product-readiness-state"', "product readiness state"),
+    ('id="research-features-panel"', "research features panel"),
+    ('id="research-feature-select"', "research feature selector"),
+    ('id="runtime-operator-panel"', "runtime operator panel"),
+    ('id="runtime-feature-source"', "runtime feature source"),
+    ('id="latency-freshness-panel"', "latency freshness panel"),
+    ('id="freshness-age-ms"', "freshness age"),
+    ('id="operator-plan-panel"', "operator plan panel"),
+    ('id="operator-generate-plan"', "operator plan generator"),
+    ('id="operator-env-plan"', "operator plan output"),
 ):
     require(fragment, label)
 
@@ -386,6 +415,12 @@ if re.search(r'id="quote-update-health"[^>]*>\s*(SSE|long-poll) error', html):
     raise SystemExit("quote update status entered an error state")
 if "LightweightCharts is not defined" in html:
     raise SystemExit("vendored LightweightCharts asset did not load")
+if expected_history_bars > 0 and history_bars < expected_history_bars:
+    raise SystemExit(
+        f"browser dashboard rendered {history_bars} history bars, expected at least {expected_history_bars}"
+    )
+if cdp_state.get("noHorizontalOverflow") is not True:
+    raise SystemExit("browser dashboard has horizontal overflow")
 
 def sha256(path):
     digest = hashlib.sha256()
@@ -410,6 +445,16 @@ checks = {
     "release_rendered": not re.search(r'id="release-identity"[^>]*>\s*-\s*<', html),
     "freshness_rendered": not re.search(r'id="health-data-age"[^>]*>\s*-\s*<', html),
     "quote_feed_visible": bool(active_message or stream_events > 0 or poll_activity > 0),
+    "product_panels_rendered": all(fragment in html for fragment in (
+        'id="product-market-panel"',
+        'id="research-features-panel"',
+        'id="runtime-operator-panel"',
+        'id="latency-freshness-panel"',
+        'id="operator-plan-panel"',
+    )),
+    "history_bars": history_bars,
+    "expected_history_bars_min": expected_history_bars,
+    "no_horizontal_overflow": cdp_state.get("noHorizontalOverflow") is True,
 }
 if evidence_path:
     body = {

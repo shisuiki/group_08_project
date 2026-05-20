@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -287,6 +288,11 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"market-status-filter\""));
         assertTrue(root.body().contains("id=\"market-search-apply\""));
         assertTrue(root.body().contains("id=\"market-state\""));
+        assertTrue(root.body().contains("id=\"product-market-panel\""));
+        assertTrue(root.body().contains("id=\"research-features-panel\""));
+        assertTrue(root.body().contains("id=\"runtime-operator-panel\""));
+        assertTrue(root.body().contains("id=\"latency-freshness-panel\""));
+        assertTrue(root.body().contains("id=\"operator-plan-panel\""));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("<dt>Quote feed</dt>"));
@@ -325,9 +331,15 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('release-identity')"));
         assertTrue(js.body().contains("document.getElementById('health-data-age')"));
         assertTrue(js.body().contains("document.getElementById('quote-update-health')"));
+        assertTrue(js.body().contains("document.getElementById('product-readiness-state')"));
+        assertTrue(js.body().contains("document.getElementById('runtime-feature-source')"));
+        assertTrue(js.body().contains("document.getElementById('freshness-age-ms')"));
+        assertTrue(js.body().contains("document.getElementById('operator-env-plan')"));
         assertTrue(js.body().contains("body.release"));
         assertTrue(js.body().contains("body.data_freshness"));
         assertTrue(js.body().contains("body.quote_streams"));
+        assertTrue(js.body().contains("body.product_readiness"));
+        assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("quote_updates"));
         assertTrue(js.body().contains("EventSource"));
         assertTrue(js.body().contains("/quotes/stream?symbols="));
@@ -376,6 +388,39 @@ class UdfEndpointsTest {
 
         assertEquals(404, get("/").statusCode());
         assertEquals("ok", getJson("/health").path("status").asText());
+    }
+
+    @Test
+    void basicAuthDisabledByDefaultAllowsStaticAndApi() throws Exception {
+        assertEquals(200, get("/").statusCode());
+        assertEquals(200, get("/health").statusCode());
+        assertEquals(200, get("/markets?limit=10").statusCode());
+    }
+
+    @Test
+    void basicAuthProtectsStaticAndApi() throws Exception {
+        restartWithBasicAuth();
+
+        HttpResponse<String> root = get("/");
+        HttpResponse<String> health = get("/health");
+        HttpResponse<String> markets = get("/markets?limit=10");
+
+        assertEquals(401, root.statusCode());
+        assertEquals(401, health.statusCode());
+        assertEquals(401, markets.statusCode());
+        assertTrue(root.headers().firstValue("WWW-Authenticate").orElse("").contains("Basic"));
+        assertTrue(health.headers().firstValue("WWW-Authenticate").orElse("").contains("Basic"));
+    }
+
+    @Test
+    void basicAuthAcceptsValidCredentialsAndRejectsBadCredentials() throws Exception {
+        restartWithBasicAuth();
+
+        assertEquals(401, getWithBasicAuth("/health", "operator", "wrong").statusCode());
+        assertEquals(200, getWithBasicAuth("/", "operator", "secret").statusCode());
+        assertEquals(200, getWithBasicAuth("/health", "operator", "secret").statusCode());
+        assertEquals(200, getWithBasicAuth("/features?symbol=MKT-1&feature=feature.bbo&limit=1",
+            "operator", "secret").statusCode());
     }
 
     @Test
@@ -947,6 +992,22 @@ class UdfEndpointsTest {
             HttpResponse.BodyHandlers.ofString()
         );
         assertEquals(204, preflight.statusCode());
+        assertFalse(preflight.headers().firstValue("WWW-Authenticate").isPresent());
+    }
+
+    @Test
+    void basicAuthDoesNotChallengeCorsPreflight() throws Exception {
+        restartWithBasicAuth();
+
+        HttpResponse<String> preflight = client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + "/datafeed/config"))
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+
+        assertEquals(204, preflight.statusCode());
+        assertEquals("*", preflight.headers().firstValue("Access-Control-Allow-Origin").orElse(""));
+        assertFalse(preflight.headers().firstValue("WWW-Authenticate").isPresent());
     }
 
     private JsonNode getJson(String path) throws Exception {
@@ -958,6 +1019,18 @@ class UdfEndpointsTest {
     private HttpResponse<String> get(String path) throws Exception {
         return client.send(
             HttpRequest.newBuilder(URI.create(baseUrl + path)).GET().build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
+    private HttpResponse<String> getWithBasicAuth(String path, String user, String password) throws Exception {
+        String token = Base64.getEncoder()
+            .encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
+        return client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .header("Authorization", "Basic " + token)
+                .GET()
+                .build(),
             HttpResponse.BodyHandlers.ofString()
         );
     }
@@ -996,6 +1069,27 @@ class UdfEndpointsTest {
         assertEquals(200, response.statusCode(), "for " + path);
         assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/event-stream"));
         return new SseStream(response.body());
+    }
+
+    private void restartWithBasicAuth() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        seed(store);
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of(
+                "FRONTEND_ADAPTER_PORT", "0",
+                "FRONTEND_ADAPTER_BASIC_AUTH_USER", "operator",
+                "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret"
+            )),
+            store,
+            FrontendMarketMetadataCatalog.loaded("test", List.of(
+                metadata("MKT-1", "EVENT-1", "SERIES-1", "open"),
+                metadata("MKT-META", "EVENT-META", "SERIES-META", "closed")
+            )),
+            () -> new FrontendAdapterServer.FeaturePlantStats(42L, 17L, 0L)
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
     }
 
     private static boolean containsMarket(JsonNode markets, String marketTicker) {

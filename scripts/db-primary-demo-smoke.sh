@@ -17,7 +17,9 @@ EXPECTED_KALSHI_GITHUB_RUN_ID="${EXPECTED_KALSHI_GITHUB_RUN_ID:-}"
 EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT="${EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT:-}"
 DEMO_FEATURE="${DEMO_FEATURE:-feature.bbo}"
 DEMO_LIMIT="${DEMO_LIMIT:-5}"
+EXPECTED_FEATURE_COUNT_MIN="${EXPECTED_FEATURE_COUNT_MIN:-1}"
 DEMO_HISTORY_RESOLUTION="${DEMO_HISTORY_RESOLUTION:-1}"
+EXPECTED_HISTORY_BARS_MIN="${EXPECTED_HISTORY_BARS_MIN:-1}"
 DEMO_METADATA_QUERY="${DEMO_METADATA_QUERY:-DEMO-DBPRIMARY}"
 DEMO_METADATA_SEARCH_QUERY="${DEMO_METADATA_SEARCH_QUERY:-$DEMO_METADATA_QUERY}"
 DEMO_MARKET_EVENT_TICKER="${DEMO_MARKET_EVENT_TICKER:-DEMO-DBPRIMARY-26MAY19}"
@@ -104,6 +106,10 @@ check_product_static_ui() {
     grep -q 'release-identity' "$index_file"
     grep -q 'health-data-age' "$index_file"
     grep -q 'quote-update-health' "$index_file"
+    grep -q 'product-market-panel' "$index_file"
+    grep -q 'runtime-operator-panel' "$index_file"
+    grep -q 'latency-freshness-panel' "$index_file"
+    grep -q 'operator-plan-panel' "$index_file"
     grep -q 'same origin' "$index_file"
     grep -q '/quotes/stream' "$app_file"
     grep -q '/quotes/updates' "$app_file"
@@ -456,13 +462,14 @@ fi
 features_json="$tmpdir/features.json"
 fetch_json "/features?symbol=${encoded_symbol}&feature=${encoded_feature}&limit=${encoded_limit}" "$features_json"
 feature_selection="$tmpdir/feature-selection.txt"
-python3 - "$features_json" "$selected_symbol" "$DEMO_FEATURE" > "$feature_selection" <<'PY'
+python3 - "$features_json" "$selected_symbol" "$DEMO_FEATURE" "$EXPECTED_FEATURE_COUNT_MIN" > "$feature_selection" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     body = json.load(handle)
 expected_symbol = sys.argv[2]
 expected_feature = sys.argv[3]
+expected_min = int(sys.argv[4])
 if body.get("symbol") != expected_symbol:
     raise SystemExit("features check failed: symbol mismatch")
 if body.get("feature") != expected_feature:
@@ -471,6 +478,8 @@ count = body.get("count")
 outputs = body.get("outputs")
 if not isinstance(count, int) or count <= 0:
     raise SystemExit("features check failed: count is not positive")
+if count < expected_min:
+    raise SystemExit(f"features check failed: count is {count}, expected at least {expected_min}")
 if not isinstance(outputs, list) or not outputs:
     raise SystemExit("features check failed: outputs are empty")
 for index, output in enumerate(outputs):
@@ -506,8 +515,8 @@ feature_event_ts_ms="$(sed -n '3p' "$feature_selection")"
 feature_midpoint_micros="$(sed -n '4p' "$feature_selection")"
 feature_bid_micros="$(sed -n '5p' "$feature_selection")"
 feature_ask_micros="$(sed -n '6p' "$feature_selection")"
-printf 'PASS features symbol=%s feature=%s count=%s latest_source_event_id=%s event_ts_ms=%s midpoint_micros=%s\n' \
-    "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$feature_source_event_id" "$feature_event_ts_ms" "$feature_midpoint_micros"
+printf 'PASS features symbol=%s feature=%s count=%s expected_count_at_least=%s latest_source_event_id=%s event_ts_ms=%s midpoint_micros=%s\n' \
+    "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$EXPECTED_FEATURE_COUNT_MIN" "$feature_source_event_id" "$feature_event_ts_ms" "$feature_midpoint_micros"
 
 quotes_json="$tmpdir/quotes.json"
 fetch_json "/quotes?symbols=${encoded_symbol}" "$quotes_json"
@@ -622,21 +631,24 @@ encoded_history_resolution="$(urlencode "$DEMO_HISTORY_RESOLUTION")"
 
 history_json="$tmpdir/history.json"
 fetch_json "/datafeed/history?symbol=${encoded_symbol}&resolution=${encoded_history_resolution}&from=${history_from}&to=${history_to}" "$history_json"
-history_bars="$(python3 - "$history_json" <<'PY'
+history_bars="$(python3 - "$history_json" "$EXPECTED_HISTORY_BARS_MIN" <<'PY'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     body = json.load(handle)
+expected_min = int(sys.argv[2])
 if body.get("s") != "ok":
     raise SystemExit("datafeed history check failed: status is not ok")
 times = body.get("t")
 if not isinstance(times, list) or not times:
     raise SystemExit("datafeed history check failed: no bars returned")
+if len(times) < expected_min:
+    raise SystemExit(f"datafeed history check failed: bars={len(times)}, expected at least {expected_min}")
 print(len(times))
 PY
 )"
-printf 'PASS datafeed_history symbol=%s resolution=%s bars=%s\n' \
-    "$selected_symbol" "$DEMO_HISTORY_RESOLUTION" "$history_bars"
+printf 'PASS datafeed_history symbol=%s resolution=%s bars=%s expected_bars_at_least=%s\n' \
+    "$selected_symbol" "$DEMO_HISTORY_RESOLUTION" "$history_bars" "$EXPECTED_HISTORY_BARS_MIN"
 
 config_json="$tmpdir/datafeed-config.json"
 fetch_json "/datafeed/config" "$config_json"
@@ -653,5 +665,5 @@ if not isinstance(resolutions, list) or not resolutions:
 PY
 printf 'PASS datafeed_config\n'
 
-printf 'PASS db_primary_demo_smoke base_url=%s symbol=%s feature=%s count=%s history_bars=%s market_metadata_rows=%s\n' \
-    "$FRONTEND_BASE_URL" "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$history_bars" "$market_metadata_rows"
+printf 'PASS db_primary_demo_smoke base_url=%s symbol=%s feature=%s count=%s expected_count_at_least=%s history_bars=%s expected_bars_at_least=%s market_metadata_rows=%s\n' \
+    "$FRONTEND_BASE_URL" "$selected_symbol" "$DEMO_FEATURE" "$feature_count" "$EXPECTED_FEATURE_COUNT_MIN" "$history_bars" "$EXPECTED_HISTORY_BARS_MIN" "$market_metadata_rows"

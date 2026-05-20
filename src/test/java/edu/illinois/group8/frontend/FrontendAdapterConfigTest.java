@@ -25,6 +25,9 @@ class FrontendAdapterConfigTest {
         assertEquals(1_000, config.metadataMaxRows());
         assertFalse(config.includeSmokeMarkets());
         assertEquals(Path.of("frontend/tradingview-lightweight"), config.staticRoot());
+        assertFalse(config.basicAuthEnabled());
+        assertEquals("", config.basicAuthUser());
+        assertEquals("", config.basicAuthPassword());
     }
 
     @Test
@@ -235,5 +238,27 @@ class FrontendAdapterConfigTest {
         ));
 
         assertEquals(Path.of("/app/frontend/tradingview-lightweight"), config.staticRoot());
+    }
+
+    @Test
+    void basicAuthConfigParsesEnvironment() {
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_BASIC_AUTH_USER", " operator ",
+            "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret"
+        ));
+
+        assertTrue(config.basicAuthEnabled());
+        assertEquals("operator", config.basicAuthUser());
+        assertEquals("secret", config.basicAuthPassword());
+    }
+
+    @Test
+    void basicAuthRequiresBothFields() {
+        assertFalse(FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_BASIC_AUTH_USER", "operator"
+        )).basicAuthEnabled());
+        assertFalse(FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret"
+        )).basicAuthEnabled());
     }
 }

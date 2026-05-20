@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -135,6 +136,8 @@ STATE_EXPR = r"""
     return { width: canvas.width, height: canvas.height, rectWidth: rect.width, rectHeight: rect.height };
   });
   const quoteStatus = text('quote-update-health');
+  const statusLine = text('status-line');
+  const historyMatch = statusLine.match(/Rendered\s+(\d+)\s+bar\(s\)/);
   return {
     title: document.body?.innerText.includes('Kalshi Product Dashboard') || false,
     marketSearch: !!document.getElementById('market-search'),
@@ -157,6 +160,15 @@ STATE_EXPR = r"""
     featureplantHealth: text('featureplant-health'),
     freshnessState: text('freshness-state'),
     quoteUpdateHealth: quoteStatus,
+    statusLine,
+    historyBars: historyMatch ? Number(historyMatch[1]) : 0,
+    productMarketPanel: !!document.getElementById('product-market-panel'),
+    researchFeaturesPanel: !!document.getElementById('research-features-panel'),
+    runtimeOperatorPanel: !!document.getElementById('runtime-operator-panel'),
+    latencyFreshnessPanel: !!document.getElementById('latency-freshness-panel'),
+    operatorPlanPanel: !!document.getElementById('operator-plan-panel'),
+    operatorPlanOutput: text('operator-env-plan'),
+    noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
     quoteFeedVisible: /(SSE (connected|snapshot|changed)|long-poll (changed|timeout|fallback)|fallback polling)/.test(quoteStatus) ||
       /SSE req\s+\d+\s+\/ events\s+[1-9]\d*/.test(quoteStatus) ||
       /long-poll req\s+[1-9]\d*/.test(quoteStatus),
@@ -224,6 +236,13 @@ def wait_for_state(cdp, timeout_seconds):
             and last.get("releaseIdentity") not in ("", "-")
             and last.get("healthDataAge") not in ("", "-")
             and last.get("quoteUpdateHealth") not in ("", "-")
+            and last.get("productMarketPanel")
+            and last.get("researchFeaturesPanel")
+            and last.get("runtimeOperatorPanel")
+            and last.get("latencyFreshnessPanel")
+            and last.get("operatorPlanPanel")
+            and last.get("operatorPlanOutput") not in ("", "-")
+            and last.get("noHorizontalOverflow")
             and last.get("freshnessState") in ("waiting", "fresh", "stale")
             and last.get("quoteFeedVisible")
             and not last.get("quoteError")
@@ -233,6 +252,23 @@ def wait_for_state(cdp, timeout_seconds):
             return last
         time.sleep(0.25)
     raise TimeoutError(f"dashboard did not reach browser smoke ready state: {json.dumps(last, sort_keys=True)}")
+
+
+def wait_for_history_bars(cdp, timeout_seconds, expected_minimum):
+    if expected_minimum <= 0:
+        return 0
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        last = evaluate(cdp, STATE_EXPR) or {}
+        bars = int(last.get("historyBars") or 0)
+        if bars >= expected_minimum:
+            return bars
+        time.sleep(0.25)
+    raise TimeoutError(
+        f"dashboard rendered {int((last or {}).get('historyBars') or 0)} history bars; "
+        f"expected at least {expected_minimum}: {json.dumps(last, sort_keys=True)}"
+    )
 
 
 def sha256(path):
@@ -297,6 +333,8 @@ def main():
         interaction = evaluate(cdp, INTERACTION_EXPR) or {}
         time.sleep(0.5)
         state = wait_for_state(cdp, args.timeout_seconds)
+        expected_history_bars = int(os.environ.get("FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN") or "0")
+        state["historyBars"] = wait_for_history_bars(cdp, args.timeout_seconds, expected_history_bars)
         interaction["selectedRowsAfter"] = state.get("selectedRows", 0)
         html = evaluate(cdp, "document.documentElement.outerHTML") or ""
         if not html:

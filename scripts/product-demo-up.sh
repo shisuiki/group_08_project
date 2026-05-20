@@ -96,14 +96,37 @@ raise SystemExit(1)
 PY
 }
 
+derive_cluster_ip_range() {
+    python3 - "$1" <<'PY'
+import ipaddress
+import sys
+
+network = ipaddress.ip_network(sys.argv[1], strict=False)
+if network.prefixlen > 17:
+    print(network)
+else:
+    print(list(network.subnets(new_prefix=17))[1])
+PY
+}
+
 postgres_port="${POSTGRES_HOST_PORT:-$(choose_free_port)}"
 frontend_port="${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-$(choose_free_port "$postgres_port")}"
 featureplant_port="${FEATUREPLANT_METRICS_HOST_PORT:-$(choose_free_port "$postgres_port" "$frontend_port")}"
 cluster_subnet="${CLUSTER_SUBNET:-$(choose_cluster_subnet)}"
+cluster_ip_range="${CLUSTER_DYNAMIC_IP_RANGE:-$(derive_cluster_ip_range "$cluster_subnet")}"
 dashboard_url="http://127.0.0.1:${frontend_port}/"
 featureplant_metrics_url="http://127.0.0.1:${featureplant_port}/metrics"
 featureplant_health_url="http://127.0.0.1:${featureplant_port}/health"
 featureplant_cursor="${FEATUREPLANT_DB_CURSOR_NAME:-${project}_featureplant}"
+product_demo_scenario="${PRODUCT_DEMO_SCENARIO:-baseline}"
+browser_expected_history_bars_min="${FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN:-${EXPECTED_HISTORY_BARS_MIN:-}}"
+if [ -z "$browser_expected_history_bars_min" ]; then
+    if [ "$product_demo_scenario" = "long-replay" ]; then
+        browser_expected_history_bars_min=51
+    else
+        browser_expected_history_bars_min=1
+    fi
+fi
 evidence_dir="${PRODUCT_DEMO_EVIDENCE_DIR:-.demo-state}"
 mkdir -p "$evidence_dir"
 evidence_file="${PRODUCT_DEMO_EVIDENCE_FILE:-${evidence_dir}/product-demo-${project}.json}"
@@ -125,10 +148,12 @@ printf 'Starting isolated product demo project=%s subnet=%s postgres_port=%s fro
 if COMPOSE_PROJECT_NAME="$project" \
     COMPOSE_HOST_BIND_IP=127.0.0.1 \
     CLUSTER_SUBNET="$cluster_subnet" \
+    CLUSTER_DYNAMIC_IP_RANGE="$cluster_ip_range" \
     POSTGRES_HOST_PORT="$postgres_port" \
     DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="$frontend_port" \
     FEATUREPLANT_METRICS_HOST_PORT="$featureplant_port" \
     FEATUREPLANT_DB_CURSOR_NAME="$featureplant_cursor" \
+    PRODUCT_DEMO_SCENARIO="$product_demo_scenario" \
     FRONTEND_BASE_URL="http://127.0.0.1:${frontend_port}" \
     FEATUREPLANT_METRICS_BASE_URL="http://127.0.0.1:${featureplant_port}" \
     scripts/db-primary-product-smoke.sh > "$smoke_log" 2>&1; then
@@ -151,6 +176,7 @@ if FRONTEND_BASE_URL="http://127.0.0.1:${frontend_port}" \
     FRONTEND_BROWSER_SMOKE_OUTPUT_DIR="$browser_artifact_dir" \
     FRONTEND_BROWSER_SMOKE_DOM_FILE="$browser_dom_file" \
     FRONTEND_BROWSER_SMOKE_SCREENSHOT_FILE="$browser_screenshot_file" \
+    FRONTEND_BROWSER_SMOKE_EXPECTED_HISTORY_BARS_MIN="$browser_expected_history_bars_min" \
     scripts/frontend-product-browser-smoke.sh > "$browser_log" 2>&1; then
     browser_status="passed"
     browser_reason=""
@@ -171,8 +197,8 @@ fi
 
 tmp_evidence="${evidence_file}.tmp.$$"
 python3 - "$tmp_evidence" "$evidence_file" "$smoke_log" "$browser_evidence_file" "$project" "$postgres_port" "$frontend_port" "$featureplant_port" \
-    "$cluster_subnet" "$featureplant_cursor" "$commit_sha" "$dashboard_url" "$featureplant_metrics_url" "$featureplant_health_url" \
-    "$started_at" "$browser_status" "$browser_reason" "$browser_exit_code" <<'PY'
+    "$cluster_subnet" "$cluster_ip_range" "$featureplant_cursor" "$commit_sha" "$dashboard_url" "$featureplant_metrics_url" "$featureplant_health_url" \
+    "$started_at" "$browser_status" "$browser_reason" "$browser_exit_code" "$product_demo_scenario" <<'PY'
 import hashlib
 import json
 import re
@@ -189,6 +215,7 @@ from pathlib import Path
     frontend_port,
     featureplant_port,
     cluster_subnet,
+    cluster_ip_range,
     featureplant_cursor,
     commit_sha,
     dashboard_url,
@@ -198,6 +225,7 @@ from pathlib import Path
     browser_status,
     browser_reason,
     browser_exit_code,
+    product_demo_scenario,
 ) = sys.argv[1:]
 
 labels = []
@@ -243,6 +271,7 @@ body = {
     "schema_version": 1,
     "evidence_type": "product_demo",
     "compose_profile": "db-primary-product",
+    "product_demo_scenario": product_demo_scenario,
     "started_at": started_at,
     "commit_sha": commit_sha,
     "compose_project_name": project,
@@ -253,6 +282,7 @@ body = {
         "featureplant_metrics": int(featureplant_port),
     },
     "cluster_subnet": cluster_subnet,
+    "cluster_ip_range": cluster_ip_range,
     "dashboard_url": dashboard_url,
     "featureplant_metrics_url": featureplant_metrics_url,
     "featureplant_health_url": featureplant_health_url,

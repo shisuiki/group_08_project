@@ -36,7 +36,9 @@ public record FrontendAdapterConfig(
     String dbUser,
     String dbPassword,
     boolean dbIncludeReplayEvents,
-    String dbReplayId
+    String dbReplayId,
+    String basicAuthUser,
+    String basicAuthPassword
 ) {
     private static final int DEFAULT_FEATURE_OUTPUT_MAX_ROWS = 10_000;
     private static final int DEFAULT_FEATURE_OUTPUT_REFRESH_INTERVAL_MS = 1_000;
@@ -141,6 +143,12 @@ public record FrontendAdapterConfig(
         dbUser = normalize(dbUser);
         dbPassword = dbPassword == null ? "" : dbPassword;
         dbReplayId = normalize(dbReplayId);
+        basicAuthUser = normalize(basicAuthUser);
+        basicAuthPassword = basicAuthPassword == null ? "" : basicAuthPassword;
+    }
+
+    public boolean basicAuthEnabled() {
+        return !basicAuthUser.isBlank() && !basicAuthPassword.isBlank();
     }
 
     public FrontendAdapterConfig(
@@ -188,7 +196,9 @@ public record FrontendAdapterConfig(
             dbUser,
             dbPassword,
             dbIncludeReplayEvents,
-            dbReplayId
+            dbReplayId,
+            "",
+            ""
         );
     }
 
@@ -247,7 +257,9 @@ public record FrontendAdapterConfig(
             value(env, "FRONTEND_ADAPTER_DB_USER", value(env, "DB_WRITER_DATABASE_USER", "")),
             value(env, "FRONTEND_ADAPTER_DB_PASSWORD", value(env, "DB_WRITER_DATABASE_PASSWORD", "")),
             Boolean.parseBoolean(value(env, "FRONTEND_ADAPTER_DB_INCLUDE_REPLAY", "false")),
-            value(env, "FRONTEND_ADAPTER_DB_REPLAY_ID", "")
+            value(env, "FRONTEND_ADAPTER_DB_REPLAY_ID", ""),
+            value(env, "FRONTEND_ADAPTER_BASIC_AUTH_USER", ""),
+            value(env, "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "")
         );
     }
 

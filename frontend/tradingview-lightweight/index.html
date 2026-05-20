@@ -39,6 +39,12 @@
             <button id="refresh-symbols" type="button">Reload</button>
             <button id="load-history" type="button">Load Chart</button>
         </div>
+        <nav id="view-tabs" class="view-tabs" aria-label="dashboard sections">
+            <button type="button" data-target="market-panel">Product/Market</button>
+            <button type="button" data-target="research-features-panel">Research Features</button>
+            <button type="button" data-target="runtime-operator-panel">Runtime/Operator</button>
+            <button type="button" data-target="latency-freshness-panel">Latency/Freshness</button>
+        </nav>
     </header>
 
     <main>
@@ -97,6 +103,19 @@
                 </dl>
             </section>
 
+            <section id="product-market-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Product Readiness</h2>
+                    <span id="product-readiness-state">-</span>
+                </div>
+                <dl>
+                    <dt>Reasons</dt><dd id="product-readiness-reasons">-</dd>
+                    <dt>Source kind</dt><dd id="market-source-kind">-</dd>
+                    <dt>Live observed</dt><dd id="market-live-observed">-</dd>
+                    <dt>Synthetic</dt><dd id="market-synthetic-state">-</dd>
+                </dl>
+            </section>
+
             <section class="panel">
                 <div class="panel-heading">
                     <h2>Selected Market</h2>
@@ -110,11 +129,19 @@
                 </dl>
             </section>
 
-            <section class="panel">
+            <section id="research-features-panel" class="panel">
                 <div class="panel-heading">
-                    <h2>Recent Features</h2>
+                    <h2>Research Features</h2>
                     <span id="feature-count">0</span>
                 </div>
+                <label class="compact-field">
+                    Feature
+                    <select id="research-feature-select">
+                        <option value="feature.bbo">Best bid/ask</option>
+                        <option value="feature.ticker_snapshot">Ticker snapshot</option>
+                        <option value="feature.trade_tape">Trade tape</option>
+                    </select>
+                </label>
                 <div id="feature-list" class="feature-list"></div>
             </section>
 
@@ -132,6 +159,91 @@
                     <dt>Metadata</dt><dd id="metadata-health">-</dd>
                     <dt>FeaturePlant</dt><dd id="featureplant-health">-</dd>
                 </dl>
+            </section>
+
+            <section id="runtime-operator-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Runtime/Operator</h2>
+                    <span id="runtime-source-mode">-</span>
+                </div>
+                <dl>
+                    <dt>Feature source</dt><dd id="runtime-feature-source">-</dd>
+                    <dt>Uptime</dt><dd id="runtime-uptime">-</dd>
+                    <dt>Refresh rows</dt><dd id="runtime-refresh-total">-</dd>
+                    <dt>Refresh errors</dt><dd id="runtime-refresh-errors">-</dd>
+                    <dt>Quote streams</dt><dd id="runtime-quote-streams">-</dd>
+                    <dt>Quote waits</dt><dd id="runtime-quote-waits">-</dd>
+                </dl>
+            </section>
+
+            <section id="latency-freshness-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Latency/Freshness</h2>
+                    <span id="freshness-status-class">-</span>
+                </div>
+                <dl>
+                    <dt>Data age</dt><dd id="freshness-age-ms">-</dd>
+                    <dt>Event ts</dt><dd id="freshness-event-ts-ms">-</dd>
+                    <dt>Symbol</dt><dd id="freshness-symbol">-</dd>
+                    <dt>Feature</dt><dd id="freshness-feature-name">-</dd>
+                    <dt>Source event</dt><dd id="freshness-source-event-id">-</dd>
+                    <dt>Store seq</dt><dd id="freshness-store-sequence">-</dd>
+                    <dt>FeaturePlant lag</dt><dd id="featureplant-lag-events">-</dd>
+                </dl>
+            </section>
+
+            <section id="operator-plan-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Operator Config</h2>
+                    <span id="operator-plan-state">local</span>
+                </div>
+                <div class="operator-grid">
+                    <label>Deploy profile
+                        <select id="operator-deploy-profile">
+                            <option value="live-product">live-product</option>
+                            <option value="live-product-local-db">live-product-local-db</option>
+                            <option value="cluster-live">cluster-live</option>
+                        </select>
+                    </label>
+                    <label>Kalshi key id
+                        <input id="operator-kalshi-key-id" type="text" autocomplete="off" />
+                    </label>
+                    <label>Key path
+                        <input id="operator-key-path" type="text" value="/run/secrets/kalshi_private_key" />
+                    </label>
+                    <label>Market mode
+                        <select id="operator-market-mode">
+                            <option value="configured">configured</option>
+                            <option value="open_markets">open_markets</option>
+                        </select>
+                    </label>
+                    <label>Max markets
+                        <input id="operator-max-markets" type="number" min="0" value="300" />
+                    </label>
+                    <label>Tickers
+                        <input id="operator-tickers" type="text" placeholder="comma separated" />
+                    </label>
+                    <label>S3 bucket
+                        <input id="operator-s3-bucket" type="text" />
+                    </label>
+                    <label>S3 prefix
+                        <input id="operator-s3-prefix" type="text" value="kalshi-normalized/" />
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="operator-s3-delete-after-upload" type="checkbox" />
+                        Delete after upload
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="operator-basic-auth-enabled" type="checkbox" />
+                        Enable Basic Auth
+                    </label>
+                    <label>Basic Auth user
+                        <input id="operator-basic-auth-user" type="text" autocomplete="off" />
+                    </label>
+                </div>
+                <button id="operator-generate-plan" type="button">Generate Plan</button>
+                <div id="operator-warnings" class="operator-warnings"></div>
+                <pre id="operator-env-plan" class="operator-plan-output"></pre>
             </section>
         </aside>
     </main>

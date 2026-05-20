@@ -67,10 +67,32 @@ header h1 {
 .controls button:hover { background: #236052; }
 .controls button:active { background: #1d5146; }
 
+.view-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.view-tabs button {
+    background: #151719;
+    color: #cfd7dc;
+    border: 1px solid #3b444b;
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.view-tabs button:hover {
+    border-color: #4e8c7b;
+    color: #f4f7f9;
+}
+
 main {
     display: grid;
     grid-template-columns: 230px minmax(360px, 1fr) 320px;
-    height: calc(100vh - 138px);
+    height: calc(100vh - 174px);
     min-height: 540px;
 }
 
@@ -269,6 +291,98 @@ main {
     display: flex;
     flex-direction: column;
     gap: 5px;
+}
+
+.compact-field {
+    display: grid;
+    gap: 4px;
+    color: #a8b0b7;
+    font-size: 11px;
+    margin-bottom: 8px;
+}
+
+.compact-field select,
+.operator-grid input,
+.operator-grid select {
+    width: 100%;
+    min-width: 0;
+    background: #111315;
+    color: #f4f7f9;
+    border: 1px solid #3b444b;
+    border-radius: 4px;
+    padding: 6px 7px;
+    font-size: 12px;
+}
+
+.operator-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.operator-grid label {
+    display: grid;
+    gap: 4px;
+    color: #a8b0b7;
+    font-size: 11px;
+    min-width: 0;
+}
+
+.operator-grid .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #e7ecef;
+}
+
+.operator-grid .checkbox-row input {
+    width: auto;
+}
+
+#operator-generate-plan {
+    width: 100%;
+    background: #2b6d5d;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    padding: 7px 8px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.operator-warnings {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0;
+}
+
+.operator-plan-step,
+.operator-plan-warning {
+    border-left: 2px solid #2fbf71;
+    padding-left: 7px;
+    color: #cfd7dc;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.operator-plan-warning {
+    border-left-color: #d5a64f;
+    color: #e7c782;
+}
+
+.operator-plan-output {
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: #111315;
+    border: 1px solid #30373c;
+    border-radius: 4px;
+    padding: 8px;
+    color: #dfe5e8;
+    font-size: 11px;
+    line-height: 1.4;
 }
 
 .feature-row {

@@ -32,6 +32,12 @@
         marketSeries: document.getElementById('market-series'),
         marketOpen: document.getElementById('market-open'),
         marketClose: document.getElementById('market-close'),
+        productReadinessState: document.getElementById('product-readiness-state'),
+        productReadinessReasons: document.getElementById('product-readiness-reasons'),
+        marketSourceKind: document.getElementById('market-source-kind'),
+        marketLiveObserved: document.getElementById('market-live-observed'),
+        marketSyntheticState: document.getElementById('market-synthetic-state'),
+        researchFeatureSelect: document.getElementById('research-feature-select'),
         featureCount: document.getElementById('feature-count'),
         featureList: document.getElementById('feature-list'),
         adapterHealth: document.getElementById('adapter-health'),
@@ -42,6 +48,36 @@
         quoteUpdateHealth: document.getElementById('quote-update-health'),
         metadataHealth: document.getElementById('metadata-health'),
         featureplantHealth: document.getElementById('featureplant-health'),
+        runtimeSourceMode: document.getElementById('runtime-source-mode'),
+        runtimeFeatureSource: document.getElementById('runtime-feature-source'),
+        runtimeUptime: document.getElementById('runtime-uptime'),
+        runtimeRefreshTotal: document.getElementById('runtime-refresh-total'),
+        runtimeRefreshErrors: document.getElementById('runtime-refresh-errors'),
+        runtimeQuoteStreams: document.getElementById('runtime-quote-streams'),
+        runtimeQuoteWaits: document.getElementById('runtime-quote-waits'),
+        freshnessAgeMs: document.getElementById('freshness-age-ms'),
+        freshnessEventTsMs: document.getElementById('freshness-event-ts-ms'),
+        freshnessSymbol: document.getElementById('freshness-symbol'),
+        freshnessFeatureName: document.getElementById('freshness-feature-name'),
+        freshnessSourceEventId: document.getElementById('freshness-source-event-id'),
+        freshnessStoreSequence: document.getElementById('freshness-store-sequence'),
+        freshnessStatusClass: document.getElementById('freshness-status-class'),
+        featureplantLagEvents: document.getElementById('featureplant-lag-events'),
+        operatorPlanState: document.getElementById('operator-plan-state'),
+        operatorDeployProfile: document.getElementById('operator-deploy-profile'),
+        operatorKalshiKeyId: document.getElementById('operator-kalshi-key-id'),
+        operatorKeyPath: document.getElementById('operator-key-path'),
+        operatorMarketMode: document.getElementById('operator-market-mode'),
+        operatorMaxMarkets: document.getElementById('operator-max-markets'),
+        operatorTickers: document.getElementById('operator-tickers'),
+        operatorS3Bucket: document.getElementById('operator-s3-bucket'),
+        operatorS3Prefix: document.getElementById('operator-s3-prefix'),
+        operatorS3DeleteAfterUpload: document.getElementById('operator-s3-delete-after-upload'),
+        operatorBasicAuthEnabled: document.getElementById('operator-basic-auth-enabled'),
+        operatorBasicAuthUser: document.getElementById('operator-basic-auth-user'),
+        operatorGeneratePlan: document.getElementById('operator-generate-plan'),
+        operatorWarnings: document.getElementById('operator-warnings'),
+        operatorEnvPlan: document.getElementById('operator-env-plan'),
         live: {
             symbol: document.getElementById('live-symbol'),
             bid: document.getElementById('live-bid'),
@@ -103,6 +139,7 @@
     let quoteUpdateErrors = 0;
     let marketEntries = [];
     let marketSearchTimer = null;
+    let lastHealthBody = null;
 
     function setStatus(message, tone) {
         dom.statusLine.textContent = message;
@@ -363,10 +400,11 @@
             return;
         }
         const base = adapterBase();
+        const feature = dom.researchFeatureSelect?.value || 'feature.bbo';
         try {
             const data = await fetchJsonFromBase(
                 base,
-                `/features?symbol=${encodeURIComponent(symbol)}&feature=feature.bbo&limit=5`
+                `/features?symbol=${encodeURIComponent(symbol)}&feature=${encodeURIComponent(feature)}&limit=8`
             );
             if (symbol !== dom.symbolSelect.value || base !== adapterBase()) {
                 return;
@@ -392,9 +430,10 @@
             const row = document.createElement('div');
             row.className = 'feature-row';
             const midpoint = output.values ? output.values.midpoint_micros : null;
+            const featureName = output.feature_name || dom.researchFeatureSelect?.value || 'feature';
             row.innerHTML =
                 `<span>${escapeHtml(formatEventTs(output.event_ts_ms))}</span>` +
-                `<strong>${escapeHtml(formatMicros(midpoint))}</strong>` +
+                `<strong>${escapeHtml(formatFeatureValue(featureName, output.values, midpoint))}</strong>` +
                 `<small>${escapeHtml(output.source_event_id || '-')}</small>`;
             dom.featureList.appendChild(row);
         }
@@ -548,6 +587,7 @@
     async function loadHealth() {
         try {
             const body = await fetchJson('/health');
+            lastHealthBody = body;
             dom.adapterHealth.textContent = adapterStatusText(body);
             dom.adapterHealth.className = body.status === 'ok' ? 'fresh' : 'stale';
             dom.releaseIdentity.textContent = releaseStatusText(body.release);
@@ -563,6 +603,9 @@
             dom.featureplantHealth.textContent = body.feature_plant
                 ? `${body.feature_plant.events_out || 0} out / ${body.feature_plant.errors || 0} err`
                 : '-';
+            renderProductReadiness(body);
+            renderRuntimeOperator(body);
+            renderLatencyFreshness(body);
         } catch (err) {
             dom.adapterHealth.textContent = 'unavailable';
             dom.adapterHealth.className = 'stale';
@@ -573,6 +616,59 @@
             dom.refreshHealth.className = 'stale';
             dom.quoteUpdateHealth.textContent = 'unavailable';
             dom.quoteUpdateHealth.className = 'stale';
+        }
+    }
+
+    function renderProductReadiness(body) {
+        const readiness = body.product_readiness || {};
+        const freshness = body.data_freshness || {};
+        const state = readiness.status || 'unknown';
+        dom.productReadinessState.textContent = state;
+        dom.productReadinessState.className = state === 'ok' ? 'fresh' : 'stale';
+        const reasons = Array.isArray(readiness.reasons) && readiness.reasons.length
+            ? readiness.reasons.join(', ')
+            : 'ready';
+        dom.productReadinessReasons.textContent = reasons;
+        dom.marketSourceKind.textContent = freshness.source_kind || '-';
+        dom.marketLiveObserved.textContent = freshness.live_data_observed === true ? 'yes' : 'no';
+        dom.marketSyntheticState.textContent = freshness.synthetic === true ? 'yes' : 'no';
+    }
+
+    function renderRuntimeOperator(body) {
+        const refresh = body.feature_output_refresh || {};
+        const streams = body.quote_streams || {};
+        const updates = body.quote_updates || {};
+        dom.runtimeSourceMode.textContent = body.source_mode || '-';
+        dom.runtimeFeatureSource.textContent = body.feature_source || '-';
+        dom.runtimeUptime.textContent = formatAge(Number(body.uptime_ms || 0));
+        dom.runtimeRefreshTotal.textContent = String(refresh.total_loaded ?? 0);
+        dom.runtimeRefreshErrors.textContent = String(refresh.refresh_errors ?? 0);
+        dom.runtimeQuoteStreams.textContent =
+            `${streams.active_streams || 0}/${streams.max_streams || 0} active, ${streams.events || 0} events`;
+        dom.runtimeQuoteWaits.textContent =
+            `${updates.active_waits || 0}/${updates.max_waits || 0} active, ${updates.timeouts || 0} timeout`;
+    }
+
+    function renderLatencyFreshness(body) {
+        const freshness = body.data_freshness || {};
+        const fp = body.feature_plant || {};
+        const store = body.store || {};
+        const age = freshness.latest_event_age_ms;
+        const state = dataFreshnessLiveState(freshness);
+        dom.freshnessStatusClass.textContent = state;
+        dom.freshnessStatusClass.className = state === 'live' ? 'fresh' : 'stale';
+        dom.freshnessAgeMs.textContent = age == null ? '-' : `${age} ms (${formatAge(Number(age))})`;
+        dom.freshnessEventTsMs.textContent = freshness.latest_event_ts_ms == null
+            ? '-'
+            : `${freshness.latest_event_ts_ms} / ${formatEventTs(freshness.latest_event_ts_ms)}`;
+        dom.freshnessSymbol.textContent = freshness.symbol || '-';
+        dom.freshnessFeatureName.textContent = freshness.feature_name || '-';
+        dom.freshnessSourceEventId.textContent = freshness.source_event_id || '-';
+        dom.freshnessStoreSequence.textContent = String(freshness.store_sequence ?? store.sequence ?? '-');
+        if (typeof store.total_features === 'number' && typeof fp.events_out === 'number') {
+            dom.featureplantLagEvents.textContent = String(Math.max(0, store.total_features - fp.events_out));
+        } else {
+            dom.featureplantLagEvents.textContent = '-';
         }
     }
 
@@ -658,6 +754,69 @@
             ` / active ${active}/${max}`;
     }
 
+    function generateOperatorPlan() {
+        const profile = dom.operatorDeployProfile.value || 'live-product';
+        const marketMode = dom.operatorMarketMode.value || 'configured';
+        const maxMarkets = dom.operatorMaxMarkets.value || '0';
+        const tickers = dom.operatorTickers.value.trim();
+        const keyId = dom.operatorKalshiKeyId.value.trim();
+        const keyPath = dom.operatorKeyPath.value.trim() || '/run/secrets/kalshi_private_key';
+        const s3Bucket = dom.operatorS3Bucket.value.trim();
+        const s3Prefix = dom.operatorS3Prefix.value.trim();
+        const basicAuthEnabled = dom.operatorBasicAuthEnabled.checked;
+        const basicAuthUser = dom.operatorBasicAuthUser.value.trim();
+        const warnings = [];
+        if (marketMode === 'configured' && !tickers) {
+            warnings.push('configured market mode needs KALSHI_MARKET_TICKERS before deploy');
+        }
+        if (marketMode === 'open_markets' && Number(maxMarkets) <= 0) {
+            warnings.push('open_markets should set KALSHI_MARKET_DISCOVERY_MAX_MARKETS above zero');
+        }
+        if (!keyId) {
+            warnings.push('Kalshi key id is blank; live websocket auth will fail');
+        }
+        if (basicAuthEnabled && !basicAuthUser) {
+            warnings.push('Basic Auth is enabled but user is blank');
+        }
+        if (s3Bucket && !s3Prefix) {
+            warnings.push('S3 bucket is set without a prefix');
+        }
+        if (lastHealthBody?.product_readiness?.status && lastHealthBody.product_readiness.status !== 'ok') {
+            warnings.push(`current dashboard readiness is ${lastHealthBody.product_readiness.status}`);
+        }
+        const env = [
+            ['KALSHI_DEPLOY_PROFILE', profile],
+            ['KALSHI_KEY_ID', keyId ? '<redacted>' : ''],
+            ['KALSHI_KEY_PATH', keyPath],
+            ['KALSHI_MARKET_SELECTION_MODE', marketMode],
+            ['KALSHI_MARKET_DISCOVERY_MAX_MARKETS', maxMarkets],
+            ['KALSHI_MARKET_TICKERS', tickers],
+            ['S3_RECORDING_BUCKET', s3Bucket],
+            ['S3_RECORDING_PREFIX', s3Prefix],
+            ['S3_DELETE_AFTER_UPLOAD', dom.operatorS3DeleteAfterUpload.checked ? 'true' : 'false'],
+            ['FRONTEND_ADAPTER_BASIC_AUTH_USER', basicAuthEnabled && basicAuthUser ? '<redacted>' : ''],
+            ['FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD', basicAuthEnabled ? '<set via secret>' : '']
+        ];
+        const workflow = {
+            deploy_profile: profile,
+            run_live_product_smoke: profile === 'live-product' || profile === 'live-product-local-db',
+            run_live_product_browser_smoke: true,
+            require_live_product_data: profile === 'live-product',
+            market_selection_mode: marketMode,
+            market_tickers_configured: tickers ? tickers.split(',').map(value => value.trim()).filter(Boolean).length : 0,
+            basic_auth_enabled: basicAuthEnabled,
+            s3_capture_configured: Boolean(s3Bucket)
+        };
+        dom.operatorWarnings.innerHTML = warnings.length
+            ? warnings.map(warning => `<div class="operator-plan-warning">${escapeHtml(warning)}</div>`).join('')
+            : '<div class="operator-plan-step">No local warnings from current inputs.</div>';
+        dom.operatorEnvPlan.textContent =
+            env.map(([key, value]) => `${key}=${value}`).join('\n') +
+            '\n\nworkflow_inputs=' + JSON.stringify(workflow, null, 2);
+        dom.operatorPlanState.textContent = warnings.length ? `${warnings.length} warning(s)` : 'ready';
+        dom.operatorPlanState.className = warnings.length ? 'stale' : 'fresh';
+    }
+
     function renderQuoteUpdateState(message, tone) {
         dom.quoteUpdateHealth.textContent = message;
         dom.quoteUpdateHealth.className = tone || '';
@@ -669,6 +828,21 @@
         }
         const dollars = Number(micros) / 1_000_000;
         return dollars.toFixed(4);
+    }
+
+    function formatFeatureValue(featureName, values, fallbackMidpoint) {
+        if (!values) {
+            return '-';
+        }
+        if (featureName === 'feature.ticker_snapshot') {
+            return formatMicros(values.price_micros ?? values.yes_bid_micros ?? values.midpoint_micros);
+        }
+        if (featureName === 'feature.trade_tape') {
+            const price = values.yes_price_micros ?? values.no_price_micros ?? values.price_micros;
+            const quantity = values.quantity_micros == null ? '' : ` x ${values.quantity_micros}`;
+            return `${formatMicros(price)}${quantity}`;
+        }
+        return formatMicros(fallbackMidpoint);
     }
 
     function formatEventTs(value) {
@@ -874,6 +1048,16 @@
     dom.marketSearchApply.addEventListener('click', loadSymbols);
     dom.loadHistory.addEventListener('click', loadHistory);
     dom.symbolSelect.addEventListener('change', onSelectedSymbolChanged);
+    dom.researchFeatureSelect.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
+    dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
+    for (const button of document.querySelectorAll('#view-tabs [data-target]')) {
+        button.addEventListener('click', () => {
+            const target = document.getElementById(button.dataset.target);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    }
     dom.adapterUrl.addEventListener('change', () => {
         quotesLoopGeneration += 1;
         stopQuotesLoop();
@@ -883,5 +1067,6 @@
     });
 
     setInterval(loadHealth, HEALTH_POLL_MS);
+    generateOperatorPlan();
     loadConfig().then(loadSymbols).then(loadHealth);
 })();
