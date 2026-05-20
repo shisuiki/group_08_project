@@ -46,6 +46,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN"));
         assertTrue(script.contains("feature_output_refresh.running"));
         assertTrue(script.contains("feature_output_refresh.total_loaded"));
+        assertProductStaticSmokeContract(script);
     }
 
     @Test
@@ -116,6 +117,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FRONTEND_HEALTH_URL"));
         assertTrue(script.contains("FRONTEND_NO_PROXY=\"${FRONTEND_NO_PROXY:-127.0.0.1,localhost}\""));
         assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
+        assertProductStaticSmokeContract(script);
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DB_URL"));
         assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
         assertTrue(script.contains("FEATUREPLANT_DB_URL"));
@@ -263,6 +265,27 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
         assertTrue(script.contains("run_live_product_semantic_smoke \"$env_file\""));
         assertTrue(script.contains("scripts/live-product-smoke.sh"));
+        assertTrue(script.contains("'vendor/lightweight-charts-4.2.0.standalone.production.js'"));
+        assertTrue(script.contains("'frontend static UI must not reference external CDN assets'"));
+        assertTrue(script.contains("'unpkg|jsdelivr|cdnjs|cdn'"));
+    }
+
+    @Test
+    void tradingViewFrontendUsesOnlyLocalStaticAssets() throws Exception {
+        String index = read("frontend/tradingview-lightweight/index.html");
+        String app = read("frontend/tradingview-lightweight/app.js");
+        String styles = read("frontend/tradingview-lightweight/styles.css");
+        String chart = read("frontend/tradingview-lightweight/vendor/lightweight-charts-4.2.0.standalone.production.js");
+
+        assertTrue(index.contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
+        assertTrue(index.contains("<script src=\"vendor/lightweight-charts-4.2.0.standalone.production.js\"></script>"));
+        assertTrue(index.contains("<script src=\"app.js\"></script>"));
+        assertTrue(chart.contains("TradingView Lightweight Charts"));
+        assertTrue(chart.contains("v4.2.0"));
+        assertNoExternalCdn(index);
+        assertNoExternalCdn(app);
+        assertNoExternalCdn(styles);
+        assertNoExternalCdn(chart);
     }
 
     @Test
@@ -353,5 +376,25 @@ class DbPrimaryDemoScriptsTest {
                 Files.exists(file),
                 "script fixture not present in this build context: " + path);
         return Files.readString(file);
+    }
+
+    private static void assertProductStaticSmokeContract(String script) {
+        assertTrue(script.contains("chart_file=\"$tmpdir/frontend-lightweight-charts.js\""));
+        assertTrue(script.contains("${FRONTEND_BASE_URL}/vendor/lightweight-charts-4.2.0.standalone.production.js"));
+        assertTrue(script.contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
+        assertTrue(script.contains("<script src=\"vendor/lightweight-charts-4.2.0.standalone.production.js\"></script>"));
+        assertTrue(script.contains("<script src=\"app.js\"></script>"));
+        assertTrue(script.contains("LightweightCharts"));
+        assertTrue(script.contains("frontend static UI must not reference external CDN assets"));
+        assertTrue(script.contains("unpkg|jsdelivr|cdnjs|cdn"));
+    }
+
+    private static void assertNoExternalCdn(String body) {
+        String lower = body.toLowerCase(Locale.ROOT);
+        assertFalse(lower.contains("https://unpkg.com"));
+        assertFalse(lower.contains("http://unpkg.com"));
+        assertFalse(lower.contains("cdn.jsdelivr"));
+        assertFalse(lower.contains("jsdelivr"));
+        assertFalse(lower.contains("cdnjs"));
     }
 }

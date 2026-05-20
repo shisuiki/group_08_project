@@ -18,6 +18,7 @@ for path in \
     frontend/tradingview-lightweight/index.html \
     frontend/tradingview-lightweight/app.js \
     frontend/tradingview-lightweight/styles.css \
+    frontend/tradingview-lightweight/vendor/lightweight-charts-4.2.0.standalone.production.js \
     ops/docker/s3-recording-sync.Dockerfile; do
     if [ ! -e "$path" ]; then
         printf 'required Docker build input is missing: %s\n' "$path" >&2
@@ -64,6 +65,17 @@ fi
 
 if ! grep -Eq '^[[:space:]]*COPY[[:space:]]+frontend/tradingview-lightweight[[:space:]]+/app/frontend/tradingview-lightweight[[:space:]]*$' Dockerfile; then
     printf 'Dockerfile does not copy TradingView frontend assets into the runtime image\n' >&2
+    exit 1
+fi
+
+if ! grep -Fq '<script src="vendor/lightweight-charts-4.2.0.standalone.production.js"></script>' \
+    frontend/tradingview-lightweight/index.html; then
+    printf 'TradingView frontend must reference the local Lightweight Charts asset\n' >&2
+    exit 1
+fi
+
+if grep -REiq '(https?://|//)[^"'"'"' ]*(unpkg|jsdelivr|cdnjs|cdn)' frontend/tradingview-lightweight; then
+    printf 'TradingView frontend must not reference external CDN assets\n' >&2
     exit 1
 fi
 

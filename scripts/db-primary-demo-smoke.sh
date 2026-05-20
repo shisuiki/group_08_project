@@ -59,10 +59,16 @@ check_product_static_ui() {
     index_file="$tmpdir/frontend-index.html"
     app_file="$tmpdir/frontend-app.js"
     css_file="$tmpdir/frontend-styles.css"
+    chart_file="$tmpdir/frontend-lightweight-charts.js"
     curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/" -o "$index_file"
     curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/app.js" -o "$app_file"
     curl -fsS --noproxy "$FRONTEND_NO_PROXY" "${FRONTEND_BASE_URL}/styles.css" -o "$css_file"
+    curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        "${FRONTEND_BASE_URL}/vendor/lightweight-charts-4.2.0.standalone.production.js" -o "$chart_file"
     grep -q 'Kalshi Product Dashboard' "$index_file"
+    grep -q '<link rel="stylesheet" href="styles.css" />' "$index_file"
+    grep -q '<script src="vendor/lightweight-charts-4.2.0.standalone.production.js"></script>' "$index_file"
+    grep -q '<script src="app.js"></script>' "$index_file"
     grep -q 'market-list' "$index_file"
     grep -q 'feature-list' "$index_file"
     grep -q 'Runtime Health' "$index_file"
@@ -72,6 +78,12 @@ check_product_static_ui() {
     grep -q '/features?symbol=' "$app_file"
     grep -q '/health' "$app_file"
     grep -q 'chart-container' "$css_file"
+    grep -q 'LightweightCharts' "$chart_file"
+    if grep -Eiq '(https?://|//)[^"'"'"' ]*(unpkg|jsdelivr|cdnjs|cdn)' \
+        "$index_file" "$app_file" "$css_file" "$chart_file"; then
+        printf 'frontend static UI must not reference external CDN assets\n' >&2
+        exit 1
+    fi
     printf 'PASS frontend_static_ui url=%s/\n' "$FRONTEND_BASE_URL"
 }
 

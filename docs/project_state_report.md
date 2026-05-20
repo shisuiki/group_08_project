@@ -302,7 +302,7 @@ README caveat:
 Current:
 
 - Static page under `frontend/tradingview-lightweight`.
-- Uses TradingView Lightweight Charts from CDN.
+- Serves the pinned Lightweight Charts 4.2.0 asset from the same frontend root; no runtime CDN is required.
 - Uses Java `FrontendAdapterServer` endpoints:
   - `/datafeed/config`
   - `/datafeed/symbols`

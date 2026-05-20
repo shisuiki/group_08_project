@@ -42,7 +42,12 @@ public class FrontendAdapterServer {
     private static final int QUOTE_UPDATE_MAX_WAITERS = 4;
     private static final long DEFAULT_QUOTE_UPDATE_TIMEOUT_MS = 15_000L;
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
-    private static final Set<String> STATIC_ASSETS = Set.of("index.html", "app.js", "styles.css");
+    private static final Set<String> STATIC_ASSETS = Set.of(
+        "index.html",
+        "app.js",
+        "styles.css",
+        "vendor/lightweight-charts-4.2.0.standalone.production.js"
+    );
 
     public record FeaturePlantStats(long eventsIn, long eventsOut, long errors) {
         public static final FeaturePlantStats EMPTY = new FeaturePlantStats(0L, 0L, 0L);

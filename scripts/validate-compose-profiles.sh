@@ -678,6 +678,9 @@ assert_live_product_manual_smoke_contract() {
         'recentNonSmokeCanonicalEvents' \
         'FEATUREPLANT_DB_CURSOR_NAME' \
         'frontend_static_ui' \
+        'vendor/lightweight-charts-4.2.0.standalone.production.js' \
+        'frontend static UI must not reference external CDN assets' \
+        'unpkg|jsdelivr|cdnjs|cdn' \
         'LIVE_PRODUCT_SMOKE_DOCKER_SUDO="${LIVE_PRODUCT_SMOKE_DOCKER_SUDO:-false}"' \
         'docker_compose()' \
         'sudo docker compose "$@"' \

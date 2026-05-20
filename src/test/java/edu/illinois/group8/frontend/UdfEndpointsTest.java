@@ -195,18 +195,27 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("feature-list"));
         assertTrue(root.body().contains("Runtime Health"));
         assertTrue(root.body().contains("placeholder=\"same origin\""));
+        assertTrue(index.body().contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
+        assertTrue(index.body().contains(
+            "<script src=\"vendor/lightweight-charts-4.2.0.standalone.production.js\"></script>"));
         assertTrue(index.body().contains("<script src=\"app.js\"></script>"));
+        assertFalse(index.body().contains("https://unpkg.com"));
+        assertFalse(index.body().contains("cdn.jsdelivr"));
+        assertFalse(index.body().contains("cdnjs"));
     }
 
     @Test
     void servesTradingViewJavascriptAndStyles() throws Exception {
         HttpResponse<String> js = get("/app.js");
         HttpResponse<String> css = get("/styles.css");
+        HttpResponse<String> chart = get("/vendor/lightweight-charts-4.2.0.standalone.production.js");
 
         assertEquals(200, js.statusCode());
         assertEquals(200, css.statusCode());
+        assertEquals(200, chart.statusCode());
         assertTrue(js.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(css.headers().firstValue("content-type").orElse("").contains("text/css"));
+        assertTrue(chart.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
         assertTrue(js.body().contains("/markets?limit=100"));
         assertTrue(js.body().contains("/features?symbol="));
@@ -214,6 +223,7 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("nextSequence < quoteSequence"));
         assertTrue(js.body().contains("window.location.origin"));
         assertTrue(css.body().contains("chart-container"));
+        assertTrue(chart.body().contains("LightweightCharts"));
     }
 
     @Test
