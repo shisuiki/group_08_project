@@ -534,9 +534,10 @@
         }
         const age = freshness.latest_event_age_ms == null ? '-' : formatAge(Number(freshness.latest_event_age_ms));
         const state = dataFreshnessLiveState(freshness);
+        const kind = freshness.source_kind || 'unknown';
         const symbol = freshness.symbol || '-';
         const source = freshness.source_event_id || '-';
-        return `${state} / ${age} / ${symbol} / ${source}`;
+        return `${state} ${kind} / ${age} / ${symbol} / ${source}`;
     }
 
     function dataFreshnessLiveState(freshness) {

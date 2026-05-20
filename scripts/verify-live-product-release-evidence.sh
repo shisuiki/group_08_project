@@ -47,6 +47,16 @@ def require(condition, message):
 def at(mapping, key):
     return mapping.get(key) if isinstance(mapping, dict) else None
 
+def require_freshness_contract(mapping, label):
+    source_kind = at(mapping, "freshness_source_kind")
+    synthetic = at(mapping, "freshness_synthetic")
+    live_data_observed = at(mapping, "freshness_live_data_observed")
+    require(source_kind in {"unknown", "smoke", "live"}, f"{label} freshness_source_kind invalid")
+    require(isinstance(synthetic, bool), f"{label} freshness_synthetic must be boolean")
+    require(isinstance(live_data_observed, bool), f"{label} freshness_live_data_observed must be boolean")
+    if isinstance(synthetic, bool) and isinstance(source_kind, str):
+        require(synthetic == (source_kind == "smoke"), f"{label} freshness_synthetic must match source kind")
+
 require(at(evidence, "schema_version") == 1, "schema_version must be 1")
 require(at(evidence, "evidence_type") == "candidate", "evidence_type must be candidate")
 require(at(evidence, "outcome") == "success", "outcome must be success")
@@ -112,6 +122,7 @@ if isinstance(frontend_health, dict):
         value = at(frontend_health, key)
         require(value == "" or isinstance(value, int), f"frontend health {key} must be integer or empty")
     require("product_readiness_status" in frontend_health, "frontend product_readiness_status missing")
+    require_freshness_contract(frontend_health, "frontend health")
 
 final = at(smoke, "live_product_smoke")
 require(isinstance(final, dict), "final live_product_smoke fields missing")
@@ -129,14 +140,29 @@ if isinstance(final, dict):
         "frontend_refresh_errors_after",
     ):
         require(isinstance(at(final, key), int) and at(final, key) >= 0, f"final smoke {key} must be non-negative integer")
+    require_freshness_contract(final, "final smoke")
+    require(isinstance(at(final, "live_data_observed"), bool), "final smoke live_data_observed must be boolean")
+    require(isinstance(at(final, "require_live_data"), bool), "final smoke require_live_data must be boolean")
+    if at(final, "require_live_data") is True:
+        require(at(final, "live_data_observed") is True, "required live data was not observed")
+        require(at(final, "freshness_live_data_observed") is True, "required live data was not visible in frontend freshness")
+        require(at(final, "freshness_source_kind") == "live", "required live data must drive frontend freshness")
     require(at(final, "product_readiness_stale") is False, "final product_readiness must not be stale")
-    require(at(final, "product_readiness_degraded") is False, "final product_readiness must not be degraded")
-    require(at(final, "product_readiness_status") == "ok", "final product_readiness status must be ok")
+    if at(final, "freshness_source_kind") == "smoke":
+        require(at(final, "product_readiness_status") != "ok", "smoke-only freshness cannot report ok product readiness")
+        require(at(final, "product_readiness_degraded") is True, "smoke-only freshness must degrade product readiness")
+    elif at(final, "freshness_source_kind") == "unknown":
+        require(at(final, "product_readiness_status") != "ok", "unknown freshness cannot report ok product readiness")
+    else:
+        require(at(final, "product_readiness_degraded") is False, "final product_readiness must not be degraded")
+        require(at(final, "product_readiness_status") == "ok", "final product_readiness status must be ok")
 
 product_latency = at(smoke, "product_latency")
 require(isinstance(product_latency, dict), "product_latency snapshot missing")
 if isinstance(product_latency, dict):
     require(at(product_latency, "status") == "ok", "product_latency status must be ok")
+    require(at(product_latency, "source_kind") == "smoke", "product_latency source_kind must be smoke")
+    require(at(product_latency, "synthetic") is True, "product_latency synthetic must be true")
     for key in (
         "canonical_commit_seq",
         "latest_market_state_commit_seq",
@@ -183,6 +209,10 @@ if summary_mode == "true":
         ("outcome", at(evidence, "outcome")),
         ("pipeline_status", at(pipeline, "status") if isinstance(pipeline, dict) else ""),
         ("final_product_readiness", at(final, "product_readiness_status") if isinstance(final, dict) else ""),
+        ("freshness_source_kind", at(final, "freshness_source_kind") if isinstance(final, dict) else ""),
+        ("freshness_synthetic", at(final, "freshness_synthetic") if isinstance(final, dict) else ""),
+        ("live_data_observed", at(final, "live_data_observed") if isinstance(final, dict) else ""),
+        ("require_live_data", at(final, "require_live_data") if isinstance(final, dict) else ""),
         ("frontend_feature_source", at(final, "feature_source") if isinstance(final, dict) else ""),
         ("product_latency_seed_to_quote_ms", at(product_latency, "seed_to_frontend_quote_ms") if isinstance(product_latency, dict) else ""),
         ("product_latency_seed_to_sse_ms", at(product_latency, "seed_to_sse_ms") if isinstance(product_latency, dict) else ""),
@@ -202,6 +232,9 @@ print(
     f"github_run_attempt={at(evidence, 'github_run_attempt') or ''} "
     f"pipeline_status={at(pipeline, 'status') if isinstance(pipeline, dict) else ''} "
     f"final_product_readiness={at(final, 'product_readiness_status') if isinstance(final, dict) else ''} "
+    f"freshness_source_kind={at(final, 'freshness_source_kind') if isinstance(final, dict) else ''} "
+    f"live_data_observed={at(final, 'live_data_observed') if isinstance(final, dict) else ''} "
+    f"require_live_data={at(final, 'require_live_data') if isinstance(final, dict) else ''} "
     f"feature_source={at(final, 'feature_source') if isinstance(final, dict) else ''} "
     f"seed_to_frontend_quote_ms={at(product_latency, 'seed_to_frontend_quote_ms') if isinstance(product_latency, dict) else ''} "
     f"seed_to_sse_ms={at(product_latency, 'seed_to_sse_ms') if isinstance(product_latency, dict) else ''}"

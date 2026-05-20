@@ -147,6 +147,9 @@ class FrontendFeatureStoreTest {
         assertEquals("MKT-2", freshness.symbol());
         assertEquals("feature.trade_tape", freshness.featureName());
         assertEquals("evt-t-3000", freshness.sourceEventId());
+        assertEquals("live", freshness.sourceKind());
+        assertFalse(freshness.synthetic());
+        assertTrue(freshness.liveDataObserved());
         assertEquals(3L, freshness.storeSequence());
     }
 
@@ -161,7 +164,43 @@ class FrontendFeatureStoreTest {
         assertEquals(null, freshness.symbol());
         assertEquals(null, freshness.featureName());
         assertEquals(null, freshness.sourceEventId());
+        assertEquals("unknown", freshness.sourceKind());
+        assertFalse(freshness.synthetic());
+        assertFalse(freshness.liveDataObserved());
         assertEquals(0L, freshness.storeSequence());
+    }
+
+    @Test
+    void latestFreshnessPrefersNonSmokeWhenSmokeHasNewerEventTs() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(bbo("MKT-LIVE", 2_000L, 600_000L));
+        store.accept(smokeBbo("LIVE-PRODUCT-SMOKE-run-1", 3_000L, 700_000L));
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(3_500L);
+
+        assertEquals("MKT-LIVE", freshness.symbol());
+        assertEquals(2_000L, freshness.latestEventTsMs());
+        assertEquals("evt-2000", freshness.sourceEventId());
+        assertEquals("live", freshness.sourceKind());
+        assertFalse(freshness.synthetic());
+        assertTrue(freshness.liveDataObserved());
+        assertEquals(2L, freshness.storeSequence());
+    }
+
+    @Test
+    void latestFreshnessReportsSmokeWhenOnlySmokeExists() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(smokeBbo("LIVE-PRODUCT-SMOKE-run-1", 3_000L, 700_000L));
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(3_500L);
+
+        assertEquals("LIVE-PRODUCT-SMOKE-run-1", freshness.symbol());
+        assertEquals(3_000L, freshness.latestEventTsMs());
+        assertEquals("live-product-smoke-3000", freshness.sourceEventId());
+        assertEquals("smoke", freshness.sourceKind());
+        assertTrue(freshness.synthetic());
+        assertFalse(freshness.liveDataObserved());
+        assertEquals(1L, freshness.storeSequence());
     }
 
     @Test
@@ -213,6 +252,21 @@ class FrontendFeatureStoreTest {
             market,
             ts,
             "evt-" + ts,
+            Map.of(
+                "bid_price_micros", midpoint - 100_000L,
+                "ask_price_micros", midpoint + 100_000L,
+                "midpoint_micros", midpoint
+            )
+        );
+    }
+
+    static FeatureOutput smokeBbo(String market, long ts, long midpoint) {
+        return new FeatureOutput(
+            FrontendFeatureStore.BBO_FEATURE,
+            FrontendFeatureStore.BBO_FEATURE,
+            market,
+            ts,
+            "live-product-smoke-" + ts,
             Map.of(
                 "bid_price_micros", midpoint - 100_000L,
                 "ask_price_micros", midpoint + 100_000L,

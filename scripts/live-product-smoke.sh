@@ -87,6 +87,7 @@ FEATUREPLANT_HEALTH_URL="${FEATUREPLANT_HEALTH_URL:-http://127.0.0.1:${FEATUREPL
 FEATUREPLANT_METRICS_URL="${FEATUREPLANT_METRICS_URL:-http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/metrics}"
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}}"
 FRONTEND_HEALTH_URL="${FRONTEND_HEALTH_URL:-${FRONTEND_BASE_URL}/health}"
+LIVE_DATA_OBSERVED=false
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/live-product-smoke.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT INT HUP TERM
@@ -359,9 +360,20 @@ for field, expected_index in (
 freshness = body.get("data_freshness")
 if not isinstance(freshness, dict):
     raise SystemExit("health check failed: data_freshness is missing")
-for key in ("latest_event_ts_ms", "latest_event_age_ms", "symbol", "feature_name", "source_event_id", "store_sequence"):
+for key in ("latest_event_ts_ms", "latest_event_age_ms", "symbol", "feature_name", "source_event_id", "store_sequence", "source_kind", "synthetic", "live_data_observed"):
     if key not in freshness:
         raise SystemExit(f"frontend data_freshness.{key} is missing")
+source_kind = freshness.get("source_kind")
+if source_kind not in ("unknown", "smoke", "live"):
+    raise SystemExit(f"frontend data_freshness.source_kind is invalid: {source_kind!r}")
+synthetic = freshness.get("synthetic")
+if not isinstance(synthetic, bool):
+    raise SystemExit("frontend data_freshness.synthetic is not a boolean")
+live_data_observed = freshness.get("live_data_observed")
+if not isinstance(live_data_observed, bool):
+    raise SystemExit("frontend data_freshness.live_data_observed is not a boolean")
+if synthetic != (source_kind == "smoke"):
+    raise SystemExit("frontend data_freshness.synthetic does not match source_kind")
 readiness = body.get("product_readiness")
 if not isinstance(readiness, dict):
     raise SystemExit("health check failed: product_readiness is missing")
@@ -396,6 +408,9 @@ print(freshness.get("latest_event_ts_ms") if freshness.get("latest_event_ts_ms")
 print(freshness.get("latest_event_age_ms") if freshness.get("latest_event_age_ms") is not None else "")
 print(freshness.get("symbol") or "")
 print(freshness.get("source_event_id") or "")
+print(source_kind)
+print(str(synthetic).lower())
+print(str(live_data_observed).lower())
 print(readiness_status)
 print(str(readiness.get("stale")).lower())
 print(str(readiness.get("degraded")).lower())
@@ -536,14 +551,18 @@ wait_frontend_refresh_progress() {
         started_at="$(printf '%s\n' "$health" | sed -n '1p')"
         total_loaded="$(printf '%s\n' "$health" | sed -n '3p')"
         refresh_errors="$(printf '%s\n' "$health" | sed -n '4p')"
-        readiness_status="$(printf '%s\n' "$health" | sed -n '12p')"
-        readiness_stale="$(printf '%s\n' "$health" | sed -n '13p')"
-        readiness_degraded="$(printf '%s\n' "$health" | sed -n '14p')"
+        freshness_source_kind="$(printf '%s\n' "$health" | sed -n '12p')"
+        freshness_synthetic="$(printf '%s\n' "$health" | sed -n '13p')"
+        freshness_live_data_observed="$(printf '%s\n' "$health" | sed -n '14p')"
+        readiness_status="$(printf '%s\n' "$health" | sed -n '15p')"
+        readiness_stale="$(printf '%s\n' "$health" | sed -n '16p')"
+        readiness_degraded="$(printf '%s\n' "$health" | sed -n '17p')"
         if [ "$started_at" = "$expected_started_at" ] \
             && [ "$total_loaded" -gt "$min_total_loaded" ] \
             && [ "$refresh_errors" -le "$max_refresh_errors" ]; then
-            printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+            printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
                 "$started_at" "$total_loaded" "$refresh_errors" \
+                "$freshness_source_kind" "$freshness_synthetic" "$freshness_live_data_observed" \
                 "$readiness_status" "$readiness_stale" "$readiness_degraded"
             return 0
         fi
@@ -936,6 +955,9 @@ if not isinstance(freshness, dict):
     raise SystemExit("data_freshness missing")
 source_event_id = freshness.get("source_event_id") or ""
 event_ts_ms = freshness.get("latest_event_ts_ms")
+source_kind = freshness.get("source_kind")
+if source_kind != "live":
+    raise SystemExit("freshness source_kind is not live")
 if not source_event_id or source_event_id.startswith("live-product-smoke-"):
     raise SystemExit("freshness does not point at non-smoke source")
 if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
@@ -958,6 +980,10 @@ PY
 
 check_optional_live_data() {
     if ! is_true "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"; then
+        live_event="$(latest_non_smoke_canonical_after "$1" || true)"
+        if [ -n "$live_event" ]; then
+            LIVE_DATA_OBSERVED=true
+        fi
         return 0
     fi
     baseline_commit_seq="$1"
@@ -991,6 +1017,7 @@ check_optional_live_data() {
             if [ "$live_feature_name" = "feature.bbo" ]; then
                 wait_frontend_live_quote "$live_feature_market" "$live_feature_event_ts_ms"
             fi
+            LIVE_DATA_OBSERVED=true
             printf 'PASS live_data baseline_commit_seq=%s live_event_id=%s market=%s stream=%s commit_seq=%s event_ts_ms=%s cursor_after=%s feature_outputs_for_source=%s feature=%s latest_feature_source_event_id=%s latest_feature=%s latest_feature_market=%s latest_feature_commit_seq=%s\n' \
                 "$baseline_commit_seq" "$live_event_id" "$live_market" "$live_stream" "$live_commit_seq" \
                 "$live_event_ts_ms" "$live_cursor_seq" "$live_feature_count" "$live_feature_name" \
@@ -1027,11 +1054,14 @@ frontend_freshness_event_ts_ms="$(printf '%s\n' "$frontend_before" | sed -n '8p'
 frontend_freshness_age_ms="$(printf '%s\n' "$frontend_before" | sed -n '9p')"
 frontend_freshness_symbol="$(printf '%s\n' "$frontend_before" | sed -n '10p')"
 frontend_freshness_source_event_id="$(printf '%s\n' "$frontend_before" | sed -n '11p')"
-frontend_readiness_status="$(printf '%s\n' "$frontend_before" | sed -n '12p')"
-frontend_readiness_stale="$(printf '%s\n' "$frontend_before" | sed -n '13p')"
-frontend_readiness_degraded="$(printf '%s\n' "$frontend_before" | sed -n '14p')"
-printf 'PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
-    "$FRONTEND_HEALTH_URL" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded"
+frontend_freshness_source_kind="$(printf '%s\n' "$frontend_before" | sed -n '12p')"
+frontend_freshness_synthetic="$(printf '%s\n' "$frontend_before" | sed -n '13p')"
+frontend_freshness_live_data_observed="$(printf '%s\n' "$frontend_before" | sed -n '14p')"
+frontend_readiness_status="$(printf '%s\n' "$frontend_before" | sed -n '15p')"
+frontend_readiness_stale="$(printf '%s\n' "$frontend_before" | sed -n '16p')"
+frontend_readiness_degraded="$(printf '%s\n' "$frontend_before" | sed -n '17p')"
+printf 'PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s freshness_source_kind=%s freshness_synthetic=%s freshness_live_data_observed=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s require_live_data=%s\n' \
+    "$FRONTEND_HEALTH_URL" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_freshness_source_kind" "$frontend_freshness_synthetic" "$frontend_freshness_live_data_observed" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded" "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"
 check_product_static_ui
 check_product_browser_ui
 
@@ -1083,9 +1113,12 @@ frontend_after="$(wait_frontend_refresh_progress "$frontend_started_at_before" "
 frontend_started_at_after="$(printf '%s\n' "$frontend_after" | sed -n '1p')"
 frontend_loaded_after="$(printf '%s\n' "$frontend_after" | sed -n '2p')"
 frontend_errors_after="$(printf '%s\n' "$frontend_after" | sed -n '3p')"
-frontend_readiness_status_after="$(printf '%s\n' "$frontend_after" | sed -n '4p')"
-frontend_readiness_stale_after="$(printf '%s\n' "$frontend_after" | sed -n '5p')"
-frontend_readiness_degraded_after="$(printf '%s\n' "$frontend_after" | sed -n '6p')"
+frontend_freshness_source_kind_after="$(printf '%s\n' "$frontend_after" | sed -n '4p')"
+frontend_freshness_synthetic_after="$(printf '%s\n' "$frontend_after" | sed -n '5p')"
+frontend_freshness_live_data_observed_after="$(printf '%s\n' "$frontend_after" | sed -n '6p')"
+frontend_readiness_status_after="$(printf '%s\n' "$frontend_after" | sed -n '7p')"
+frontend_readiness_stale_after="$(printf '%s\n' "$frontend_after" | sed -n '8p')"
+frontend_readiness_degraded_after="$(printf '%s\n' "$frontend_after" | sed -n '9p')"
 wait_frontend_feature_output "$market_ticker" "$bbo_event_id"
 feature_http_done_ms="$(now_ms)"
 wait_frontend_quote "$market_ticker"
@@ -1121,7 +1154,7 @@ if [ "$product_latency_status" = "ok" ]; then
         fi
     done
 fi
-printf 'PASS product_latency market=%s run_id=%s source_event_id=%s canonical_commit_seq=%s latest_market_state_commit_seq=%s canonical_to_feature_ms=%s feature_to_latest_state_ms=%s canonical_to_latest_state_ms=%s seed_to_cursor_ms=%s seed_to_feature_ms=%s seed_to_frontend_feature_ms=%s seed_to_frontend_quote_ms=%s seed_to_sse_ms=%s seed_insert_ms=%s max_allowed_ms=%s status=%s\n' \
+printf 'PASS product_latency market=%s run_id=%s source_event_id=%s source_kind=smoke synthetic=true canonical_commit_seq=%s latest_market_state_commit_seq=%s canonical_to_feature_ms=%s feature_to_latest_state_ms=%s canonical_to_latest_state_ms=%s seed_to_cursor_ms=%s seed_to_feature_ms=%s seed_to_frontend_feature_ms=%s seed_to_frontend_quote_ms=%s seed_to_sse_ms=%s seed_insert_ms=%s max_allowed_ms=%s status=%s\n' \
     "$market_ticker" "$run_id" "$latency_source_event_id" "$latency_canonical_commit_seq" "$latency_latest_market_state_commit_seq" \
     "$canonical_to_feature_ms" "$feature_to_latest_state_ms" "$canonical_to_latest_state_ms" \
     "$seed_to_cursor_ms" "$seed_to_feature_ms" "$seed_to_frontend_feature_ms" "$seed_to_frontend_quote_ms" \
@@ -1138,7 +1171,8 @@ wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health
 wait_plain_health featureplant-db-follower "$FEATUREPLANT_HEALTH_URL"
 
-printf 'PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
+printf 'PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s freshness_source_kind=%s freshness_synthetic=%s freshness_live_data_observed=%s live_data_observed=%s require_live_data=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
     "$market_ticker" "$run_id" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$cursor_before" "$target_commit_seq" "$cursor_after" "$feature_outputs_after" \
     "$frontend_started_at_after" "$frontend_loaded_before" "$frontend_loaded_after" "$frontend_errors_after" \
+    "$frontend_freshness_source_kind_after" "$frontend_freshness_synthetic_after" "$frontend_freshness_live_data_observed_after" "$LIVE_DATA_OBSERVED" "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA" \
     "$frontend_readiness_status_after" "$frontend_readiness_stale_after" "$frontend_readiness_degraded_after"

@@ -28,6 +28,7 @@ public class FrontendFeatureStore {
     private final Map<String, Map<String, LatestFeature>> latestByMarket = new HashMap<>();
     private final AtomicLong totalAccepted = new AtomicLong();
     private LatestFeature latestGlobal;
+    private LatestFeature latestLiveGlobal;
     private long sequence;
 
     public FrontendFeatureStore(int maxFeaturesPerMarket, int maxSymbolsIndexed) {
@@ -89,6 +90,10 @@ public class FrontendFeatureStore {
         if (latestGlobal == null || key.compareTo(latestGlobal.key()) >= 0) {
             latestGlobal = new LatestFeature(out, key);
         }
+        if (!FrontendSyntheticData.isSmoke(out)
+            && (latestLiveGlobal == null || key.compareTo(latestLiveGlobal.key()) >= 0)) {
+            latestLiveGlobal = new LatestFeature(out, key);
+        }
         totalAccepted.incrementAndGet();
         sequence = acceptedSequence;
         notifyAll();
@@ -137,29 +142,51 @@ public class FrontendFeatureStore {
 
     private void recomputeLatestGlobal() {
         LatestFeature best = null;
+        LatestFeature bestLive = null;
         for (Map<String, LatestFeature> byFeature : latestByMarket.values()) {
             for (LatestFeature candidate : byFeature.values()) {
                 if (best == null || candidate.key().compareTo(best.key()) >= 0) {
                     best = candidate;
                 }
+                if (!FrontendSyntheticData.isSmoke(candidate.output())
+                    && (bestLive == null || candidate.key().compareTo(bestLive.key()) >= 0)) {
+                    bestLive = candidate;
+                }
             }
         }
         latestGlobal = best;
+        latestLiveGlobal = bestLive;
     }
 
     public synchronized DataFreshness latestFreshness(long nowMs) {
         if (latestGlobal == null) {
-            return new DataFreshness(null, null, null, null, null, sequence);
+            return new DataFreshness(
+                null,
+                null,
+                null,
+                null,
+                null,
+                FrontendSyntheticData.SOURCE_KIND_UNKNOWN,
+                false,
+                false,
+                sequence
+            );
         }
-        FeatureOutput output = latestGlobal.output();
+        boolean liveDataObserved = latestLiveGlobal != null;
+        LatestFeature selected = liveDataObserved ? latestLiveGlobal : latestGlobal;
+        FeatureOutput output = selected.output();
         Long eventTsMs = output.eventTsMs();
         Long eventAgeMs = eventTsMs == null ? null : Math.max(0L, nowMs - eventTsMs);
+        String sourceKind = FrontendSyntheticData.sourceKind(output);
         return new DataFreshness(
             eventTsMs,
             eventAgeMs,
             output.marketTicker(),
             output.featureName(),
             output.sourceEventId(),
+            sourceKind,
+            FrontendSyntheticData.isSynthetic(sourceKind),
+            liveDataObserved,
             sequence
         );
     }
@@ -262,6 +289,9 @@ public class FrontendFeatureStore {
         String symbol,
         String featureName,
         String sourceEventId,
+        String sourceKind,
+        boolean synthetic,
+        boolean liveDataObserved,
         long storeSequence
     ) {
     }

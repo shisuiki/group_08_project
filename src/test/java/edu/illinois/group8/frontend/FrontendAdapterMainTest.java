@@ -353,6 +353,7 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/quotes?symbols="));
         assertTrue(app.contains("nextSequence < quoteSequence"));
         assertTrue(app.contains("/markets?limit=100"));
+        assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(app.contains("/features?symbol="));
         assertTrue(app.contains("/health"));
     }

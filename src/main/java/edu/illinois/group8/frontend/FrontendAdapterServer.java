@@ -249,7 +249,8 @@ public class FrontendAdapterServer {
         }
         List<Map<String, Object>> results = new ArrayList<>();
         Set<String> seen = ConcurrentHashMap.newKeySet();
-        for (MarketMetadata metadata : metadataCatalog.search(query, null, limit)) {
+        boolean includeSmoke = includeSmokeMarkets(params);
+        for (MarketMetadata metadata : metadataCatalog.search(query, null, limit, includeSmoke)) {
             results.add(searchEntry(metadata));
             seen.add(metadata.marketTicker());
             if (results.size() >= limit) {
@@ -261,6 +262,9 @@ public class FrontendAdapterServer {
                 break;
             }
             if (!seen.add(symbol)) {
+                continue;
+            }
+            if (!includeSmoke && FrontendSyntheticData.isSmokeMarketTicker(symbol)) {
                 continue;
             }
             if (query.isEmpty() || symbol.toLowerCase(Locale.ROOT).contains(query)) {
@@ -334,13 +338,24 @@ public class FrontendAdapterServer {
     }
 
     private void handleSymbols(HttpExchange exchange) throws IOException {
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        boolean includeSmoke = includeSmokeMarkets(params);
         Set<String> symbols = store.symbols();
         List<Map<String, Object>> entries = new ArrayList<>(symbols.size());
         for (String symbol : symbols) {
+            if (!includeSmoke && FrontendSyntheticData.isSmokeMarketTicker(symbol)) {
+                continue;
+            }
             Optional<FeatureOutput> latestBbo = store.latest(symbol, FrontendFeatureStore.BBO_FEATURE);
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("symbol", symbol);
             entry.put("latest_event_ts_ms", latestBbo.map(FeatureOutput::eventTsMs).orElse(null));
+            String sourceKind = latestBbo.map(FrontendSyntheticData::sourceKind)
+                .orElse(FrontendSyntheticData.isSmokeMarketTicker(symbol)
+                    ? FrontendSyntheticData.SOURCE_KIND_SMOKE
+                    : FrontendSyntheticData.SOURCE_KIND_UNKNOWN);
+            entry.put("source_kind", sourceKind);
+            entry.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
             entries.add(entry);
         }
         writeJson(exchange, 200, Map.of("symbols", entries));
@@ -467,6 +482,9 @@ public class FrontendAdapterServer {
                 quote.put("event_ts_ms", out.eventTsMs());
                 quote.put("source_event_id", out.sourceEventId());
                 quote.put("feature_name", out.featureName());
+                String sourceKind = FrontendSyntheticData.sourceKind(out);
+                quote.put("source_kind", sourceKind);
+                quote.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
             } else {
                 quote.put("bid_micros", null);
                 quote.put("ask_micros", null);
@@ -474,6 +492,8 @@ public class FrontendAdapterServer {
                 quote.put("event_ts_ms", null);
                 quote.put("source_event_id", null);
                 quote.put("feature_name", null);
+                quote.put("source_kind", FrontendSyntheticData.SOURCE_KIND_UNKNOWN);
+                quote.put("synthetic", false);
             }
             quotes.add(quote);
         }
@@ -526,7 +546,8 @@ public class FrontendAdapterServer {
         }
         String query = params.getOrDefault("query", "");
         String status = params.getOrDefault("status", "");
-        List<Map<String, Object>> markets = metadataCatalog.search(query, status, limit).stream()
+        boolean includeSmoke = includeSmokeMarkets(params);
+        List<Map<String, Object>> markets = metadataCatalog.search(query, status, limit, includeSmoke).stream()
             .map(FrontendAdapterServer::marketMetadataBody)
             .toList();
         Map<String, Object> body = new LinkedHashMap<>();
@@ -696,6 +717,9 @@ public class FrontendAdapterServer {
         body.put("market_ticker", output.marketTicker());
         body.put("event_ts_ms", output.eventTsMs());
         body.put("source_event_id", output.sourceEventId());
+        String sourceKind = FrontendSyntheticData.sourceKind(output);
+        body.put("source_kind", sourceKind);
+        body.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
         body.put("values", output.values());
         return body;
     }
@@ -721,6 +745,9 @@ public class FrontendAdapterServer {
         body.put("symbol", freshness.symbol());
         body.put("feature_name", freshness.featureName());
         body.put("source_event_id", freshness.sourceEventId());
+        body.put("source_kind", freshness.sourceKind());
+        body.put("synthetic", freshness.synthetic());
+        body.put("live_data_observed", freshness.liveDataObserved());
         body.put("store_sequence", freshness.storeSequence());
         return body;
     }
@@ -739,6 +766,9 @@ public class FrontendAdapterServer {
             || freshness.latestEventAgeMs() > DATA_FRESHNESS_STALE_AFTER_MS) {
             stale = true;
             reasons.add("stale_feature_output");
+        }
+        if (freshness.synthetic()) {
+            reasons.add("synthetic_freshness");
         }
         if (refresh.enabled() && !refresh.running()) {
             reasons.add("feature_refresh_stopped");
@@ -772,6 +802,9 @@ public class FrontendAdapterServer {
         body.put("open_time", metadata.openTime() == null ? null : metadata.openTime().toString());
         body.put("close_time", metadata.closeTime() == null ? null : metadata.closeTime().toString());
         body.put("settlement_time", metadata.settlementTime() == null ? null : metadata.settlementTime().toString());
+        String sourceKind = FrontendSyntheticData.sourceKind(metadata);
+        body.put("source_kind", sourceKind);
+        body.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
         return body;
     }
 
@@ -784,6 +817,9 @@ public class FrontendAdapterServer {
         entry.put("ticker", metadata.marketTicker());
         entry.put("type", "binary");
         entry.put("status", metadata.status());
+        String sourceKind = FrontendSyntheticData.sourceKind(metadata);
+        entry.put("source_kind", sourceKind);
+        entry.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
         return entry;
     }
 
@@ -808,6 +844,21 @@ public class FrontendAdapterServer {
         body.put("open_time", metadata.openTime() == null ? null : metadata.openTime().toString());
         body.put("close_time", metadata.closeTime() == null ? null : metadata.closeTime().toString());
         body.put("settlement_time", metadata.settlementTime() == null ? null : metadata.settlementTime().toString());
+        String sourceKind = FrontendSyntheticData.sourceKind(metadata);
+        body.put("source_kind", sourceKind);
+        body.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
+    }
+
+    private boolean includeSmokeMarkets(Map<String, String> params) {
+        String override = params.get("include_smoke");
+        if (override == null) {
+            return config.includeSmokeMarkets();
+        }
+        return switch (override.trim().toLowerCase(Locale.ROOT)) {
+            case "1", "true", "yes", "y", "on" -> true;
+            case "0", "false", "no", "n", "off" -> false;
+            default -> config.includeSmokeMarkets();
+        };
     }
 
     private static int parseLimit(String raw, int defaultLimit, int maxLimit) {

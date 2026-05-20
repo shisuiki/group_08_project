@@ -391,6 +391,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("verifier accepted degraded product readiness"));
         assertTrue(validator.contains("feature_source_mismatch_file="));
         assertTrue(validator.contains("accepted frontend feature_source mismatch"));
+        assertTrue(validator.contains("unknown-ok-release-evidence.json"));
+        assertTrue(validator.contains("accepted unknown freshness ok readiness"));
         assertTrue(validator.contains("release evidence summary missing expected field"));
         assertTrue(validator.contains("release evidence summary leaked forbidden value"));
         assertTrue(validator.contains("| evidence_artifact | live-product-release-evidence-release-sha-123-2 |"));
@@ -414,6 +416,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(verifier.contains("product_latency status must be ok"));
         assertTrue(verifier.contains("seed_to_frontend_quote_ms"));
         assertTrue(verifier.contains("exceeds max_allowed_ms"));
+        assertTrue(verifier.contains("unknown freshness cannot report ok product readiness"));
         assertTrue(verifier.contains("final product_readiness must not be degraded"));
         assertTrue(verifier.contains("final product_readiness status must be ok"));
 
@@ -514,6 +517,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("long-poll fallback"));
         assertTrue(app.contains("fallback polling"));
         assertTrue(app.contains("latest_event_ts_ms"));
+        assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));
         assertTrue(chart.contains("v4.2.0"));
         assertNoExternalCdn(index);

@@ -149,6 +149,74 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void marketCatalogHidesSmokeByDefaultAndAllowsExplicitOverride() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature("MKT-LIVE", System.currentTimeMillis() - 250L, "live-source", 500_000L));
+        store.accept(feature(
+            "LIVE-PRODUCT-SMOKE-run-1",
+            System.currentTimeMillis() - 100L,
+            "live-product-smoke-run-1-bbo-001",
+            600_000L
+        ));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.loaded("test", List.of(
+                metadata("MKT-LIVE", "EVENT-LIVE", "SERIES-LIVE", "open"),
+                metadata("LIVE-PRODUCT-SMOKE-run-1", "LIVE-PRODUCT-SMOKE", "LIVE-PRODUCT-SMOKE", "open")
+            )),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode markets = getJson("/markets?limit=10");
+        assertEquals(1, markets.path("count").asInt());
+        assertEquals("MKT-LIVE", markets.path("markets").get(0).path("market_ticker").asText());
+        JsonNode smokeHiddenSearch = getJson("/datafeed/search?query=LIVE-PRODUCT-SMOKE&limit=10");
+        assertEquals(0, smokeHiddenSearch.size());
+        JsonNode smokeHiddenSymbols = getJson("/symbols");
+        assertFalse(containsSymbol(smokeHiddenSymbols.path("symbols"), "LIVE-PRODUCT-SMOKE-run-1"));
+
+        JsonNode smokeMarkets = getJson("/markets?include_smoke=true&limit=10");
+        assertEquals(2, smokeMarkets.path("count").asInt());
+        assertTrue(containsMarket(smokeMarkets.path("markets"), "LIVE-PRODUCT-SMOKE-run-1"));
+        JsonNode smokeSearch = getJson("/datafeed/search?query=LIVE-PRODUCT-SMOKE&include_smoke=true&limit=10");
+        assertEquals(1, smokeSearch.size());
+        assertEquals("smoke", smokeSearch.get(0).path("source_kind").asText());
+        assertTrue(smokeSearch.get(0).path("synthetic").asBoolean());
+        JsonNode smokeSymbols = getJson("/symbols?include_smoke=true");
+        assertTrue(containsSymbol(smokeSymbols.path("symbols"), "LIVE-PRODUCT-SMOKE-run-1"));
+    }
+
+    @Test
+    void directSmokeQuotesAndFeaturesRemainAvailable() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        String market = "LIVE-PRODUCT-SMOKE-run-1";
+        store.accept(feature(market, System.currentTimeMillis() - 100L, "live-product-smoke-run-1-bbo-001", 600_000L));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode quote = getJson("/quotes?symbols=" + market).path("quotes").get(0);
+        assertEquals(market, quote.path("symbol").asText());
+        assertEquals("smoke", quote.path("source_kind").asText());
+        assertTrue(quote.path("synthetic").asBoolean());
+
+        JsonNode features = getJson("/features?symbol=" + market + "&feature=feature.bbo&limit=10");
+        assertEquals(1, features.path("count").asInt());
+        assertEquals("smoke", features.path("outputs").get(0).path("source_kind").asText());
+        assertTrue(features.path("outputs").get(0).path("synthetic").asBoolean());
+    }
+
+    @Test
     void marketsEndpointRejectsBadLimit() throws Exception {
         HttpResponse<String> badLimit = get("/markets?limit=0");
 
@@ -229,6 +297,7 @@ class UdfEndpointsTest {
         assertTrue(chart.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
         assertTrue(js.body().contains("/markets?limit=100"));
+        assertTrue(js.body().contains("markets.markets.length > 0"));
         assertTrue(js.body().contains("/features?symbol="));
         assertTrue(js.body().contains("/health"));
         assertTrue(js.body().contains("document.getElementById('release-identity')"));
@@ -473,6 +542,9 @@ class UdfEndpointsTest {
         assertEquals("MKT-1", body.path("data_freshness").path("symbol").asText());
         assertEquals("feature.bbo", body.path("data_freshness").path("feature_name").asText());
         assertEquals("evt-5000", body.path("data_freshness").path("source_event_id").asText());
+        assertEquals("live", body.path("data_freshness").path("source_kind").asText());
+        assertFalse(body.path("data_freshness").path("synthetic").asBoolean());
+        assertTrue(body.path("data_freshness").path("live_data_observed").asBoolean());
         assertTrue(body.path("data_freshness").path("latest_event_age_ms").asLong() >= 0L);
         assertEquals("stale", body.path("product_readiness").path("status").asText());
         assertTrue(body.path("product_readiness").path("stale").asBoolean());
@@ -523,6 +595,9 @@ class UdfEndpointsTest {
         assertEquals("MKT-REL", freshness.path("symbol").asText());
         assertEquals("feature.bbo", freshness.path("feature_name").asText());
         assertEquals("evt-release", freshness.path("source_event_id").asText());
+        assertEquals("live", freshness.path("source_kind").asText());
+        assertFalse(freshness.path("synthetic").asBoolean());
+        assertTrue(freshness.path("live_data_observed").asBoolean());
         assertEquals(1L, freshness.path("store_sequence").asLong());
         assertTrue(freshness.path("latest_event_age_ms").asLong() >= 0L);
         JsonNode readiness = body.path("product_readiness");
@@ -569,6 +644,10 @@ class UdfEndpointsTest {
         assertEquals(7, refresh.path("last_row_count").asInt());
         assertEquals(11L, refresh.path("total_loaded").asLong());
         assertEquals(2L, refresh.path("refresh_errors").asLong());
+        JsonNode freshness = body.path("data_freshness");
+        assertEquals("unknown", freshness.path("source_kind").asText());
+        assertFalse(freshness.path("synthetic").asBoolean());
+        assertFalse(freshness.path("live_data_observed").asBoolean());
         assertEquals("stale", body.path("product_readiness").path("status").asText());
         assertTrue(body.path("product_readiness").path("reasons").toString().contains("no_feature_output"));
         assertTrue(body.path("product_readiness").path("reasons").toString().contains("feature_refresh_errors"));
@@ -612,6 +691,66 @@ class UdfEndpointsTest {
         assertEquals(600_000L, quote.path("midpoint_micros").asLong());
         assertEquals(2_000L, quote.path("event_ts_ms").asLong());
         assertEquals(2L, getJson("/health").path("feature_output_refresh").path("total_loaded").asLong());
+    }
+
+    @Test
+    void healthMarksSmokeOnlyFreshnessAsSyntheticAndDegraded() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature(
+            "LIVE-PRODUCT-SMOKE-run-1",
+            System.currentTimeMillis() - 100L,
+            "live-product-smoke-run-1-bbo-001",
+            600_000L
+        ));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode body = getJson("/health");
+        JsonNode freshness = body.path("data_freshness");
+        assertEquals("smoke", freshness.path("source_kind").asText());
+        assertTrue(freshness.path("synthetic").asBoolean());
+        assertFalse(freshness.path("live_data_observed").asBoolean());
+        JsonNode readiness = body.path("product_readiness");
+        assertEquals("degraded", readiness.path("status").asText());
+        assertFalse(readiness.path("stale").asBoolean());
+        assertTrue(readiness.path("degraded").asBoolean());
+        assertTrue(readiness.path("reasons").toString().contains("synthetic_freshness"));
+    }
+
+    @Test
+    void healthPrefersLiveFreshnessOverNewerSmoke() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature("MKT-LIVE", System.currentTimeMillis() - 250L, "live-source", 500_000L));
+        store.accept(feature(
+            "LIVE-PRODUCT-SMOKE-run-1",
+            System.currentTimeMillis() - 100L,
+            "live-product-smoke-run-1-bbo-001",
+            600_000L
+        ));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode body = getJson("/health");
+        JsonNode freshness = body.path("data_freshness");
+        assertEquals("MKT-LIVE", freshness.path("symbol").asText());
+        assertEquals("live", freshness.path("source_kind").asText());
+        assertFalse(freshness.path("synthetic").asBoolean());
+        assertTrue(freshness.path("live_data_observed").asBoolean());
+        assertEquals("ok", body.path("product_readiness").path("status").asText());
     }
 
     @Test
@@ -835,6 +974,24 @@ class UdfEndpointsTest {
         assertEquals(200, response.statusCode(), "for " + path);
         assertTrue(response.headers().firstValue("content-type").orElse("").contains("text/event-stream"));
         return new SseStream(response.body());
+    }
+
+    private static boolean containsMarket(JsonNode markets, String marketTicker) {
+        for (JsonNode market : markets) {
+            if (marketTicker.equals(market.path("market_ticker").asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsSymbol(JsonNode symbols, String symbol) {
+        for (JsonNode entry : symbols) {
+            if (symbol.equals(entry.path("symbol").asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static FeatureOutput feature(String market, long eventTsMs, String sourceEventId, long midpointMicros) {

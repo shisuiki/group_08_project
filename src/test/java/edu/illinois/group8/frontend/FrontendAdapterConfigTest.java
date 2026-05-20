@@ -23,6 +23,7 @@ class FrontendAdapterConfigTest {
         assertEquals(1_000, config.featureOutputRefreshIntervalMs());
         assertEquals(10_000, config.featureOutputRefreshMaxRows());
         assertEquals(1_000, config.metadataMaxRows());
+        assertFalse(config.includeSmokeMarkets());
         assertEquals(Path.of("frontend/tradingview-lightweight"), config.staticRoot());
     }
 
@@ -218,11 +219,13 @@ class FrontendAdapterConfigTest {
     void metadataConfigParsesSourceAndMaxRows() {
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
             "FRONTEND_ADAPTER_METADATA_SOURCE", "db",
-            "FRONTEND_ADAPTER_METADATA_MAX_ROWS", "250"
+            "FRONTEND_ADAPTER_METADATA_MAX_ROWS", "250",
+            "FRONTEND_ADAPTER_INCLUDE_SMOKE_MARKETS", "true"
         ));
 
         assertEquals(FrontendAdapterConfig.MetadataSource.DB, config.metadataSource());
         assertEquals(250, config.metadataMaxRows());
+        assertTrue(config.includeSmokeMarkets());
     }
 
     @Test

@@ -77,6 +77,10 @@ public final class FrontendMarketMetadataCatalog {
     }
 
     public List<MarketMetadata> search(String query, String status, int limit) {
+        return search(query, status, limit, true);
+    }
+
+    public List<MarketMetadata> search(String query, String status, int limit, boolean includeSmoke) {
         String normalizedQuery = normalize(query);
         String normalizedStatus = normalize(status);
         int boundedLimit = Math.max(1, limit);
@@ -85,6 +89,9 @@ public final class FrontendMarketMetadataCatalog {
             .sorted(Comparator.comparing(MarketMetadata::marketTicker))
             .toList();
         for (MarketMetadata row : rows) {
+            if (!includeSmoke && FrontendSyntheticData.isSmoke(row)) {
+                continue;
+            }
             if (normalizedStatus != null && !normalizedStatus.equalsIgnoreCase(nullToEmpty(row.status()))) {
                 continue;
             }
