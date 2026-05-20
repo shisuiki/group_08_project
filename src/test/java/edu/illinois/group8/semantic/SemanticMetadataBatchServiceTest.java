@@ -6,6 +6,8 @@ import edu.illinois.group8.storage.db.MarketSemanticMetadata;
 import edu.illinois.group8.storage.db.MarketSemanticMetadataJob;
 import edu.illinois.group8.storage.db.MarketSemanticMetadataStore;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -113,6 +115,41 @@ class SemanticMetadataBatchServiceTest {
         assertEquals("failed", store.metadata.get(0).status());
         assertTrue(store.metadata.get(0).error().contains("budget exceeded"));
         assertEquals(0, summary.paidRequests());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {401, 402, 403})
+    void terminalAuthOrBillingErrorDoesNotRetryOrFallbackToPaidModel(int statusCode) {
+        FakeStore store = new FakeStore();
+        FakeOpenRouter client = new FakeOpenRouter(List.of(
+            new OpenRouterException(statusCode, "Bearer sk-secret-token-12345678901234567890 terminal")
+        ));
+
+        SemanticMetadataBatchSummary summary = service(store, client).run(config(Map.of(
+            "OPENROUTER_API_KEY", "sk-test",
+            "LLM_METADATA_MAX_RETRIES", "2"
+        )));
+
+        assertEquals(1, summary.failed());
+        assertEquals(0, summary.rateLimited());
+        assertEquals(0, summary.paidRequests());
+        assertEquals(List.of("deepseek/deepseek-v4-flash:free"), client.models);
+        assertEquals(1, store.metadata.size());
+        assertEquals(2, store.jobs.size());
+
+        MarketSemanticMetadata metadata = store.metadata.get(0);
+        MarketSemanticMetadataJob job = store.jobs.get(store.jobs.size() - 1);
+        assertEquals("failed", metadata.status());
+        assertEquals("failed", job.status());
+        assertEquals(1, job.attempts());
+        assertEquals("deepseek/deepseek-v4-flash:free", job.actualModel());
+        assertTrue(job.nextRetryAt() == null);
+        assertTrue(!metadata.error().contains("sk-secret-token"));
+        assertTrue(!job.error().contains("sk-secret-token"));
+        assertTrue(!metadata.rawResponse().contains("sk-secret-token"));
+        assertTrue(metadata.error().contains("[redacted]"));
+        assertTrue(job.error().contains("[redacted]"));
+        assertTrue(metadata.rawResponse().contains("[redacted]"));
     }
 
     @Test
