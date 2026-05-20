@@ -13,6 +13,8 @@ STREAM_TAP_HOST_PORT="${STREAM_TAP_HOST_PORT:-8080}"
 STREAM_RECORDER_HOST_PORT="${STREAM_RECORDER_HOST_PORT:-8092}"
 WSCLIENT_START_DELAY_SECONDS="${WSCLIENT_START_DELAY_SECONDS:-20}"
 DEPLOY_DB_PREFLIGHT_REQUIRED="${DEPLOY_DB_PREFLIGHT_REQUIRED:-false}"
+LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"
+FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 
 down_all_profiles() {
     sudo docker compose --env-file "$1" \
@@ -193,6 +195,18 @@ validate_live_product_db_writer() {
     fi
 }
 
+validate_live_product_frontend_feature_source() {
+    env_file="$1"
+    feature_source="$(env_file_value "$env_file" FRONTEND_ADAPTER_FEATURE_SOURCE)"
+    if [ -z "$feature_source" ]; then
+        feature_source="feature_outputs"
+    fi
+    if [ "$feature_source" != "feature_outputs" ]; then
+        log "live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs, got $feature_source."
+        return 1
+    fi
+}
+
 run_db_release_preflight() {
     env_file="$1"
     service="$(db_preflight_service)"
@@ -213,6 +227,9 @@ run_db_release_preflight() {
             ;;
         live-product)
             if ! validate_live_product_db_writer "$env_file"; then
+                return 1
+            fi
+            if ! validate_live_product_frontend_feature_source "$env_file"; then
                 return 1
             fi
             db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
@@ -277,7 +294,7 @@ health_smoke_services() {
             index=$((index + 1))
             eval "url=\${$index}"
             index=$((index + 1))
-            if curl -fsS --connect-timeout 1 --max-time 2 "$url" >/dev/null 2>&1; then
+            if curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 2 "$url" >/dev/null 2>&1; then
                 log "$name health check passed: $url"
             else
                 all_ok=0
@@ -330,6 +347,36 @@ profile_health_smoke() {
     esac
 }
 
+run_live_product_semantic_smoke() {
+    env_file="$1"
+    if [ "$DEPLOY_PROFILE" != "live-product" ]; then
+        return 0
+    fi
+
+    if ! validate_live_product_frontend_feature_source "$env_file"; then
+        return 1
+    fi
+
+    enabled="$(env_file_value "$env_file" LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED)"
+    if [ -z "$enabled" ]; then
+        enabled="$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"
+    fi
+    if ! is_true "$enabled"; then
+        log "WARNING: live-product semantic smoke is disabled; enforcing feature_outputs but recording success without DB-primary product proof."
+        return 0
+    fi
+
+    log "Running live-product semantic smoke before recording candidate success."
+    if ! COMPOSE_ENV_FILE="$env_file" \
+        COMPOSE_PROFILE="$DEPLOY_PROFILE" \
+        LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true \
+        FRONTEND_NO_PROXY="$FRONTEND_NO_PROXY" \
+        sh scripts/live-product-smoke.sh; then
+        log "live-product semantic smoke failed."
+        return 1
+    fi
+}
+
 deploy_env() {
     env_file="$1"
     candidate="$2"
@@ -370,6 +417,11 @@ deploy_env() {
     fi
 
     if ! profile_health_smoke; then
+        diagnose_profile "$env_file"
+        return 1
+    fi
+
+    if ! run_live_product_semantic_smoke "$env_file"; then
         diagnose_profile "$env_file"
         return 1
     fi

@@ -15,7 +15,7 @@ on:
           - cluster-live
           - live-product
       run_live_product_smoke:
-        description: Run live-product DB/FeaturePlant/frontend smoke after deploy
+        description: Run an extra live-product DB/FeaturePlant/frontend smoke after rollback-gated deploy
         required: false
         default: false
         type: boolean
@@ -87,6 +87,7 @@ jobs:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/group_08_project' }}
       DEPLOY_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}
       RUN_LIVE_PRODUCT_SMOKE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}
+      LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: ${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}
       COMPOSE_HOST_BIND_IP: ${{ vars.COMPOSE_HOST_BIND_IP || '127.0.0.1' }}
       KALSHI_BASE_URL: ${{ vars.KALSHI_BASE_URL || 'https://api.elections.kalshi.com' }}
       KALSHI_KEY_ID: ${{ secrets.KALSHI_KEY_ID }}
@@ -199,7 +200,7 @@ jobs:
       FRONTEND_ADAPTER_DB_URL: ${{ vars.FRONTEND_ADAPTER_DB_URL || vars.DB_WRITER_DATABASE_URL }}
       FRONTEND_ADAPTER_DB_USER: ${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}
       FRONTEND_ADAPTER_DB_PASSWORD: ${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}
-      FRONTEND_ADAPTER_FEATURE_SOURCE: ${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'modules' }}
+      FRONTEND_ADAPTER_FEATURE_SOURCE: ${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}
       FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS: ${{ vars.FRONTEND_ADAPTER_FEATURE_OUTPUT_MAX_ROWS || '10000' }}
       FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: ${{ vars.FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED || 'true' }}
       FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS: ${{ vars.FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS || '1000' }}
@@ -299,6 +300,15 @@ jobs:
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "mkdir -p '$DEPLOY_PATH/secrets'"
           printf '%s\n' "$KALSHI_PRIVATE_KEY" | ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
             "cat > '$DEPLOY_PATH/secrets/kalshi_private_key.pem' && chmod 600 '$DEPLOY_PATH/secrets/kalshi_private_key.pem'"
+
+          case "$DEPLOY_PROFILE" in
+            live-product|db-primary-product)
+              if [ "$FRONTEND_ADAPTER_FEATURE_SOURCE" != "feature_outputs" ]; then
+                echo "$DEPLOY_PROFILE requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs" >&2
+                exit 1
+              fi
+              ;;
+          esac
 
           cat > deploy.env <<EOF
           BACKEND_PROFILE=production
@@ -416,6 +426,7 @@ jobs:
           FEATUREPLANT_RUN_ONCE=$FEATUREPLANT_RUN_ONCE
           FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT
           DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT
+          LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED
           FRONTEND_ADAPTER_DB_URL=$FRONTEND_ADAPTER_DB_URL
           FRONTEND_ADAPTER_DB_USER=$FRONTEND_ADAPTER_DB_USER
           FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD
@@ -447,8 +458,9 @@ jobs:
           printf -v q_db_primary_product_frontend_host_port '%q' "$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"
           printf -v q_wsclient_start_delay_seconds '%q' "$WSCLIENT_START_DELAY_SECONDS"
           printf -v q_deploy_db_preflight_required '%q' "$DEPLOY_DB_PREFLIGHT_REQUIRED"
+          printf -v q_live_product_semantic_smoke_enabled '%q' "$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"
           ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
-            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required sh scripts/ec2-compose-rollback-gate.sh"
+            "cd $q_deploy_path && DEPLOY_PROFILE=$q_deploy_profile CANDIDATE_ENV_FILE=.env.next DEPLOY_STATE_DIR=.deploy-state WSCLIENT_METRICS_HOST_PORT=$q_wsclient_metrics_host_port WSCLIENT_CAPTURE_METRICS_HOST_PORT=$q_wsclient_capture_metrics_host_port STREAM_TAP_HOST_PORT=$q_stream_tap_host_port STREAM_RECORDER_HOST_PORT=$q_stream_recorder_host_port FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port WSCLIENT_START_DELAY_SECONDS=$q_wsclient_start_delay_seconds DEPLOY_DB_PREFLIGHT_REQUIRED=$q_deploy_db_preflight_required LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$q_live_product_semantic_smoke_enabled sh scripts/ec2-compose-rollback-gate.sh"
 
       - name: Run live-product smoke
         if: env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'

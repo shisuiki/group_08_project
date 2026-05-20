@@ -190,6 +190,7 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_DB_URL: \${{ vars.FRONTEND_ADAPTER_DB_URL || vars.DB_WRITER_DATABASE_URL }}" \
         "FRONTEND_ADAPTER_DB_USER: \${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}" \
         "FRONTEND_ADAPTER_DB_PASSWORD: \${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}" \
+        "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}" \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT' \
         'LOCAL_DB_NAME=$LOCAL_DB_NAME' \
         'LOCAL_DB_USER=$LOCAL_DB_USER' \
@@ -197,6 +198,7 @@ assert_db_primary_product_defaults_aligned() {
         'FRONTEND_ADAPTER_DB_URL=$FRONTEND_ADAPTER_DB_URL' \
         'FRONTEND_ADAPTER_DB_USER=$FRONTEND_ADAPTER_DB_USER' \
         'FRONTEND_ADAPTER_DB_PASSWORD=$FRONTEND_ADAPTER_DB_PASSWORD' \
+        'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE' \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port'; do
         if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
             printf 'deploy workflow missing db-primary-product frontend propagation: %s\n' "$expected" >&2
@@ -214,8 +216,13 @@ assert_frontend_adapter_db_primary_static_root() {
             printf '%s frontend-adapter-db-primary missing static root default\n' "$profile" >&2
             exit 1
         fi
+        if ! printf '%s\n' "$rendered" \
+            | grep -q '^      FRONTEND_ADAPTER_FEATURE_SOURCE: feature_outputs$'; then
+            printf '%s frontend-adapter-db-primary missing feature_outputs default\n' "$profile" >&2
+            exit 1
+        fi
     done
-    printf 'PASS frontend_adapter_db_primary_static_root\n'
+    printf 'PASS frontend_adapter_db_primary_frontend_contract\n'
 }
 
 assert_cluster_live_db_writer_stays_opt_in() {
@@ -264,7 +271,16 @@ assert_live_product_db_writer_expectations() {
         'live-product requires DB writer, FeaturePlant, and frontend DB URLs to match.' \
         'live-product requires DB writer, FeaturePlant, and frontend DB users to match.' \
         'live-product requires DB writer, FeaturePlant, and frontend DB passwords to match.' \
+        'live-product requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs' \
         'Skipping DB release preflight: live-product uses managed local Timescale; db-migrate validates after startup.' \
+        'validate_live_product_frontend_feature_source()' \
+        'FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"' \
+        'curl -fsS --noproxy "$FRONTEND_NO_PROXY"' \
+        'LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}"' \
+        'run_live_product_semantic_smoke "$env_file"' \
+        'WARNING: live-product semantic smoke is disabled' \
+        'LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true' \
+        'sh scripts/live-product-smoke.sh' \
         "live-product) printf '%s\\n' wsclient" \
         'wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health"' \
         'streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"' \
@@ -479,6 +495,12 @@ assert_live_product_manual_smoke_contract() {
         "run_live_product_smoke:" \
         "DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
         "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}" \
+        "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \
+        "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}" \
+        "live-product|db-primary-product" \
+        "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs" \
+        "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
+        "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
         "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
         "LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh" \
         "bash -n scripts/live-product-smoke.sh" \
