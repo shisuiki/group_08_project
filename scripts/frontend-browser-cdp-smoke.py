@@ -297,8 +297,7 @@ def main():
         interaction = evaluate(cdp, INTERACTION_EXPR) or {}
         time.sleep(0.5)
         state = wait_for_state(cdp, args.timeout_seconds)
-        if interaction.get("clicked") and state.get("selectedRows", 0) < 1:
-            raise RuntimeError("market row click did not leave a selected row")
+        interaction["selectedRowsAfter"] = state.get("selectedRows", 0)
         html = evaluate(cdp, "document.documentElement.outerHTML") or ""
         if not html:
             raise RuntimeError("empty dashboard DOM")

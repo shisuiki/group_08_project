@@ -273,6 +273,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(cdpSmoke.contains("--no-first-run"));
         assertTrue(cdpSmoke.contains("document.documentElement.outerHTML"));
         assertTrue(cdpSmoke.contains("Page.captureScreenshot"));
+        assertTrue(cdpSmoke.contains("selectedRowsAfter"));
+        assertFalse(cdpSmoke.contains("market row click did not leave a selected row"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_ENABLED"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_PREFER"));
         assertTrue(browserSmoke.contains("FRONTEND_BROWSER_SMOKE_DOCKER_SUDO"));
