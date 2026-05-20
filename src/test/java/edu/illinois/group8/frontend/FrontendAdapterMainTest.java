@@ -427,6 +427,8 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/health"));
         assertTrue(app.contains("/ops/pipeline"));
         assertTrue(app.contains("/ops/latency"));
+        assertTrue(app.contains("/operator/catalog/sync"));
+        assertTrue(app.contains("/operator/catalog/sync-status"));
         assertTrue(app.contains("/operator/semantic-metadata/run"));
         assertTrue(app.contains("/operator/semantic-metadata/run-status"));
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));

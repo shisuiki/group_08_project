@@ -33,7 +33,7 @@ public class KalshiWrapper {
             try {
                 this.privateKey = Cryptography.loadPrivateKey(keyPath);
             } catch (Exception e) {
-                System.err.println("Loading private key from filepath " + keyPath + " threw exception with message: " + e.getMessage());
+                System.err.println("Loading private key from configured filepath failed");
             }
         }
     }

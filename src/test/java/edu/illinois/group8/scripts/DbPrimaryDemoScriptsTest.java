@@ -154,6 +154,27 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void catalogSyncOperatorSmokeIsOptionalAndRedacted() throws Exception {
+        String script = read("scripts/catalog-sync-operator-smoke.sh");
+
+        assertTrue(script.contains("CATALOG_SYNC_SMOKE_ENABLED=\"${CATALOG_SYNC_SMOKE_ENABLED:-false}\""));
+        assertTrue(script.contains("skip_or_fail \"disabled\""));
+        assertTrue(script.contains("SKIP catalog_sync_smoke reason=$reason"));
+        assertTrue(script.contains("KALSHI_KEY_ID"));
+        assertTrue(script.contains("KALSHI_KEY_PATH"));
+        assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_BASIC_AUTH_USER"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD"));
+        assertTrue(script.contains("/operator/catalog/sync"));
+        assertTrue(script.contains("/operator/catalog/sync-status"));
+        assertTrue(script.contains("PASS catalog_sync_smoke"));
+        assertTrue(script.contains("curl -fsS --noproxy \"$FRONTEND_NO_PROXY\""));
+        assertTrue(script.contains("reason=secret_leaked"));
+        assertFalse(script.contains("docker compose up"));
+        assertFalse(script.contains("db-primary-product-smoke.sh"));
+    }
+
+    @Test
     void productDemoLauncherCreatesIsolatedStackEvidenceAndCleanup() throws Exception {
         String up = read("scripts/product-demo-up.sh");
         String down = read("scripts/product-demo-down.sh");
@@ -729,6 +750,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"semantic-operator-panel\""));
         assertTrue(index.contains("id=\"semantic-run-start\""));
         assertTrue(index.contains("id=\"semantic-run-openrouter-key\""));
+        assertTrue(index.contains("id=\"catalog-sync-panel\""));
+        assertTrue(index.contains("id=\"catalog-sync-start\""));
+        assertTrue(index.contains("id=\"catalog-sync-dry-run\""));
         assertTrue(app.contains("body.release"));
         assertTrue(app.contains("body.data_freshness"));
         assertTrue(app.contains("body.quote_streams"));
@@ -748,6 +772,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/operator/semantic-metadata/run"));
+        assertTrue(app.contains("/operator/catalog/sync"));
         assertTrue(app.contains("layoutSemanticTreemap"));
         assertTrue(app.contains("semanticTileSizeClass"));
         assertTrue(app.contains("semanticTileTitle"));

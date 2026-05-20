@@ -138,6 +138,21 @@
         operatorChecklist: document.getElementById('operator-checklist'),
         operatorCommandPlan: document.getElementById('operator-command-plan'),
         operatorEnvPlan: document.getElementById('operator-env-plan'),
+        catalogSyncState: document.getElementById('catalog-sync-state'),
+        catalogSyncId: document.getElementById('catalog-sync-id'),
+        catalogSyncCounts: document.getElementById('catalog-sync-counts'),
+        catalogSyncConfig: document.getElementById('catalog-sync-config'),
+        catalogSyncError: document.getElementById('catalog-sync-error'),
+        catalogSyncSeries: document.getElementById('catalog-sync-series'),
+        catalogSyncStatus: document.getElementById('catalog-sync-status'),
+        catalogSyncLimit: document.getElementById('catalog-sync-limit'),
+        catalogSyncMaxPages: document.getElementById('catalog-sync-max-pages'),
+        catalogSyncMaxTickers: document.getElementById('catalog-sync-max-tickers'),
+        catalogSyncMveFilter: document.getElementById('catalog-sync-mve-filter'),
+        catalogSyncDryRun: document.getElementById('catalog-sync-dry-run'),
+        catalogSyncStart: document.getElementById('catalog-sync-start'),
+        catalogSyncRefresh: document.getElementById('catalog-sync-refresh'),
+        catalogSyncOutput: document.getElementById('catalog-sync-output'),
         semanticRunState: document.getElementById('semantic-run-state'),
         semanticRunId: document.getElementById('semantic-run-id'),
         semanticRunCounts: document.getElementById('semantic-run-counts'),
@@ -147,6 +162,8 @@
         semanticRunFallbackModel: document.getElementById('semantic-run-fallback-model'),
         semanticRunTaxonomy: document.getElementById('semantic-run-taxonomy'),
         semanticRunMarketTicker: document.getElementById('semantic-run-market-ticker'),
+        semanticRunSeriesTicker: document.getElementById('semantic-run-series-ticker'),
+        semanticRunMarketStatus: document.getElementById('semantic-run-market-status'),
         semanticRunMaxMarkets: document.getElementById('semantic-run-max-markets'),
         semanticRunBudgetUsd: document.getElementById('semantic-run-budget-usd'),
         semanticRunEstimatedCost: document.getElementById('semantic-run-estimated-cost'),
@@ -220,7 +237,9 @@
     let marketSearchTimer = null;
     let semanticSearchTimer = null;
     let semanticMapGeneration = 0;
+    let catalogSyncStatusTimer = null;
     let semanticRunStatusTimer = null;
+    let lastCatalogSyncCompletion = '';
     let lastSemanticRunCompletion = '';
     let lastHealthBody = null;
     let lastOpsPipeline = null;
@@ -1202,6 +1221,9 @@
             : 'disabled';
         dom.operatorDataSource.textContent =
             `${freshness.source_kind || 'unknown'} / live ${yesNo(freshness.live_data_observed)}`;
+        if (body.catalog_sync_run || body.catalog_sync) {
+            renderCatalogSyncStatus(body.catalog_sync_run || body.catalog_sync);
+        }
         if (body.semantic_metadata_run) {
             renderSemanticRunStatus(body.semantic_metadata_run);
         }
@@ -1233,6 +1255,68 @@
             dom.semanticRunError.textContent = err.message;
             dom.semanticRunStart.disabled = true;
             dom.semanticRunOutput.textContent = '';
+        }
+    }
+
+    async function loadCatalogSyncStatus() {
+        try {
+            const body = await fetchJson('/operator/catalog/sync-status');
+            renderCatalogSyncStatus(body);
+        } catch (err) {
+            dom.catalogSyncState.textContent = 'unavailable';
+            dom.catalogSyncState.className = 'stale';
+            dom.catalogSyncError.textContent = err.message;
+            dom.catalogSyncStart.disabled = true;
+            dom.catalogSyncOutput.textContent = '';
+        }
+    }
+
+    function renderCatalogSyncStatus(body) {
+        const latest = body?.latest_run || null;
+        const state = latest?.state || body?.status || 'idle';
+        const summary = latest?.summary || null;
+        const config = latest?.config || {};
+        dom.catalogSyncState.textContent = state;
+        dom.catalogSyncState.className = state === 'completed' ? 'fresh'
+            : state === 'running' ? ''
+            : state === 'idle' ? ''
+            : 'stale';
+        dom.catalogSyncId.textContent = latest
+            ? `${latest.run_id} / ${latest.started_at || '-'}${latest.finished_at ? ' -> ' + latest.finished_at : ''}`
+            : '-';
+        dom.catalogSyncCounts.textContent = summary
+            ? `pages ${summary.pages_fetched || 0} / discovered ${summary.markets_discovered || 0}` +
+                ` / selected ${summary.markets_selected || 0} / upserted ${summary.rows_upserted || 0}` +
+                ` / dry ${summary.dry_run_rows || 0} / failures ${summary.failures || 0}` +
+                ` / ${summary.outcome || 'completed'}`
+            : '-';
+        dom.catalogSyncConfig.textContent = latest
+            ? `series ${config.series_ticker || '-'} / status ${config.market_status || '-'}` +
+                ` / limit ${config.limit || '-'} / pages ${config.max_pages || '-'}` +
+                ` / max ${config.max_tickers ?? '-'} / dry ${yesNo(config.dry_run)}` +
+                ` / db ${yesNo(config.db_configured)} / key ${yesNo(config.kalshi_key_id_configured)}`
+            : `db ${yesNo(body?.db_configured)} / key ${yesNo(body?.kalshi_key_id_configured)}` +
+                ` / key path ${yesNo(body?.kalshi_private_key_path_configured)}`;
+        dom.catalogSyncError.textContent = latest?.last_error || (state === 'disabled' ? 'operator control disabled' : '-');
+        dom.catalogSyncStart.disabled = body?.running === true || body?.operator_control_enabled !== true;
+        dom.catalogSyncOutput.textContent = latest ? JSON.stringify({
+            state: latest.state,
+            run_id: latest.run_id,
+            summary,
+            config,
+            last_error: latest.last_error || null
+        }, null, 2) : '';
+        if (body?.running === true) {
+            scheduleCatalogSyncStatusRefresh();
+        } else {
+            clearCatalogSyncStatusTimer();
+        }
+        const completionKey = latest && latest.state === 'completed'
+            ? `${latest.run_id}:${latest.finished_at || ''}`
+            : '';
+        if (completionKey && completionKey !== lastCatalogSyncCompletion) {
+            lastCatalogSyncCompletion = completionKey;
+            loadSymbols();
         }
     }
 
@@ -1552,11 +1636,61 @@
         if (ticker) {
             request.market_ticker = ticker;
         }
+        const series = dom.semanticRunSeriesTicker.value.trim();
+        if (series) {
+            request.series_ticker = series;
+        }
+        const status = dom.semanticRunMarketStatus.value.trim();
+        if (status) {
+            request.market_status = status;
+        }
         const apiKey = dom.semanticRunOpenRouterKey.value.trim();
         if (apiKey) {
             request.openrouter_api_key = apiKey;
         }
         return request;
+    }
+
+    function buildCatalogSyncRequest() {
+        const request = {
+            dry_run: dom.catalogSyncDryRun.checked,
+            limit: Number(dom.catalogSyncLimit.value || 20) || 20,
+            max_pages: Number(dom.catalogSyncMaxPages.value || 1) || 1,
+            max_tickers: Number(dom.catalogSyncMaxTickers.value || 0) || 0
+        };
+        const series = dom.catalogSyncSeries.value.trim();
+        if (series) {
+            request.series_ticker = series;
+        }
+        const status = dom.catalogSyncStatus.value.trim();
+        if (status) {
+            request.market_status = status;
+        }
+        const mveFilter = dom.catalogSyncMveFilter.value.trim();
+        if (mveFilter) {
+            request.mve_filter = mveFilter;
+        }
+        return request;
+    }
+
+    async function startCatalogSync() {
+        dom.catalogSyncStart.disabled = true;
+        dom.catalogSyncState.textContent = 'starting';
+        dom.catalogSyncError.textContent = '-';
+        try {
+            const body = await fetchJson('/operator/catalog/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildCatalogSyncRequest())
+            });
+            renderCatalogSyncStatus(body);
+        } catch (err) {
+            dom.catalogSyncState.textContent = 'blocked';
+            dom.catalogSyncState.className = 'stale';
+            dom.catalogSyncError.textContent = err.message;
+        } finally {
+            await loadOperatorStatus();
+        }
     }
 
     async function startSemanticMetadataRun() {
@@ -1589,6 +1723,18 @@
         if (semanticRunStatusTimer != null) {
             clearTimeout(semanticRunStatusTimer);
             semanticRunStatusTimer = null;
+        }
+    }
+
+    function scheduleCatalogSyncStatusRefresh() {
+        clearCatalogSyncStatusTimer();
+        catalogSyncStatusTimer = setTimeout(loadCatalogSyncStatus, 2500);
+    }
+
+    function clearCatalogSyncStatusTimer() {
+        if (catalogSyncStatusTimer != null) {
+            clearTimeout(catalogSyncStatusTimer);
+            catalogSyncStatusTimer = null;
         }
     }
 
@@ -1881,6 +2027,8 @@
     dom.semanticTagFilter.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticSearch.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticRefresh.addEventListener('click', loadSemanticMap);
+    dom.catalogSyncStart.addEventListener('click', startCatalogSync);
+    dom.catalogSyncRefresh.addEventListener('click', loadCatalogSyncStatus);
     dom.semanticRunStart.addEventListener('click', startSemanticMetadataRun);
     dom.semanticRunRefresh.addEventListener('click', loadSemanticRunStatus);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
@@ -1896,6 +2044,7 @@
         loadOpsTelemetry();
         loadOperatorStatus();
         loadSemanticMap();
+        loadCatalogSyncStatus();
         loadSemanticRunStatus();
     });
 
@@ -1909,6 +2058,7 @@
         loadOpsTelemetry();
         loadOperatorStatus();
         loadSemanticMap();
+        loadCatalogSyncStatus();
         loadSemanticRunStatus();
     });
 })();

@@ -83,6 +83,7 @@ public class FrontendAdapterServer {
     private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
     private final SemanticMarketMetadataReader semanticMarketMetadataReader;
     private final SemanticMetadataOperatorService semanticMetadataOperator;
+    private final CatalogSyncOperatorService catalogSyncOperator;
     private final FrontendReleaseInfo releaseInfo;
     private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -255,6 +256,36 @@ public class FrontendAdapterServer {
         FrontendReleaseInfo releaseInfo,
         SemanticMetadataOperatorService semanticMetadataOperator
     ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            semanticMetadataOperator,
+            CatalogSyncOperatorService.create(config, System.getenv())
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        CatalogSyncOperatorService catalogSyncOperator
+    ) {
         this.config = config;
         this.store = store;
         this.metadataCatalog = metadataCatalog == null
@@ -279,6 +310,9 @@ public class FrontendAdapterServer {
         this.semanticMetadataOperator = semanticMetadataOperator == null
             ? SemanticMetadataOperatorService.create(config, System.getenv())
             : semanticMetadataOperator;
+        this.catalogSyncOperator = catalogSyncOperator == null
+            ? CatalogSyncOperatorService.create(config, System.getenv())
+            : catalogSyncOperator;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
     }
@@ -304,6 +338,8 @@ public class FrontendAdapterServer {
         bind("/ops/latency", this::handleOpsLatency);
         bind("/operator/status", this::handleOperatorStatus);
         bind("/operator/plan", this::handleOperatorPlan);
+        bind("/operator/catalog/sync", this::handleOperatorCatalogSync);
+        bind("/operator/catalog/sync-status", this::handleOperatorCatalogSyncStatus);
         bind("/operator/semantic-metadata/run", this::handleOperatorSemanticMetadataRun);
         bind("/operator/semantic-metadata/run-status", this::handleOperatorSemanticMetadataRunStatus);
         bind("/", this::handleStaticAsset);
@@ -329,6 +365,7 @@ public class FrontendAdapterServer {
             httpExecutor = null;
         }
         semanticMetadataOperator.close();
+        catalogSyncOperator.close();
     }
 
     private void bind(String path, HttpHandler delegate) {
@@ -844,6 +881,7 @@ public class FrontendAdapterServer {
             metadataView.put("error", operatorVisibleError(metadataCatalog.error()));
         }
         health.put("market_metadata", metadataView);
+        health.put("catalog_sync", catalogSyncOperator.statusBody());
         Map<String, Object> fp = new LinkedHashMap<>();
         fp.put("events_in", stats.eventsIn());
         fp.put("events_out", stats.eventsOut());
@@ -912,6 +950,8 @@ public class FrontendAdapterServer {
         body.put("runtime", runtimeStatusBody());
         body.put("configuration", operatorControlPlane.configurationStatus());
         body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
+        body.put("catalog_sync", catalogSyncOperator.statusBody());
+        body.put("catalog_sync_run", catalogSyncOperator.statusBody());
         body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
         body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
         body.put("data_freshness", dataFreshnessBody(freshness));
@@ -971,6 +1011,42 @@ public class FrontendAdapterServer {
         } catch (IOException e) {
             writeError(exchange, 400, "malformed JSON payload");
         }
+    }
+
+    private void handleOperatorCatalogSync(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!config.operatorControlEnabled()) {
+            writeError(exchange, 403, "operator control POST is disabled");
+            return;
+        }
+        if (!config.basicAuthEnabled()) {
+            writeError(exchange, 403, "operator control POST requires Basic Auth");
+            return;
+        }
+        try {
+            JsonNode request = mapper.readTree(exchange.getRequestBody());
+            writeJson(exchange, 202, catalogSyncOperator.start(request));
+        } catch (CatalogSyncOperatorService.RunAlreadyActiveException e) {
+            Map<String, Object> body = new LinkedHashMap<>(catalogSyncOperator.statusBody());
+            body.put("status", "blocked");
+            body.put("message", e.getMessage());
+            writeJson(exchange, 409, body);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+        } catch (IOException e) {
+            writeError(exchange, 400, "malformed JSON payload");
+        }
+    }
+
+    private void handleOperatorCatalogSyncStatus(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        writeJson(exchange, 200, catalogSyncOperator.statusBody());
     }
 
     private void handleOperatorSemanticMetadataRunStatus(HttpExchange exchange) throws IOException {

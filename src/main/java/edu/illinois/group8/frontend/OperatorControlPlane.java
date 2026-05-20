@@ -44,6 +44,7 @@ final class OperatorControlPlane {
         body.put("db", dbStatus());
         body.put("s3", s3Status());
         body.put("basic_auth", basicAuthStatus());
+        body.put("catalog_sync", catalogSyncStatus());
         body.put("semantic_metadata", semanticMetadataConfigStatus());
         body.put("release", releaseInfo.toBody());
         return body;
@@ -225,6 +226,28 @@ final class OperatorControlPlane {
             config.semanticMetadataStatusSource() != FrontendAdapterConfig.SemanticMetadataStatusSource.DISABLED
                 && !config.dbUrl().isBlank());
         body.put("read_api_endpoints", SEMANTIC_METADATA_READ_ENDPOINTS);
+        return body;
+    }
+
+    private Map<String, Object> catalogSyncStatus() {
+        String dbUrl = firstNonBlank(config.dbUrl(), firstEnv("FRONTEND_ADAPTER_DB_URL", "DB_WRITER_DATABASE_URL"));
+        String dbUser = firstNonBlank(config.dbUser(), firstEnv("FRONTEND_ADAPTER_DB_USER", "DB_WRITER_DATABASE_USER"));
+        String dbPassword = firstNonBlank(
+            config.dbPassword(),
+            firstEnv("FRONTEND_ADAPTER_DB_PASSWORD", "DB_WRITER_DATABASE_PASSWORD")
+        );
+        boolean keyId = configured(firstEnv("KALSHI_KEY_ID"));
+        boolean keyPath = configured(firstEnv("KALSHI_KEY_PATH"));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("execution_mode", "operator_async_catalog_only");
+        body.put("db_configured", configured(dbUrl) && configured(dbUser) && configured(dbPassword));
+        body.put("kalshi_key_id_configured", keyId);
+        body.put("kalshi_private_key_path_configured", keyPath);
+        body.put("kalshi_credentials_configured", keyId && keyPath);
+        body.put("kalshi_base_url", OperatorRedactor.redact(firstEnv("KALSHI_BASE_URL")));
+        body.put("writes", "market_metadata");
+        body.put("raw_rest_recording", false);
+        body.put("canonical_events", false);
         return body;
     }
 

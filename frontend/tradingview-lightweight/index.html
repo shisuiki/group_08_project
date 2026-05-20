@@ -374,6 +374,53 @@
                 <pre id="operator-env-plan" class="operator-plan-output"></pre>
             </section>
 
+            <section id="catalog-sync-panel" class="panel">
+                <div class="panel-heading">
+                    <h2>Catalog Sync</h2>
+                    <span id="catalog-sync-state">idle</span>
+                </div>
+                <dl>
+                    <dt>Run</dt><dd id="catalog-sync-id">-</dd>
+                    <dt>Counts</dt><dd id="catalog-sync-counts">-</dd>
+                    <dt>Config</dt><dd id="catalog-sync-config">-</dd>
+                    <dt>Error</dt><dd id="catalog-sync-error">-</dd>
+                </dl>
+                <div class="operator-grid catalog-sync-grid">
+                    <label>Series
+                        <input id="catalog-sync-series" type="text" autocomplete="off" placeholder="KX..." />
+                    </label>
+                    <label>Status
+                        <select id="catalog-sync-status">
+                            <option value="open">open</option>
+                            <option value="">any</option>
+                            <option value="closed">closed</option>
+                            <option value="settled">settled</option>
+                        </select>
+                    </label>
+                    <label>Limit
+                        <input id="catalog-sync-limit" type="number" min="1" max="1000" value="20" />
+                    </label>
+                    <label>Max pages
+                        <input id="catalog-sync-max-pages" type="number" min="1" max="20" value="1" />
+                    </label>
+                    <label>Max tickers
+                        <input id="catalog-sync-max-tickers" type="number" min="0" max="1000" value="20" />
+                    </label>
+                    <label>MVE filter
+                        <input id="catalog-sync-mve-filter" type="text" autocomplete="off" />
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="catalog-sync-dry-run" type="checkbox" checked />
+                        Dry run
+                    </label>
+                </div>
+                <div class="operator-actions">
+                    <button id="catalog-sync-start" type="button">Sync Catalog</button>
+                    <button id="catalog-sync-refresh" type="button">Refresh</button>
+                </div>
+                <pre id="catalog-sync-output" class="operator-plan-output"></pre>
+            </section>
+
             <section id="semantic-operator-panel" class="panel">
                 <div class="panel-heading">
                     <h2>Semantic Metadata</h2>
@@ -397,6 +444,17 @@
                     </label>
                     <label>Market ticker
                         <input id="semantic-run-market-ticker" type="text" autocomplete="off" />
+                    </label>
+                    <label>Series ticker
+                        <input id="semantic-run-series-ticker" type="text" autocomplete="off" />
+                    </label>
+                    <label>Market status
+                        <select id="semantic-run-market-status">
+                            <option value="open">open</option>
+                            <option value="">any</option>
+                            <option value="closed">closed</option>
+                            <option value="settled">settled</option>
+                        </select>
                     </label>
                     <label>Max markets
                         <input id="semantic-run-max-markets" type="number" min="1" max="500" value="25" />

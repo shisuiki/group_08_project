@@ -2,6 +2,7 @@ package edu.illinois.group8.frontend;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.illinois.group8.backfill.CatalogSyncSummary;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.semantic.SemanticMetadataBatchSummary;
 import edu.illinois.group8.semantic.SemanticMetadataConfig;
@@ -346,6 +347,15 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"semantic-operator-panel\""));
         assertTrue(root.body().contains("id=\"semantic-run-start\""));
         assertTrue(root.body().contains("id=\"semantic-run-openrouter-key\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-panel\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-series\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-status\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-limit\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-max-pages\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-max-tickers\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-dry-run\""));
+        assertTrue(root.body().contains("id=\"catalog-sync-start\""));
+        assertTrue(root.body().contains("Sync Catalog"));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("<dt>Quote feed</dt>"));
@@ -392,6 +402,9 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
         assertTrue(js.body().contains("document.getElementById('semantic-run-start')"));
         assertTrue(js.body().contains("document.getElementById('semantic-run-openrouter-key')"));
+        assertTrue(js.body().contains("document.getElementById('catalog-sync-start')"));
+        assertTrue(js.body().contains("document.getElementById('catalog-sync-series')"));
+        assertTrue(js.body().contains("document.getElementById('catalog-sync-mve-filter')"));
         assertTrue(js.body().contains("document.getElementById('trader-bid')"));
         assertTrue(js.body().contains("document.getElementById('research-feature-limit')"));
         assertTrue(js.body().contains("document.getElementById('semantic-group-by')"));
@@ -402,6 +415,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("body.quote_streams"));
         assertTrue(js.body().contains("/operator/status"));
         assertTrue(js.body().contains("/operator/plan"));
+        assertTrue(js.body().contains("/operator/catalog/sync"));
+        assertTrue(js.body().contains("/operator/catalog/sync-status"));
         assertTrue(js.body().contains("/operator/semantic-metadata/run"));
         assertTrue(js.body().contains("/operator/semantic-metadata/run-status"));
         assertTrue(js.body().contains("/ops/pipeline"));
@@ -412,6 +427,9 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("layoutSemanticTreemap"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
+        assertTrue(js.body().contains("buildCatalogSyncRequest"));
+        assertTrue(js.body().contains("startCatalogSync"));
+        assertTrue(js.body().contains("loadCatalogSyncStatus"));
         assertTrue(js.body().contains("quote_updates"));
         assertTrue(js.body().contains("EventSource"));
         assertTrue(js.body().contains("/quotes/stream?symbols="));
@@ -1338,6 +1356,164 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void operatorCatalogSyncPostIsDisabledByDefault() throws Exception {
+        HttpResponse<String> response = postJson("/operator/catalog/sync", "{\"dry_run\":true}");
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("operator control POST is disabled"));
+    }
+
+    @Test
+    void operatorCatalogSyncEnabledStillRequiresBasicAuth() throws Exception {
+        restartWithOperatorControl(false);
+
+        HttpResponse<String> response = postJson("/operator/catalog/sync", "{\"dry_run\":true}");
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("requires Basic Auth"));
+    }
+
+    @Test
+    void operatorCatalogSyncStartsAsyncAndBlocksConcurrentRun() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<CatalogSyncOperatorService.CatalogSyncRunConfig> observed = new AtomicReference<>();
+        String keyId = "catalog-test-key-id";
+        String keyPath = "/run/secrets/catalog-test-key.pem";
+        restartWithCatalogSyncOperator(
+            Map.of("KALSHI_KEY_ID", keyId, "KALSHI_KEY_PATH", keyPath),
+            config -> {
+                observed.set(config);
+                started.countDown();
+                try {
+                    assertTrue(release.await(2, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+                return catalogSummary(2, 3, 2, 2, 0);
+            }
+        );
+
+        String request = """
+            {
+              "dry_run": false,
+              "series_ticker": "KXDEMO",
+              "market_status": "open",
+              "limit": 25,
+              "max_pages": 2,
+              "max_tickers": 2,
+              "mve_filter": "exclude"
+            }
+            """;
+        HttpResponse<String> response =
+            postJsonWithBasicAuth("/operator/catalog/sync", request, "operator", "secret");
+        JsonNode body = MAPPER.readTree(response.body());
+
+        assertEquals(202, response.statusCode());
+        assertEquals("running", body.path("status").asText());
+        assertTrue(body.path("running").asBoolean());
+        assertFalse(response.body().contains(keyId));
+        assertFalse(response.body().contains(keyPath));
+        assertTrue(started.await(2, TimeUnit.SECONDS));
+        CatalogSyncOperatorService.CatalogSyncRunConfig runConfig = observed.get();
+        assertEquals("KXDEMO", runConfig.request().seriesTicker());
+        assertEquals("open", runConfig.request().marketStatus());
+        assertEquals(25, runConfig.request().limit());
+        assertEquals(2, runConfig.request().maxPages());
+        assertEquals(2, runConfig.request().maxTickers());
+        assertEquals("exclude", runConfig.request().mveFilter());
+        assertEquals(409, postJsonWithBasicAuth("/operator/catalog/sync", request, "operator", "secret").statusCode());
+
+        release.countDown();
+        JsonNode completed = waitForCatalogSyncRunState("completed");
+        assertEquals(2, completed.path("latest_run").path("summary").path("rows_upserted").asInt());
+        assertFalse(completed.toString().contains(keyId));
+        assertFalse(completed.toString().contains(keyPath));
+    }
+
+    @Test
+    void operatorCatalogSyncStatusReportsReadinessWithoutSecrets() throws Exception {
+        String keyId = "catalog-readiness-key";
+        String keyPath = "/run/secrets/catalog-readiness.pem";
+        restartWithCatalogSyncOperator(
+            Map.of("KALSHI_KEY_ID", keyId, "KALSHI_KEY_PATH", keyPath),
+            config -> catalogSummary(0, 0, 0, 0, 0)
+        );
+
+        JsonNode status = MAPPER.readTree(getWithBasicAuth(
+            "/operator/catalog/sync-status",
+            "operator",
+            "secret"
+        ).body());
+        JsonNode health = MAPPER.readTree(getWithBasicAuth("/health", "operator", "secret").body());
+        JsonNode operator = MAPPER.readTree(getWithBasicAuth("/operator/status", "operator", "secret").body());
+
+        assertTrue(status.path("db_configured").asBoolean());
+        assertTrue(status.path("kalshi_key_id_configured").asBoolean());
+        assertTrue(status.path("kalshi_private_key_path_configured").asBoolean());
+        assertTrue(health.path("catalog_sync").path("kalshi_key_id_configured").asBoolean());
+        assertEquals(
+            "operator_async_catalog_only",
+            operator.path("configuration").path("catalog_sync").path("execution_mode").asText()
+        );
+        assertTrue(operator.path("configuration").path("catalog_sync").path("db_configured").asBoolean());
+        assertTrue(operator.path("catalog_sync_run").path("kalshi_key_id_configured").asBoolean());
+        String raw = operator.toString() + status.toString() + health.toString();
+        assertFalse(raw.contains(keyId));
+        assertFalse(raw.contains(keyPath));
+    }
+
+    @Test
+    void operatorCatalogSyncRejectsMissingKalshiCredentials() throws Exception {
+        restartWithCatalogSyncOperator(
+            Map.of("KALSHI_KEY_ID", "", "KALSHI_KEY_PATH", ""),
+            config -> catalogSummary(0, 0, 0, 0, 0)
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/catalog/sync",
+            "{\"dry_run\":true,\"max_pages\":1}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("KALSHI_KEY_ID"));
+    }
+
+    @Test
+    void operatorCatalogSyncStatusRedactsRuntimeError() throws Exception {
+        String keyId = "catalog-error-key-id";
+        String keyPath = "/run/secrets/catalog-error-key.pem";
+        restartWithCatalogSyncOperator(
+            Map.of("KALSHI_KEY_ID", keyId, "KALSHI_KEY_PATH", keyPath),
+            config -> {
+                throw new IllegalStateException(
+                    "catalog failed key=" + config.kalshiKeyId()
+                        + " path=" + config.kalshiKeyPath()
+                        + " password=" + config.dbPassword()
+                );
+            }
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/catalog/sync",
+            "{\"dry_run\":false}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode failed = waitForCatalogSyncRunState("failed");
+        String raw = failed.toString();
+        assertFalse(raw.contains(keyId));
+        assertFalse(raw.contains(keyPath));
+        assertFalse(raw.contains("db-secret"));
+        assertTrue(failed.path("latest_run").path("last_error").asText().contains("[redacted]"));
+    }
+
+    @Test
     void healthReportsReleaseIdentityAndDataFreshness() throws Exception {
         server.stop();
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
@@ -1928,11 +2104,66 @@ class UdfEndpointsTest {
         baseUrl = "http://127.0.0.1:" + server.boundPort();
     }
 
+    private void restartWithCatalogSyncOperator(
+        Map<String, String> serviceEnv,
+        Function<CatalogSyncOperatorService.CatalogSyncRunConfig, CatalogSyncSummary> runner
+    ) throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        seed(store);
+        java.util.HashMap<String, String> env = new java.util.HashMap<>();
+        env.put("FRONTEND_ADAPTER_PORT", "0");
+        env.put("FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED", "true");
+        env.put("FRONTEND_ADAPTER_BASIC_AUTH_USER", "operator");
+        env.put("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret");
+        env.put("FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi");
+        env.put("FRONTEND_ADAPTER_DB_USER", "frontend");
+        env.put("FRONTEND_ADAPTER_DB_PASSWORD", "db-secret");
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(env);
+        java.util.HashMap<String, String> runEnv = new java.util.HashMap<>(serviceEnv);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CatalogSyncOperatorService catalogSyncOperator =
+            new CatalogSyncOperatorService(config, runEnv, executor, runner);
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("model", "fallback", "tax-v1"),
+            request -> List.of(),
+            FrontendReleaseInfo.empty(),
+            null,
+            catalogSyncOperator
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
     private JsonNode waitForSemanticRunState(String expectedState) throws Exception {
         JsonNode status = null;
         for (int attempt = 0; attempt < 80; attempt++) {
             status = MAPPER.readTree(getWithBasicAuth(
                 "/operator/semantic-metadata/run-status",
+                "operator",
+                "secret"
+            ).body());
+            if (expectedState.equals(status.path("latest_run").path("state").asText())) {
+                return status;
+            }
+            Thread.sleep(25L);
+        }
+        assertNotNull(status);
+        return status;
+    }
+
+    private JsonNode waitForCatalogSyncRunState(String expectedState) throws Exception {
+        JsonNode status = null;
+        for (int attempt = 0; attempt < 80; attempt++) {
+            status = MAPPER.readTree(getWithBasicAuth(
+                "/operator/catalog/sync-status",
                 "operator",
                 "secret"
             ).body());
@@ -1964,6 +2195,25 @@ class UdfEndpointsTest {
             BigDecimal.ZERO,
             "primary",
             "fallback"
+        );
+    }
+
+    private static CatalogSyncSummary catalogSummary(
+        int pagesFetched,
+        int marketsDiscovered,
+        int marketsSelected,
+        int rowsUpserted,
+        int dryRunRows
+    ) {
+        return new CatalogSyncSummary(
+            pagesFetched,
+            marketsDiscovered,
+            marketsSelected,
+            rowsUpserted,
+            dryRunRows,
+            0,
+            "",
+            false
         );
     }
 
