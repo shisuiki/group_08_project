@@ -420,6 +420,18 @@ jobs:
           TARGET_SHA="${GITHUB_SHA}"
           sudo mkdir -p "\$APP_DIR"
           sudo chown "$EC2_USER:$EC2_USER" "\$APP_DIR"
+          STATE_DIR="\$APP_DIR/.deploy-state"
+          IMAGE_DIR="\$STATE_DIR/images"
+          if [ -d "\$IMAGE_DIR" ]; then
+            cd "\$IMAGE_DIR"
+            ls -1t kalshi-project-*.tar.gz 2>/dev/null | awk 'NR>3 {print}' | while IFS= read -r old_tar; do
+              rm -f -- "\$old_tar" "\$old_tar.sha256"
+            done
+            cd "\$APP_DIR"
+          fi
+          sudo docker builder prune -af >/dev/null || true
+          sudo docker image prune -af >/dev/null || true
+          df -h "\$APP_DIR" || true
 
           if [ -d "\$APP_DIR/.git" ]; then
             git -C "\$APP_DIR" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
