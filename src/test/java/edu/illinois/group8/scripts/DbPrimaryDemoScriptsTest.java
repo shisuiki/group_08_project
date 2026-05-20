@@ -687,6 +687,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("KALSHI_APP_IMAGE_TAR: .deploy-state/images/kalshi-project-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz"));
         assertTrue(script.contains("sudo docker image inspect \"$app_image\""));
         assertTrue(script.contains("skipping Docker Compose build"));
+        assertTrue(script.contains("REBUILD_S3_RECORDING_SYNC"));
+        assertTrue(script.contains("group_08_project-s3-recording-sync already exists; skipping recording-capture sidecar build"));
         assertTrue(script.contains("assert_runtime_container_images()"));
         assertTrue(script.contains("last_success.image"));
         assertTrue(script.contains("last_success.image_tar"));

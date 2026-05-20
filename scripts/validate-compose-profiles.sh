@@ -707,6 +707,14 @@ assert_kalshi_app_image_contract() {
             exit 1
         fi
     done
+    for expected in \
+        'REBUILD_S3_RECORDING_SYNC' \
+        'group_08_project-s3-recording-sync already exists; skipping recording-capture sidecar build'; do
+        if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
+            printf 'rollback gate missing reusable s3-recording-sync image behavior: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
 
     for expected in \
         'KALSHI_APP_IMAGE: kalshi-project:${{ github.sha }}' \

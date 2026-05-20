@@ -551,6 +551,12 @@ build_profile_sidecar_images() {
     env_file="$1"
     case "$DEPLOY_PROFILE" in
         recording-capture)
+            sidecar_image="group_08_project-s3-recording-sync"
+            if ! is_true "${REBUILD_S3_RECORDING_SYNC:-false}" \
+                && sudo docker image inspect "$sidecar_image" >/dev/null 2>&1; then
+                log "group_08_project-s3-recording-sync already exists; skipping recording-capture sidecar build. Set REBUILD_S3_RECORDING_SYNC=true to rebuild."
+                return 0
+            fi
             log "Building recording-capture sidecar images before prebuilt Compose up."
             if ! compose_profile "$env_file" build s3-recording-sync; then
                 log "Docker Compose sidecar build failed."
