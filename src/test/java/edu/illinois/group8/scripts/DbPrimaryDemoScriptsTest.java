@@ -99,6 +99,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("feature_outputs"));
         assertTrue(script.contains("latest_market_state"));
         assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=\"${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}\""));
+        assertTrue(script.contains("print(body.get(\"feature_source\") or \"\")"));
+        assertTrue(script.contains("PASS db_primary_product_smoke symbol=%s feature_source=%s expected_feature_source=%s"));
         assertTrue(script.contains("source_event_id like 'demo-db-primary-canonical-%'"));
         assertTrue(script.contains("EXPECTED_FRONTEND_STARTED_AT"));
         assertTrue(script.contains("EXPECTED_REFRESH_TOTAL_LOADED_MIN=1"));
@@ -138,6 +140,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
         assertTrue(script.contains("FEATUREPLANT_DB_URL"));
         assertTrue(script.contains("FRONTEND_ADAPTER_DB_URL"));
+        assertTrue(script.contains("EXPECTED_FEATURE_SOURCE=\"$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)\""));
+        assertTrue(script.contains("print(body.get(\"feature_source\") or \"\")"));
         assertTrue(script.contains("LiveProductSmokeDbProbeCli"));
         assertTrue(script.contains("db_probe_output=\"$tmpdir/db-probe.out\""));
         assertTrue(script.contains("if ! compose run --rm --no-deps -T"));
@@ -174,6 +178,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("wait_frontend_quote_stream \"$market_ticker\" 461500"));
         assertTrue(script.contains("check_optional_live_data \"$max_commit_before\""));
         assertTrue(script.contains("product_readiness_status"));
+        assertTrue(script.contains("PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s"));
+        assertTrue(script.contains("PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s"));
         assertTrue(
             script.indexOf("check_optional_live_data \"$max_commit_before\"")
                 < script.indexOf("seed_result=\"$(seed_canonical_events"),
@@ -255,6 +261,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("live-product semantic smoke must be enabled before recording a live-product deploy success."));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_JSON"));
         assertTrue(script.contains("live_product_smoke_summary_json()"));
+        assertTrue(script.contains("\"feature_source\": body.get(\"feature_source\")"));
+        assertTrue(script.contains("\"feature_source\","));
+        assertTrue(script.contains("\"expected_feature_source\","));
         assertTrue(script.contains("> \"$smoke_stdout\" 2> \"$smoke_stderr\""));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true"));
         assertTrue(script.contains("sh scripts/live-product-smoke.sh"));
@@ -369,13 +378,21 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(validator.contains("scripts/verify-live-product-release-evidence.sh \"$evidence_file\""));
         assertTrue(validator.contains("degraded-release-evidence.json"));
         assertTrue(validator.contains("verifier accepted degraded product readiness"));
+        assertTrue(validator.contains("feature_source_mismatch_file="));
+        assertTrue(validator.contains("accepted frontend feature_source mismatch"));
         assertTrue(validator.contains("release evidence summary missing expected field"));
         assertTrue(validator.contains("release evidence summary leaked forbidden value"));
         assertTrue(validator.contains("| evidence_artifact | live-product-release-evidence-release-sha-123-2 |"));
+        assertTrue(validator.contains("| frontend_feature_source | latest_market_state |"));
         assertTrue(validator.contains("python3 -m json.tool \"$evidence_file\""));
         assertTrue(validator.contains("secret-db-password"));
         String verifier = read("scripts/verify-live-product-release-evidence.sh");
         assertTrue(verifier.contains("PASS live_product_release_evidence"));
+        assertTrue(verifier.contains("frontend release health feature_source missing"));
+        assertTrue(verifier.contains("final smoke feature_source missing"));
+        assertTrue(verifier.contains("frontend health feature_source mismatch"));
+        assertTrue(verifier.contains("final smoke feature_source mismatch"));
+        assertTrue(verifier.contains("feature_source={at(final, 'feature_source')"));
         assertTrue(verifier.contains("final product_readiness must not be degraded"));
         assertTrue(verifier.contains("final product_readiness status must be ok"));
 
@@ -441,7 +458,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("assert_runtime_container_images()"));
         assertTrue(script.contains("last_success.image"));
         assertTrue(script.contains("last_success.image_tar"));
-        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: \\${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}"));
+        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: \\${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}"));
         assertTrue(script.contains("'FRONTEND_ADAPTER_FEATURE_SOURCE=$FRONTEND_ADAPTER_FEATURE_SOURCE'"));
         assertTrue(script.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\"${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true}\""));
         assertTrue(script.contains("validate_live_product_frontend_feature_source()"));
@@ -500,7 +517,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_URL: ${{ vars.FRONTEND_ADAPTER_DB_URL || vars.DB_WRITER_DATABASE_URL }}"));
         assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_USER: ${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}"));
         assertTrue(workflow.contains("FRONTEND_ADAPTER_DB_PASSWORD: ${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}"));
-        assertTrue(workflow.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: ${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}"));
+        assertTrue(workflow.contains("FRONTEND_ADAPTER_FEATURE_SOURCE: ${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}"));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"));

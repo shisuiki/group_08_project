@@ -130,8 +130,8 @@ cp "$candidate_env" "$compose_env"
     PROFILE_HEALTH_SMOKE_STATUS="passed"
     LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="passed"
     RECORD_SUCCESS_STATUS="passed"
-    FRONTEND_RELEASE_HEALTH_JSON='{"checked":true,"status":"observed","product_readiness":{"status":"ok","stale":false,"degraded":false}}'
-    LIVE_PRODUCT_SMOKE_JSON='{"checked":true,"status":"passed","output_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","stderr_sha256":null,"stderr_present":false,"pass_labels":["health","live_product_smoke","pipeline_reliability"],"pipeline_reliability":{"status":"ok","window_seconds":300,"row_limit":1000,"raw_recent":1,"raw_latest_receive_ts_ns":123,"canonical_recent":1,"canonical_max_commit_seq":7,"cursor_commit_seq":7,"cursor_lag_events":0,"feature_recent":1,"raw_without_canonical":0},"frontend_health":{"service":"frontend-adapter","release_sha":"release-sha","release_profile":"live-product","feature_output_refresh_total_loaded":1,"refresh_errors":0,"freshness_event_ts_ms":1700000000000,"freshness_age_ms":10,"product_readiness_status":"ok","product_readiness_stale":false,"product_readiness_degraded":false},"final_pass":true,"live_product_smoke":{"market":"M","run_id":"run","cursor_before":4,"target_commit_seq":7,"cursor_after":7,"feature_outputs":3,"frontend_total_loaded_before":1,"frontend_total_loaded_after":4,"frontend_refresh_errors_after":0,"product_readiness_status":"ok","product_readiness_stale":false,"product_readiness_degraded":false}}'
+    FRONTEND_RELEASE_HEALTH_JSON='{"checked":true,"status":"observed","feature_source":"latest_market_state","product_readiness":{"status":"ok","stale":false,"degraded":false}}'
+    LIVE_PRODUCT_SMOKE_JSON='{"checked":true,"status":"passed","output_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","stderr_sha256":null,"stderr_present":false,"pass_labels":["health","live_product_smoke","pipeline_reliability"],"pipeline_reliability":{"status":"ok","window_seconds":300,"row_limit":1000,"raw_recent":1,"raw_latest_receive_ts_ns":123,"canonical_recent":1,"canonical_max_commit_seq":7,"cursor_commit_seq":7,"cursor_lag_events":0,"feature_recent":1,"raw_without_canonical":0},"frontend_health":{"service":"frontend-adapter","release_sha":"release-sha","release_profile":"live-product","feature_source":"latest_market_state","expected_feature_source":"latest_market_state","feature_output_refresh_total_loaded":1,"refresh_errors":0,"freshness_event_ts_ms":1700000000000,"freshness_age_ms":10,"product_readiness_status":"ok","product_readiness_stale":false,"product_readiness_degraded":false},"final_pass":true,"live_product_smoke":{"market":"M","run_id":"run","feature_source":"latest_market_state","expected_feature_source":"latest_market_state","cursor_before":4,"target_commit_seq":7,"cursor_after":7,"feature_outputs":3,"frontend_total_loaded_before":1,"frontend_total_loaded_after":4,"frontend_refresh_errors_after":0,"product_readiness_status":"ok","product_readiness_stale":false,"product_readiness_degraded":false}}'
     write_release_evidence "candidate" "success" >/dev/null
 )
 
@@ -160,6 +160,7 @@ for expected_summary in \
     '| outcome | success |' \
     '| pipeline_status | ok |' \
     '| final_product_readiness | ok |' \
+    '| frontend_feature_source | latest_market_state |' \
     '| frontend_release_sha | release-sha |' \
     '| frontend_release_profile | live-product |' \
     '| evidence_artifact | live-product-release-evidence-release-sha-123-2 |'; do
@@ -187,6 +188,26 @@ if EXPECTED_KALSHI_RELEASE_SHA=release-sha \
     EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=2 \
     scripts/verify-live-product-release-evidence.sh "$degraded_evidence_file" >/dev/null 2>&1; then
     printf 'live-product release evidence verifier accepted degraded product readiness\n' >&2
+    exit 1
+fi
+feature_source_mismatch_file="$tmpdir/feature-source-mismatch-release-evidence.json"
+python3 - "$evidence_file" "$feature_source_mismatch_file" <<'PY'
+import json
+import sys
+
+source, target = sys.argv[1:3]
+with open(source, "r", encoding="utf-8") as handle:
+    evidence = json.load(handle)
+evidence["live_product_smoke"]["frontend_health"]["feature_source"] = "feature_outputs"
+evidence["live_product_smoke"]["live_product_smoke"]["feature_source"] = "feature_outputs"
+with open(target, "w", encoding="utf-8") as handle:
+    json.dump(evidence, handle, separators=(",", ":"))
+PY
+if EXPECTED_KALSHI_RELEASE_SHA=release-sha \
+    EXPECTED_KALSHI_GITHUB_RUN_ID=123 \
+    EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT=2 \
+    scripts/verify-live-product-release-evidence.sh "$feature_source_mismatch_file" >/dev/null 2>&1; then
+    printf 'live-product release evidence verifier accepted frontend feature_source mismatch\n' >&2
     exit 1
 fi
 for forbidden_value in \

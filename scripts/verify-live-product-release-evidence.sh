@@ -63,6 +63,7 @@ require(at(gates, "live_product_semantic_smoke") == "passed", "live_product_sema
 
 frontend = at(evidence, "frontend_release_health")
 require(at(frontend, "status") == "observed", "frontend release health must be observed")
+require(isinstance(at(frontend, "feature_source"), str) and at(frontend, "feature_source"), "frontend release health feature_source missing")
 
 smoke = at(evidence, "live_product_smoke")
 require(at(smoke, "checked") is True, "live_product_smoke.checked must be true")
@@ -94,6 +95,12 @@ require(isinstance(frontend_health, dict), "frontend PASS health missing")
 if isinstance(frontend_health, dict):
     require(at(frontend_health, "service") == "frontend-adapter", "frontend health service mismatch")
     require(at(frontend_health, "release_profile") == "live-product", "frontend release_profile mismatch")
+    require(isinstance(at(frontend_health, "feature_source"), str) and at(frontend_health, "feature_source"), "frontend health feature_source missing")
+    require(isinstance(at(frontend_health, "expected_feature_source"), str) and at(frontend_health, "expected_feature_source"), "frontend health expected_feature_source missing")
+    require(
+        at(frontend_health, "feature_source") == at(frontend_health, "expected_feature_source"),
+        "frontend health feature_source mismatch",
+    )
     if expected_sha:
         require(at(frontend_health, "release_sha") == expected_sha, "frontend release_sha mismatch")
     for key in (
@@ -109,6 +116,9 @@ if isinstance(frontend_health, dict):
 final = at(smoke, "live_product_smoke")
 require(isinstance(final, dict), "final live_product_smoke fields missing")
 if isinstance(final, dict):
+    require(isinstance(at(final, "feature_source"), str) and at(final, "feature_source"), "final smoke feature_source missing")
+    require(isinstance(at(final, "expected_feature_source"), str) and at(final, "expected_feature_source"), "final smoke expected_feature_source missing")
+    require(at(final, "feature_source") == at(final, "expected_feature_source"), "final smoke feature_source mismatch")
     for key in (
         "cursor_before",
         "target_commit_seq",
@@ -147,6 +157,7 @@ if summary_mode == "true":
         ("outcome", at(evidence, "outcome")),
         ("pipeline_status", at(pipeline, "status") if isinstance(pipeline, dict) else ""),
         ("final_product_readiness", at(final, "product_readiness_status") if isinstance(final, dict) else ""),
+        ("frontend_feature_source", at(final, "feature_source") if isinstance(final, dict) else ""),
         ("frontend_release_sha", at(frontend_health, "release_sha") if isinstance(frontend_health, dict) else ""),
         ("frontend_release_profile", at(frontend_health, "release_profile") if isinstance(frontend_health, dict) else ""),
         ("evidence_artifact", artifact_name),
@@ -162,6 +173,7 @@ print(
     f"github_run_id={at(evidence, 'github_run_id') or ''} "
     f"github_run_attempt={at(evidence, 'github_run_attempt') or ''} "
     f"pipeline_status={at(pipeline, 'status') if isinstance(pipeline, dict) else ''} "
-    f"final_product_readiness={at(final, 'product_readiness_status') if isinstance(final, dict) else ''}"
+    f"final_product_readiness={at(final, 'product_readiness_status') if isinstance(final, dict) else ''} "
+    f"feature_source={at(final, 'feature_source') if isinstance(final, dict) else ''}"
 )
 PY

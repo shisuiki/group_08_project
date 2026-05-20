@@ -329,6 +329,7 @@ evidence = {
     "status": "observed",
     "url": url,
     "body_sha256": body_sha,
+    "feature_source": body.get("feature_source"),
     "release": pick(release, ("sha", "image", "profile", "run_id", "run_attempt")),
     "data_freshness": {
         "latest_event_ts_ms": freshness.get("latest_event_ts_ms"),
@@ -649,7 +650,7 @@ validate_live_product_frontend_feature_source() {
     env_file="$1"
     feature_source="$(env_file_value "$env_file" FRONTEND_ADAPTER_FEATURE_SOURCE)"
     if [ -z "$feature_source" ]; then
-        feature_source="feature_outputs"
+        feature_source="latest_market_state"
     fi
     case "$feature_source" in
         feature_outputs|latest_market_state|latest_state|latest-state) return 0 ;;
@@ -883,6 +884,8 @@ ALLOWED_KEYS = {
     "health": {
         "service",
         "started_at",
+        "feature_source",
+        "expected_feature_source",
         "feature_output_refresh_total_loaded",
         "refresh_errors",
         "release_sha",
@@ -899,6 +902,8 @@ ALLOWED_KEYS = {
     "live_product_smoke": {
         "market",
         "run_id",
+        "feature_source",
+        "expected_feature_source",
         "cursor_before",
         "target_commit_seq",
         "cursor_after",

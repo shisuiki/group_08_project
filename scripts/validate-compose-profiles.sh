@@ -158,7 +158,7 @@ assert_db_primary_product_defaults_aligned() {
     frontend_rendered="$(service_config_for frontend-adapter-db-primary --profile db-primary-product)"
     for expected in \
         "FRONTEND_ADAPTER_SOURCE: db" \
-        "FRONTEND_ADAPTER_FEATURE_SOURCE: feature_outputs" \
+        "FRONTEND_ADAPTER_FEATURE_SOURCE: latest_market_state" \
         "FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_ENABLED: \"true\"" \
         "FRONTEND_ADAPTER_STATIC_ROOT: /app/frontend/tradingview-lightweight" \
         "FRONTEND_ADAPTER_DB_URL: jdbc:postgresql://timescaledb:5432/kalshi_test" \
@@ -190,7 +190,7 @@ assert_db_primary_product_defaults_aligned() {
         "FRONTEND_ADAPTER_DB_URL: \${{ vars.FRONTEND_ADAPTER_DB_URL || vars.DB_WRITER_DATABASE_URL }}" \
         "FRONTEND_ADAPTER_DB_USER: \${{ vars.FRONTEND_ADAPTER_DB_USER || vars.DB_WRITER_DATABASE_USER }}" \
         "FRONTEND_ADAPTER_DB_PASSWORD: \${{ secrets.FRONTEND_ADAPTER_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD }}" \
-        "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}" \
+        "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}" \
         'DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT' \
         'LOCAL_DB_NAME=$LOCAL_DB_NAME' \
         'LOCAL_DB_USER=$LOCAL_DB_USER' \
@@ -205,7 +205,7 @@ assert_db_primary_product_defaults_aligned() {
             exit 1
         fi
     done
-    printf 'PASS db_primary_product_defaults featureplant=follower frontend=feature_outputs\n'
+    printf 'PASS db_primary_product_defaults featureplant=follower frontend=latest_market_state\n'
 }
 
 assert_frontend_adapter_db_primary_static_root() {
@@ -217,8 +217,17 @@ assert_frontend_adapter_db_primary_static_root() {
             exit 1
         fi
         if ! printf '%s\n' "$rendered" \
+            | grep -q '^      FRONTEND_ADAPTER_FEATURE_SOURCE: latest_market_state$'; then
+            printf '%s frontend-adapter-db-primary missing latest_market_state default\n' "$profile" >&2
+            exit 1
+        fi
+        fallback_rendered="$(
+            FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs \
+                service_config_for frontend-adapter-db-primary --profile "$profile"
+        )"
+        if ! printf '%s\n' "$fallback_rendered" \
             | grep -q '^      FRONTEND_ADAPTER_FEATURE_SOURCE: feature_outputs$'; then
-            printf '%s frontend-adapter-db-primary missing feature_outputs default\n' "$profile" >&2
+            printf '%s frontend-adapter-db-primary missing feature_outputs fallback override\n' "$profile" >&2
             exit 1
         fi
     done
@@ -276,6 +285,8 @@ assert_frontend_release_health_contract() {
             'EXPECTED_KALSHI_GITHUB_RUN_ID' \
             'EXPECTED_KALSHI_GITHUB_RUN_ATTEMPT' \
             'health check failed: release is missing' \
+            'feature_source' \
+            'expected_feature_source' \
             'freshness = body.get("data_freshness")' \
             'latest_event_ts_ms' \
             'latest_event_age_ms' \
@@ -774,7 +785,7 @@ assert_live_product_manual_smoke_contract() {
         "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}" \
         "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_browser_smoke || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \
-        "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}" \
+        "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}" \
         "live-product|db-primary-product" \
         "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
@@ -911,6 +922,11 @@ assert_latest_market_state_smoke_contract() {
             fi
         done
     done
+    if ! grep -Fq 'EXPECTED_FEATURE_SOURCE="${EXPECTED_FEATURE_SOURCE:-latest_market_state}"' \
+        scripts/db-primary-demo-smoke.sh; then
+        printf 'db-primary demo smoke missing latest-market-state default expectation\n' >&2
+        exit 1
+    fi
     for expected in \
         'delete from latest_market_state' \
         'latest_market_state=0 before FeaturePlant'; do

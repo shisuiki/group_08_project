@@ -75,7 +75,7 @@ FEATUREPLANT_DB_PASSWORD="$(env_or_file FEATUREPLANT_DB_PASSWORD "$DB_WRITER_DAT
 FRONTEND_ADAPTER_DB_URL="$(env_or_file FRONTEND_ADAPTER_DB_URL "$DB_WRITER_DATABASE_URL")"
 FRONTEND_ADAPTER_DB_USER="$(env_or_file FRONTEND_ADAPTER_DB_USER "$DB_WRITER_DATABASE_USER")"
 FRONTEND_ADAPTER_DB_PASSWORD="$(env_or_file FRONTEND_ADAPTER_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
-EXPECTED_FEATURE_SOURCE="$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE feature_outputs)"
+EXPECTED_FEATURE_SOURCE="$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)"
 LIVE_PRODUCT_SMOKE_DB_URL="$(env_or_file LIVE_PRODUCT_SMOKE_DB_URL "$DB_WRITER_DATABASE_URL")"
 LIVE_PRODUCT_SMOKE_DB_USER="$(env_or_file LIVE_PRODUCT_SMOKE_DB_USER "$DB_WRITER_DATABASE_USER")"
 LIVE_PRODUCT_SMOKE_DB_PASSWORD="$(env_or_file LIVE_PRODUCT_SMOKE_DB_PASSWORD "$DB_WRITER_DATABASE_PASSWORD")"
@@ -381,6 +381,7 @@ if latest_event_ts_ms is not None and (isinstance(latest_event_ts_ms, bool) or n
 if latest_event_age_ms is not None and (isinstance(latest_event_age_ms, bool) or not isinstance(latest_event_age_ms, int)):
     raise SystemExit("frontend data_freshness.latest_event_age_ms is not an integer or null")
 print(body.get("started_at", ""))
+print(body.get("feature_source") or "")
 print(total_loaded)
 print(refresh_errors)
 print(release.get("sha") or "")
@@ -524,11 +525,11 @@ wait_frontend_refresh_progress() {
     while :; do
         health="$(wait_frontend_ready)"
         started_at="$(printf '%s\n' "$health" | sed -n '1p')"
-        total_loaded="$(printf '%s\n' "$health" | sed -n '2p')"
-        refresh_errors="$(printf '%s\n' "$health" | sed -n '3p')"
-        readiness_status="$(printf '%s\n' "$health" | sed -n '11p')"
-        readiness_stale="$(printf '%s\n' "$health" | sed -n '12p')"
-        readiness_degraded="$(printf '%s\n' "$health" | sed -n '13p')"
+        total_loaded="$(printf '%s\n' "$health" | sed -n '3p')"
+        refresh_errors="$(printf '%s\n' "$health" | sed -n '4p')"
+        readiness_status="$(printf '%s\n' "$health" | sed -n '12p')"
+        readiness_stale="$(printf '%s\n' "$health" | sed -n '13p')"
+        readiness_degraded="$(printf '%s\n' "$health" | sed -n '14p')"
         if [ "$started_at" = "$expected_started_at" ] \
             && [ "$total_loaded" -gt "$min_total_loaded" ] \
             && [ "$refresh_errors" -le "$max_refresh_errors" ]; then
@@ -1007,20 +1008,21 @@ wait_streamtap_health
 wait_plain_health featureplant-db-follower "$FEATUREPLANT_HEALTH_URL"
 frontend_before="$(wait_frontend_ready)"
 frontend_started_at_before="$(printf '%s\n' "$frontend_before" | sed -n '1p')"
-frontend_loaded_before="$(printf '%s\n' "$frontend_before" | sed -n '2p')"
-frontend_errors_before="$(printf '%s\n' "$frontend_before" | sed -n '3p')"
-frontend_release_sha="$(printf '%s\n' "$frontend_before" | sed -n '4p')"
-frontend_release_image="$(printf '%s\n' "$frontend_before" | sed -n '5p')"
-frontend_release_profile="$(printf '%s\n' "$frontend_before" | sed -n '6p')"
-frontend_freshness_event_ts_ms="$(printf '%s\n' "$frontend_before" | sed -n '7p')"
-frontend_freshness_age_ms="$(printf '%s\n' "$frontend_before" | sed -n '8p')"
-frontend_freshness_symbol="$(printf '%s\n' "$frontend_before" | sed -n '9p')"
-frontend_freshness_source_event_id="$(printf '%s\n' "$frontend_before" | sed -n '10p')"
-frontend_readiness_status="$(printf '%s\n' "$frontend_before" | sed -n '11p')"
-frontend_readiness_stale="$(printf '%s\n' "$frontend_before" | sed -n '12p')"
-frontend_readiness_degraded="$(printf '%s\n' "$frontend_before" | sed -n '13p')"
-printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
-    "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded"
+frontend_feature_source_before="$(printf '%s\n' "$frontend_before" | sed -n '2p')"
+frontend_loaded_before="$(printf '%s\n' "$frontend_before" | sed -n '3p')"
+frontend_errors_before="$(printf '%s\n' "$frontend_before" | sed -n '4p')"
+frontend_release_sha="$(printf '%s\n' "$frontend_before" | sed -n '5p')"
+frontend_release_image="$(printf '%s\n' "$frontend_before" | sed -n '6p')"
+frontend_release_profile="$(printf '%s\n' "$frontend_before" | sed -n '7p')"
+frontend_freshness_event_ts_ms="$(printf '%s\n' "$frontend_before" | sed -n '8p')"
+frontend_freshness_age_ms="$(printf '%s\n' "$frontend_before" | sed -n '9p')"
+frontend_freshness_symbol="$(printf '%s\n' "$frontend_before" | sed -n '10p')"
+frontend_freshness_source_event_id="$(printf '%s\n' "$frontend_before" | sed -n '11p')"
+frontend_readiness_status="$(printf '%s\n' "$frontend_before" | sed -n '12p')"
+frontend_readiness_stale="$(printf '%s\n' "$frontend_before" | sed -n '13p')"
+frontend_readiness_degraded="$(printf '%s\n' "$frontend_before" | sed -n '14p')"
+printf 'PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
+    "$FRONTEND_HEALTH_URL" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded"
 check_product_static_ui
 check_product_browser_ui
 
@@ -1078,7 +1080,7 @@ wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health
 wait_plain_health featureplant-db-follower "$FEATUREPLANT_HEALTH_URL"
 
-printf 'PASS live_product_smoke market=%s run_id=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
-    "$market_ticker" "$run_id" "$cursor_before" "$target_commit_seq" "$cursor_after" "$feature_outputs_after" \
+printf 'PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
+    "$market_ticker" "$run_id" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$cursor_before" "$target_commit_seq" "$cursor_after" "$feature_outputs_after" \
     "$frontend_started_at_after" "$frontend_loaded_before" "$frontend_loaded_after" "$frontend_errors_after" \
     "$frontend_readiness_status_after" "$frontend_readiness_stale_after" "$frontend_readiness_degraded_after"

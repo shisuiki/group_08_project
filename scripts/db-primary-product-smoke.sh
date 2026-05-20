@@ -115,6 +115,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
     body = json.load(handle)
 refresh = body.get("feature_output_refresh", {})
 print(body.get("started_at", ""))
+print(body.get("feature_source") or "")
 print(refresh.get("total_loaded", 0))
 PY
             return 0
@@ -258,7 +259,8 @@ docker compose --profile db-primary-product up -d --build --force-recreate front
 
 frontend_health="$(wait_frontend_started)"
 frontend_started_at="$(printf '%s\n' "$frontend_health" | sed -n '1p')"
-frontend_initial_loaded="$(printf '%s\n' "$frontend_health" | sed -n '2p')"
+frontend_feature_source="$(printf '%s\n' "$frontend_health" | sed -n '2p')"
+frontend_initial_loaded="$(printf '%s\n' "$frontend_health" | sed -n '3p')"
 
 FEATUREPLANT_SOURCE=db \
 FEATUREPLANT_OUTPUT=db \
@@ -290,8 +292,8 @@ SMOKE_HTTP_ATTEMPTS="$SMOKE_HTTP_ATTEMPTS" \
 SMOKE_HTTP_RETRY_SLEEP_SECONDS="$SMOKE_HTTP_RETRY_SLEEP_SECONDS" \
 "$SCRIPT_DIR/db-primary-demo-smoke.sh"
 
-printf 'PASS db_primary_product_smoke symbol=%s frontend_started_at=%s initial_loaded=%s feature_outputs=%s expected_feature_outputs_at_least=%s cursor=%s expected_cursor_at_least=%s\n' \
-    "$DEMO_SYMBOL" "$frontend_started_at" "$frontend_initial_loaded" \
+printf 'PASS db_primary_product_smoke symbol=%s feature_source=%s expected_feature_source=%s frontend_started_at=%s initial_loaded=%s feature_outputs=%s expected_feature_outputs_at_least=%s cursor=%s expected_cursor_at_least=%s\n' \
+    "$DEMO_SYMBOL" "$frontend_feature_source" "$FRONTEND_ADAPTER_FEATURE_SOURCE" "$frontend_started_at" "$frontend_initial_loaded" \
     "$feature_outputs_after" "$EXPECTED_FEATURE_OUTPUTS_MIN" "$cursor_after" "$expected_commit_seq"
 printf 'PASS db_primary_product_cursor cursor_before=%s cursor_after=%s expected_cursor_at_least=%s\n' \
     "$cursor_before" "$cursor_after" "$expected_commit_seq"
