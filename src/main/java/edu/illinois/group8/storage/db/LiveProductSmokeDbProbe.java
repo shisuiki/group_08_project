@@ -35,6 +35,48 @@ public final class LiveProductSmokeDbProbe {
         where event_id not like 'live-product-smoke-%'
           and created_at >= now() - interval '15 minutes'
         """;
+    static final String LATEST_NON_SMOKE_CANONICAL_AFTER_SQL = """
+        select
+            event_id,
+            coalesce(market_ticker, ''),
+            stream_name,
+            canonical_commit_seq,
+            coalesce(event_ts_ms, 0)
+        from canonical_events
+        where canonical_commit_seq > ?
+          and event_id not like 'live-product-smoke-%'
+          and stream_name in ('derived.top_of_book', 'canonical.ticker', 'canonical.trade')
+        order by canonical_commit_seq desc
+        limit 1
+        """;
+    static final String FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL = """
+        select
+            count(*) over (),
+            feature_name,
+            coalesce(market_ticker, ''),
+            coalesce(event_ts_ms, 0),
+            coalesce(source_event_id, '')
+        from feature_outputs
+        where source_event_id = ?
+        order by created_at desc, feature_event_id desc
+        limit 1
+        """;
+    static final String LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL = """
+        select
+            coalesce(fo.source_event_id, ''),
+            fo.feature_name,
+            coalesce(fo.market_ticker, ''),
+            coalesce(fo.event_ts_ms, 0),
+            ce.stream_name,
+            ce.canonical_commit_seq
+        from feature_outputs fo
+        join canonical_events ce on ce.event_id = fo.source_event_id
+        where ce.canonical_commit_seq > ?
+          and ce.event_id not like 'live-product-smoke-%'
+          and fo.source_event_id not like 'live-product-smoke-%'
+        order by ce.canonical_commit_seq desc, fo.created_at desc, fo.feature_event_id desc
+        limit 1
+        """;
     static final String UPSERT_MARKET_METADATA_SQL = """
         insert into market_metadata (
             market_ticker,
@@ -165,6 +207,73 @@ public final class LiveProductSmokeDbProbe {
             return singleLong(statement, "recent non-smoke canonical event count");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to count recent non-smoke canonical events", e);
+        }
+    }
+
+    public CanonicalEventSummary latestNonSmokeCanonicalAfter(long afterCommitSeq) {
+        validateNonNegative(afterCommitSeq, "afterCommitSeq");
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(LATEST_NON_SMOKE_CANONICAL_AFTER_SQL)) {
+            statement.setLong(1, afterCommitSeq);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
+                return new CanonicalEventSummary(
+                    resultSet.getString(1),
+                    resultSet.getString(2),
+                    resultSet.getString(3),
+                    resultSet.getLong(4),
+                    resultSet.getLong(5)
+                );
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read latest non-smoke canonical event", e);
+        }
+    }
+
+    public FeatureOutputSummary featureOutputsForSourceEvent(String sourceEventId) {
+        String normalizedSourceEventId = normalize(sourceEventId, "sourceEventId");
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL)) {
+            statement.setString(1, normalizedSourceEventId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return new FeatureOutputSummary(0L, "", "", 0L, normalizedSourceEventId);
+                }
+                return new FeatureOutputSummary(
+                    resultSet.getLong(1),
+                    resultSet.getString(2),
+                    resultSet.getString(3),
+                    resultSet.getLong(4),
+                    resultSet.getString(5)
+                );
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read feature outputs for source event", e);
+        }
+    }
+
+    public LiveFeatureOutputSummary latestNonSmokeFeatureOutputAfter(long afterCommitSeq) {
+        validateNonNegative(afterCommitSeq, "afterCommitSeq");
+        try (Connection connection = connectionFactory.openConnection();
+             PreparedStatement statement = connection.prepareStatement(LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL)) {
+            statement.setLong(1, afterCommitSeq);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
+                return new LiveFeatureOutputSummary(
+                    resultSet.getString(1),
+                    resultSet.getString(2),
+                    resultSet.getString(3),
+                    resultSet.getLong(4),
+                    resultSet.getString(5),
+                    resultSet.getLong(6)
+                );
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read latest non-smoke feature output", e);
         }
     }
 
@@ -318,10 +427,44 @@ public final class LiveProductSmokeDbProbe {
         return value.trim();
     }
 
+    private static void validateNonNegative(long value, String label) {
+        if (value < 0) {
+            throw new IllegalArgumentException(label + " must be non-negative");
+        }
+    }
+
     public record SeedResult(long seededCount, long targetCommitSeq) {
     }
 
     public record FeatureOutputProgress(long featureOutputCount, long cursorCommitSeq) {
+    }
+
+    public record CanonicalEventSummary(
+        String eventId,
+        String marketTicker,
+        String streamName,
+        long commitSeq,
+        long eventTsMs
+    ) {
+    }
+
+    public record FeatureOutputSummary(
+        long count,
+        String featureName,
+        String marketTicker,
+        long eventTsMs,
+        String sourceEventId
+    ) {
+    }
+
+    public record LiveFeatureOutputSummary(
+        String sourceEventId,
+        String featureName,
+        String marketTicker,
+        long eventTsMs,
+        String streamName,
+        long commitSeq
+    ) {
     }
 
     private record SeedEvent(

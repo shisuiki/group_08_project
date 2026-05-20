@@ -280,7 +280,9 @@ assert_frontend_release_health_contract() {
             'latest_event_ts_ms' \
             'latest_event_age_ms' \
             'release-identity' \
-            'health-data-age'; do
+            'health-data-age' \
+            'quote-update-health' \
+            'body.quote_updates'; do
             if ! grep -Fq "$expected" "$smoke_script"; then
                 printf '%s missing release/data freshness contract: %s\n' "$smoke_script" "$expected" >&2
                 exit 1
@@ -291,8 +293,10 @@ assert_frontend_release_health_contract() {
     for expected in \
         'id="release-identity"' \
         'id="health-data-age"' \
+        'id="quote-update-health"' \
         'body.release' \
         'body.data_freshness' \
+        'body.quote_updates' \
         'latest_event_ts_ms'; do
         if ! grep -Fq "$expected" frontend/tradingview-lightweight/index.html frontend/tradingview-lightweight/app.js; then
             printf 'frontend static UI missing release/data freshness contract: %s\n' "$expected" >&2
@@ -749,12 +753,15 @@ assert_featureplant_cursor_config_propagated() {
 assert_live_product_manual_smoke_contract() {
     workflow=".github/workflows/deploy-ec2.yml"
     smoke_script="scripts/live-product-smoke.sh"
+    browser_smoke_script="scripts/frontend-product-browser-smoke.sh"
     smoke_probe="src/main/java/edu/illinois/group8/storage/db/LiveProductSmokeDbProbe.java"
     for expected in \
         "deploy_profile:" \
         "run_live_product_smoke:" \
+        "run_live_product_browser_smoke:" \
         "DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
         "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_smoke || false }}" \
+        "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: \${{ github.event_name == 'workflow_dispatch' && inputs.run_live_product_browser_smoke || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \
         "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'feature_outputs' }}" \
         "live-product|db-primary-product" \
@@ -762,9 +769,12 @@ assert_live_product_manual_smoke_contract() {
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
         "env.DEPLOY_PROFILE == 'live-product' && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
+        "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED=\$q_live_product_browser_smoke_enabled" \
         "LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true sh scripts/live-product-smoke.sh" \
         "bash -n scripts/live-product-smoke.sh" \
-        "sh -n scripts/live-product-smoke.sh"; do
+        "sh -n scripts/live-product-smoke.sh" \
+        "bash -n scripts/frontend-product-browser-smoke.sh" \
+        "sh -n scripts/frontend-product-browser-smoke.sh"; do
         if ! grep -Fq "$expected" "$workflow"; then
             printf 'deploy workflow missing manual live-product smoke contract: %s\n' "$expected" >&2
             exit 1
@@ -790,8 +800,16 @@ assert_live_product_manual_smoke_contract() {
         'cursorCommitSeq' \
         'seedCanonicalEvents' \
         'featureOutputsForPrefix' \
-        'recentNonSmokeCanonicalEvents' \
+        'latestNonSmokeCanonicalAfter' \
+        'featureOutputsForSourceEvent' \
+        'latestNonSmokeFeatureOutputAfter' \
+        'wait_featureplant_cursor_caught_up' \
+        'wait_frontend_live_feature_output' \
+        'wait_frontend_health_non_smoke_freshness' \
         'FEATUREPLANT_DB_CURSOR_NAME' \
+        'LIVE_PRODUCT_BROWSER_SMOKE_ENABLED' \
+        'check_product_browser_ui' \
+        'scripts/frontend-product-browser-smoke.sh' \
         'frontend_static_ui' \
         'vendor/lightweight-charts-4.2.0.standalone.production.js' \
         'frontend static UI must not reference external CDN assets' \
@@ -814,9 +832,29 @@ assert_live_product_manual_smoke_contract() {
         'featureplant_cursors' \
         'feature_outputs' \
         "event_id not like 'live-product-smoke-%'" \
+        'LATEST_NON_SMOKE_CANONICAL_AFTER_SQL' \
+        'FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL' \
+        'LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL' \
         'source_event_id like ?'; do
         if ! grep -Fq "$expected" "$smoke_probe"; then
             printf 'live-product smoke DB probe missing contract fragment: %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
+    for expected in \
+        'chromium chromium-browser google-chrome google-chrome-stable' \
+        '--headless=new' \
+        '--dump-dom' \
+        'id="chart-container"' \
+        '<canvas' \
+        'id="quote-update-health"' \
+        'No markets indexed yet' \
+        'no feature outputs' \
+        'freshness-state' \
+        'PASS frontend_browser_smoke'; do
+        if ! grep -Fq -- "$expected" "$browser_smoke_script"; then
+            printf 'frontend browser smoke script missing contract fragment: %s\n' "$expected" >&2
             exit 1
         fi
     done

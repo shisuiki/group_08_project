@@ -32,6 +32,7 @@
         healthDataAge: document.getElementById('health-data-age'),
         healthSequence: document.getElementById('health-sequence'),
         refreshHealth: document.getElementById('refresh-health'),
+        quoteUpdateHealth: document.getElementById('quote-update-health'),
         metadataHealth: document.getElementById('metadata-health'),
         featureplantHealth: document.getElementById('featureplant-health'),
         live: {
@@ -171,6 +172,8 @@
             populateSymbolDropdown(marketEntries);
             renderMarketCatalog(marketEntries);
             if (marketEntries.length === 0) {
+                renderMissingQuote('');
+                renderFeatures([]);
                 setStatus('No markets indexed yet; confirm FeaturePlant outputs are flowing.', 'error');
                 return;
             }
@@ -444,11 +447,15 @@
     async function loadHealth() {
         try {
             const body = await fetchJson('/health');
-            dom.adapterHealth.textContent = body.status || '-';
+            dom.adapterHealth.textContent = adapterStatusText(body);
+            dom.adapterHealth.className = body.status === 'ok' ? 'fresh' : 'stale';
             dom.releaseIdentity.textContent = releaseStatusText(body.release);
             dom.healthDataAge.textContent = dataFreshnessText(body.data_freshness);
+            dom.healthDataAge.className = dataFreshnessClass(body.data_freshness);
             dom.healthSequence.textContent = body.store ? String(body.store.sequence) : '-';
             dom.refreshHealth.textContent = refreshStatusText(body.feature_output_refresh);
+            dom.refreshHealth.className = refreshStatusClass(body.feature_output_refresh);
+            dom.quoteUpdateHealth.textContent = quoteUpdateStatusText(body.quote_updates);
             dom.metadataHealth.textContent = body.market_metadata
                 ? `${body.market_metadata.status || '-'} / ${body.market_metadata.markets || 0}`
                 : '-';
@@ -457,10 +464,22 @@
                 : '-';
         } catch (err) {
             dom.adapterHealth.textContent = 'unavailable';
+            dom.adapterHealth.className = 'stale';
             dom.releaseIdentity.textContent = '-';
             dom.healthDataAge.textContent = '-';
+            dom.healthDataAge.className = 'stale';
             dom.refreshHealth.textContent = err.message;
+            dom.refreshHealth.className = 'stale';
+            dom.quoteUpdateHealth.textContent = 'unavailable';
+            dom.quoteUpdateHealth.className = 'stale';
         }
+    }
+
+    function adapterStatusText(body) {
+        if (!body || !body.status) {
+            return 'unavailable';
+        }
+        return body.status === 'ok' ? 'up' : String(body.status);
     }
 
     function releaseStatusText(release) {
@@ -488,9 +507,21 @@
             return 'waiting';
         }
         const age = freshness.latest_event_age_ms == null ? '-' : formatAge(Number(freshness.latest_event_age_ms));
+        const state = dataFreshnessLiveState(freshness);
         const symbol = freshness.symbol || '-';
         const source = freshness.source_event_id || '-';
-        return `${age} / ${symbol} / ${source}`;
+        return `${state} / ${age} / ${symbol} / ${source}`;
+    }
+
+    function dataFreshnessLiveState(freshness) {
+        if (!freshness || freshness.latest_event_age_ms == null) {
+            return 'stale';
+        }
+        return Number(freshness.latest_event_age_ms) <= 15000 ? 'live' : 'stale';
+    }
+
+    function dataFreshnessClass(freshness) {
+        return dataFreshnessLiveState(freshness) === 'live' ? 'fresh' : 'stale';
     }
 
     function refreshStatusText(status) {
@@ -498,7 +529,30 @@
             return 'disabled';
         }
         const running = status.running ? 'running' : 'stopped';
-        return `${running} / ${status.total_loaded || 0} rows`;
+        return `${running} / ${status.total_loaded || 0} rows / ${status.refresh_errors || 0} err`;
+    }
+
+    function refreshStatusClass(status) {
+        if (!status || status.enabled !== true || status.running !== true || (status.refresh_errors || 0) > 0) {
+            return 'stale';
+        }
+        return 'fresh';
+    }
+
+    function quoteUpdateStatusText(status) {
+        if (!status) {
+            return 'unavailable';
+        }
+        const active = status.active_waits || 0;
+        const max = status.max_waits || 0;
+        return `long-poll req ${status.requests || 0} / changed ${status.changed || 0}` +
+            ` / timeout ${status.timeouts || 0} / rejected ${status.rejected || 0}` +
+            ` / active ${active}/${max}`;
+    }
+
+    function renderQuoteUpdateState(message, tone) {
+        dom.quoteUpdateHealth.textContent = message;
+        dom.quoteUpdateHealth.className = tone || '';
     }
 
     function formatMicros(micros) {
@@ -561,6 +615,7 @@
             return;
         }
         stopQuotesLoop();
+        renderQuoteUpdateState('fallback polling', 'stale');
         pollQuotes(generation, symbol, base);
         quotesTimer = setInterval(() => pollQuotes(generation, symbol, base), QUOTES_POLL_MS);
     }
@@ -592,6 +647,7 @@
                 }
                 quoteUpdateErrors = 0;
                 applyQuoteResponse(data, symbol);
+                renderQuoteUpdateState(data.changed ? 'long-poll changed' : 'long-poll timeout', 'fresh');
             } catch (err) {
                 if (quotesAbortController === controller) {
                     quotesAbortController = null;
@@ -601,6 +657,7 @@
                 }
                 quoteUpdateErrors += 1;
                 dom.live.updated.textContent = `error: ${err.message}`;
+                renderQuoteUpdateState(`long-poll error ${quoteUpdateErrors}`, 'stale');
                 if (quoteUpdateErrors >= QUOTES_UPDATE_ERROR_LIMIT) {
                     startQuotesFallback(generation, symbol, base);
                     return;
@@ -615,6 +672,7 @@
         stopQuotesLoop();
         quoteSequence = null;
         quoteUpdateErrors = 0;
+        renderQuoteUpdateState('long-poll starting', '');
         runQuotesLongPoll(quotesLoopGeneration);
     }
 

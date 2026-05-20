@@ -111,6 +111,47 @@ class LiveProductSmokeDbProbeCliTest {
     }
 
     @Test
+    void probeLiveDataCommandsReadExpectedRows() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.LATEST_NON_SMOKE_CANONICAL_AFTER_SQL,
+                List.<Object[]>of(new Object[] {"live-event-1", "MKT-1", "derived.top_of_book", 42L, 1_700_000_000_000L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL,
+                List.<Object[]>of(new Object[] {1L, "feature.bbo", "MKT-1", 1_700_000_000_000L, "live-event-1"})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL,
+                List.<Object[]>of(new Object[] {
+                    "live-event-1", "feature.bbo", "MKT-1", 1_700_000_000_000L, "derived.top_of_book", 42L
+                })
+            );
+        LiveProductSmokeDbProbe probe = new LiveProductSmokeDbProbe(jdbc::openConnection);
+
+        LiveProductSmokeDbProbe.CanonicalEventSummary event = probe.latestNonSmokeCanonicalAfter(41L);
+        assertEquals("live-event-1", event.eventId());
+        assertEquals("MKT-1", event.marketTicker());
+        assertEquals("derived.top_of_book", event.streamName());
+        assertEquals(42L, event.commitSeq());
+        assertEquals(1_700_000_000_000L, event.eventTsMs());
+
+        LiveProductSmokeDbProbe.FeatureOutputSummary feature = probe.featureOutputsForSourceEvent("live-event-1");
+        assertEquals(1L, feature.count());
+        assertEquals("feature.bbo", feature.featureName());
+        assertEquals("MKT-1", feature.marketTicker());
+        assertEquals(1_700_000_000_000L, feature.eventTsMs());
+        assertEquals("live-event-1", feature.sourceEventId());
+
+        LiveProductSmokeDbProbe.LiveFeatureOutputSummary latest = probe.latestNonSmokeFeatureOutputAfter(41L);
+        assertEquals("live-event-1", latest.sourceEventId());
+        assertEquals("feature.bbo", latest.featureName());
+        assertEquals("MKT-1", latest.marketTicker());
+        assertEquals("derived.top_of_book", latest.streamName());
+        assertEquals(42L, latest.commitSeq());
+    }
+
+    @Test
     void cliPrintsSeedResultShape() {
         RecordingJdbc jdbc = new RecordingJdbc();
         Output output = new Output();
@@ -127,6 +168,71 @@ class LiveProductSmokeDbProbeCliTest {
 
         assertEquals(0, exitCode);
         assertEquals("3|103\n", output.stdout());
+    }
+
+    @Test
+    void cliPrintsLiveDataResultShapes() {
+        RecordingJdbc jdbc = new RecordingJdbc()
+            .withRows(
+                LiveProductSmokeDbProbe.LATEST_NON_SMOKE_CANONICAL_AFTER_SQL,
+                List.<Object[]>of(new Object[] {"live-event-1", "MKT-1", "derived.top_of_book", 42L, 1_700_000_000_000L})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL,
+                List.<Object[]>of(new Object[] {1L, "feature.bbo", "MKT-1", 1_700_000_000_000L, "live-event-1"})
+            )
+            .withRows(
+                LiveProductSmokeDbProbe.LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL,
+                List.<Object[]>of(new Object[] {
+                    "live-event-1", "feature.bbo", "MKT-1", 1_700_000_000_000L, "derived.top_of_book", 42L
+                })
+            );
+        Output output = new Output();
+        LiveProductSmokeDbProbeCli.Config latestCanonical = new LiveProductSmokeDbProbeCli.Config(
+            "latestNonSmokeCanonicalAfter",
+            "jdbc:postgresql://live/db",
+            "user",
+            "password",
+            Map.of("after-commit-seq", "41"),
+            false
+        );
+
+        assertEquals(0, LiveProductSmokeDbProbeCli.run(latestCanonical, jdbc::openConnection, output.out(), output.err()));
+        assertEquals("live-event-1|MKT-1|derived.top_of_book|42|1700000000000\n", output.stdout());
+
+        Output featureOutput = new Output();
+        LiveProductSmokeDbProbeCli.Config featureForSource = new LiveProductSmokeDbProbeCli.Config(
+            "featureOutputsForSourceEvent",
+            "jdbc:postgresql://live/db",
+            "user",
+            "password",
+            Map.of("source-event-id", "live-event-1"),
+            false
+        );
+        assertEquals(0, LiveProductSmokeDbProbeCli.run(
+            featureForSource,
+            jdbc::openConnection,
+            featureOutput.out(),
+            featureOutput.err()
+        ));
+        assertEquals("1|feature.bbo|MKT-1|1700000000000|live-event-1\n", featureOutput.stdout());
+
+        Output latestFeature = new Output();
+        LiveProductSmokeDbProbeCli.Config latestFeatureAfter = new LiveProductSmokeDbProbeCli.Config(
+            "latestNonSmokeFeatureOutputAfter",
+            "jdbc:postgresql://live/db",
+            "user",
+            "password",
+            Map.of("after-commit-seq", "41"),
+            false
+        );
+        assertEquals(0, LiveProductSmokeDbProbeCli.run(
+            latestFeatureAfter,
+            jdbc::openConnection,
+            latestFeature.out(),
+            latestFeature.err()
+        ));
+        assertEquals("live-event-1|feature.bbo|MKT-1|1700000000000|derived.top_of_book|42\n", latestFeature.stdout());
     }
 
     private static final class Output {
@@ -152,6 +258,7 @@ class LiveProductSmokeDbProbeCliTest {
 
     private static final class RecordingJdbc {
         private final Map<String, Long> scalarResults = new HashMap<>();
+        private final Map<String, List<Object[]>> rowResults = new HashMap<>();
         private final List<Map<Integer, Object>> canonicalInserts = new ArrayList<>();
         private int metadataUpserts;
         private int canonicalCommitSeq = 100;
@@ -160,6 +267,11 @@ class LiveProductSmokeDbProbeCliTest {
 
         private RecordingJdbc withScalar(String sql, long value) {
             scalarResults.put(normalizeSql(sql), value);
+            return this;
+        }
+
+        private RecordingJdbc withRows(String sql, List<Object[]> rows) {
+            rowResults.put(normalizeSql(sql), rows);
             return this;
         }
 
@@ -255,6 +367,10 @@ class LiveProductSmokeDbProbeCliTest {
                         jdbc.canonicalInserts.add(new HashMap<>(parameters));
                         yield jdbc.resultSet(++jdbc.canonicalCommitSeq);
                     }
+                    List<Object[]> rows = jdbc.rowResults.get(normalized);
+                    if (rows != null) {
+                        yield jdbc.resultSet(rows);
+                    }
                     Long scalar = jdbc.scalarResults.get(normalized);
                     if (scalar != null) {
                         yield jdbc.resultSet(scalar);
@@ -286,7 +402,17 @@ class LiveProductSmokeDbProbeCliTest {
                     index++;
                     yield index < rows.size();
                 }
-                case "getLong" -> ((Number) rows.get(index)[(Integer) args[0] - 1]).longValue();
+                case "getString" -> {
+                    Object value = rows.get(index)[(Integer) args[0] - 1];
+                    yield value == null ? null : String.valueOf(value);
+                }
+                case "getLong" -> {
+                    Object value = rows.get(index)[(Integer) args[0] - 1];
+                    if (value instanceof Number number) {
+                        yield number.longValue();
+                    }
+                    yield Long.parseLong(String.valueOf(value));
+                }
                 case "close" -> null;
                 default -> defaultValue(method.getReturnType());
             };

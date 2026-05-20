@@ -196,8 +196,10 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("Runtime Health"));
         assertTrue(root.body().contains("id=\"release-identity\""));
         assertTrue(root.body().contains("id=\"health-data-age\""));
+        assertTrue(root.body().contains("id=\"quote-update-health\""));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
+        assertTrue(root.body().contains("<dt>Quote feed</dt>"));
         assertTrue(root.body().contains("placeholder=\"same origin\""));
         assertTrue(index.body().contains("<link rel=\"stylesheet\" href=\"styles.css\" />"));
         assertTrue(index.body().contains(
@@ -226,8 +228,12 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/health"));
         assertTrue(js.body().contains("document.getElementById('release-identity')"));
         assertTrue(js.body().contains("document.getElementById('health-data-age')"));
+        assertTrue(js.body().contains("document.getElementById('quote-update-health')"));
         assertTrue(js.body().contains("body.release"));
         assertTrue(js.body().contains("body.data_freshness"));
+        assertTrue(js.body().contains("quote_updates"));
+        assertTrue(js.body().contains("long-poll timeout"));
+        assertTrue(js.body().contains("fallback polling"));
         assertTrue(js.body().contains("latest_event_ts_ms"));
         assertTrue(js.body().contains("nextSequence < quoteSequence"));
         assertTrue(js.body().contains("window.location.origin"));

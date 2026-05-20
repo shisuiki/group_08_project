@@ -75,6 +75,31 @@ public final class LiveProductSmokeDbProbeCli {
                     out.println(progress.featureOutputCount() + "|" + progress.cursorCommitSeq());
                 }
                 case "recentNonSmokeCanonicalEvents" -> out.println(probe.recentNonSmokeCanonicalEvents());
+                case "latestNonSmokeCanonicalAfter" -> {
+                    LiveProductSmokeDbProbe.CanonicalEventSummary event = probe.latestNonSmokeCanonicalAfter(
+                        requiredLong(config, "after-commit-seq")
+                    );
+                    if (event != null) {
+                        out.println(event.eventId() + "|" + event.marketTicker() + "|" + event.streamName()
+                            + "|" + event.commitSeq() + "|" + event.eventTsMs());
+                    }
+                }
+                case "featureOutputsForSourceEvent" -> {
+                    LiveProductSmokeDbProbe.FeatureOutputSummary summary = probe.featureOutputsForSourceEvent(
+                        required(config, "source-event-id")
+                    );
+                    out.println(summary.count() + "|" + summary.featureName() + "|" + summary.marketTicker()
+                        + "|" + summary.eventTsMs() + "|" + summary.sourceEventId());
+                }
+                case "latestNonSmokeFeatureOutputAfter" -> {
+                    LiveProductSmokeDbProbe.LiveFeatureOutputSummary output = probe.latestNonSmokeFeatureOutputAfter(
+                        requiredLong(config, "after-commit-seq")
+                    );
+                    if (output != null) {
+                        out.println(output.sourceEventId() + "|" + output.featureName() + "|" + output.marketTicker()
+                            + "|" + output.eventTsMs() + "|" + output.streamName() + "|" + output.commitSeq());
+                    }
+                }
                 default -> throw new IllegalArgumentException("Unknown command: " + config.command());
             }
             return 0;
@@ -94,6 +119,9 @@ public final class LiveProductSmokeDbProbeCli {
               seedCanonicalEvents --run-id=<id> --market-ticker=<ticker> --prefix=<prefix>
               featureOutputsForPrefix --prefix=<prefix> --cursor-name=<name>
               recentNonSmokeCanonicalEvents
+              latestNonSmokeCanonicalAfter --after-commit-seq=<seq>
+              featureOutputsForSourceEvent --source-event-id=<event-id>
+              latestNonSmokeFeatureOutputAfter --after-commit-seq=<seq>
 
             DB options:
               --db-url=<jdbc-url>        Overrides LIVE_PRODUCT_SMOKE_DB_URL / DB_WRITER_DATABASE_URL
@@ -109,6 +137,19 @@ public final class LiveProductSmokeDbProbeCli {
             throw new IllegalArgumentException("--" + option + " is required for " + config.command());
         }
         return value.trim();
+    }
+
+    private static long requiredLong(Config config, String option) {
+        String value = required(config, option);
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed < 0) {
+                throw new IllegalArgumentException("--" + option + " must be non-negative");
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("--" + option + " must be a long integer");
+        }
     }
 
     record Config(

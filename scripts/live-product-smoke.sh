@@ -15,6 +15,8 @@ SMOKE_HTTP_RETRY_SLEEP_SECONDS="${SMOKE_HTTP_RETRY_SLEEP_SECONDS:-1}"
 SMOKE_DB_ATTEMPTS="${SMOKE_DB_ATTEMPTS:-90}"
 SMOKE_DB_RETRY_SLEEP_SECONDS="${SMOKE_DB_RETRY_SLEEP_SECONDS:-1}"
 LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA="${LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA:-false}"
+LIVE_PRODUCT_BROWSER_SMOKE_ENABLED="${LIVE_PRODUCT_BROWSER_SMOKE_ENABLED:-false}"
+FRONTEND_BROWSER_SMOKE_SCRIPT="${FRONTEND_BROWSER_SMOKE_SCRIPT:-scripts/frontend-product-browser-smoke.sh}"
 EXPECTED_KALSHI_RELEASE_SHA="${EXPECTED_KALSHI_RELEASE_SHA:-}"
 EXPECTED_KALSHI_APP_IMAGE="${EXPECTED_KALSHI_APP_IMAGE:-}"
 EXPECTED_KALSHI_DEPLOY_PROFILE="${EXPECTED_KALSHI_DEPLOY_PROFILE:-}"
@@ -365,6 +367,18 @@ cursor_commit_seq() {
     db_probe cursorCommitSeq --cursor-name="$FEATUREPLANT_DB_CURSOR_NAME"
 }
 
+latest_non_smoke_canonical_after() {
+    db_probe latestNonSmokeCanonicalAfter --after-commit-seq="$1"
+}
+
+feature_outputs_for_source_event() {
+    db_probe featureOutputsForSourceEvent --source-event-id="$1"
+}
+
+latest_non_smoke_feature_output_after() {
+    db_probe latestNonSmokeFeatureOutputAfter --after-commit-seq="$1"
+}
+
 seed_canonical_events() {
     db_probe seedCanonicalEvents --run-id="$1" --market-ticker="$2" --prefix="$3"
 }
@@ -437,6 +451,7 @@ check_product_static_ui() {
     grep -q 'Runtime Health' "$index_file"
     grep -q 'release-identity' "$index_file"
     grep -q 'health-data-age' "$index_file"
+    grep -q 'quote-update-health' "$index_file"
     grep -q 'same origin' "$index_file"
     grep -q '/quotes/updates' "$app_file"
     grep -q '/markets?limit=100' "$app_file"
@@ -444,6 +459,7 @@ check_product_static_ui() {
     grep -q '/health' "$app_file"
     grep -q 'body.release' "$app_file"
     grep -q 'body.data_freshness' "$app_file"
+    grep -q 'body.quote_updates' "$app_file"
     grep -q 'latest_event_ts_ms' "$app_file"
     grep -q 'chart-container' "$css_file"
     grep -q 'LightweightCharts' "$chart_file"
@@ -453,6 +469,15 @@ check_product_static_ui() {
         exit 1
     fi
     printf 'PASS frontend_static_ui url=%s/\n' "$FRONTEND_BASE_URL"
+}
+
+check_product_browser_ui() {
+    if ! is_true "$LIVE_PRODUCT_BROWSER_SMOKE_ENABLED"; then
+        return 0
+    fi
+    FRONTEND_BASE_URL="$FRONTEND_BASE_URL" \
+        FRONTEND_NO_PROXY="$FRONTEND_NO_PROXY" \
+        sh "$FRONTEND_BROWSER_SMOKE_SCRIPT"
 }
 
 wait_frontend_feature_output() {
@@ -542,17 +567,251 @@ PY
     done
 }
 
+wait_featureplant_cursor_caught_up() {
+    expected_commit_seq="$1"
+    attempt=1
+    while :; do
+        current_cursor_seq="$(cursor_commit_seq)"
+        if [ "$current_cursor_seq" -ge "$expected_commit_seq" ]; then
+            printf '%s\n' "$current_cursor_seq"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_DB_ATTEMPTS" ]; then
+            printf 'FeaturePlant cursor did not catch up to live canonical event: cursor=%s expected_cursor_at_least=%s\n' \
+                "$current_cursor_seq" "$expected_commit_seq" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_DB_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_live_feature_output_for_source_event() {
+    source_event_id="$1"
+    attempt=1
+    while :; do
+        output="$(feature_outputs_for_source_event "$source_event_id")"
+        output_count="$(printf '%s\n' "$output" | awk -F '|' 'NR == 1 {print $1}')"
+        if [ -n "$output_count" ] && [ "$output_count" -ge 1 ]; then
+            printf '%s\n' "$output"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_DB_ATTEMPTS" ]; then
+            printf 'FeaturePlant did not write non-smoke feature_output for source_event_id=%s\n' \
+                "$source_event_id" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_DB_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_latest_live_feature_output_after() {
+    baseline_commit_seq="$1"
+    attempt=1
+    while :; do
+        output="$(latest_non_smoke_feature_output_after "$baseline_commit_seq")"
+        if [ -n "$output" ]; then
+            printf '%s\n' "$output"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_DB_ATTEMPTS" ]; then
+            printf 'No non-smoke feature_output joined to canonical_events after baseline_commit_seq=%s\n' \
+                "$baseline_commit_seq" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_DB_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_frontend_live_feature_output() {
+    market="$1"
+    feature="$2"
+    source_event_id="$3"
+    encoded_market="$(urlencode "$market")"
+    encoded_feature="$(urlencode "$feature")"
+    output="$tmpdir/frontend.live.features.json"
+    attempt=1
+    while :; do
+        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+            "${FRONTEND_BASE_URL}/features?symbol=${encoded_market}&feature=${encoded_feature}&limit=20" \
+            -o "$output" \
+            && python3 - "$output" "$market" "$feature" "$source_event_id" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+market = sys.argv[2]
+feature = sys.argv[3]
+source_event_id = sys.argv[4]
+if body.get("symbol") != market or body.get("feature") != feature:
+    raise SystemExit("feature response metadata mismatch")
+outputs = body.get("outputs")
+if not isinstance(outputs, list):
+    raise SystemExit("feature outputs missing")
+for output in outputs:
+    if isinstance(output, dict) and output.get("source_event_id") == source_event_id:
+        if not isinstance(output.get("values"), dict):
+            raise SystemExit("live feature has no values")
+        raise SystemExit(0)
+raise SystemExit("live feature output not visible")
+PY
+        then
+            printf 'PASS frontend_live_feature_output market=%s feature=%s source_event_id=%s\n' \
+                "$market" "$feature" "$source_event_id"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'frontend did not expose live feature output: market=%s feature=%s source_event_id=%s\n' \
+                "$market" "$feature" "$source_event_id" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_frontend_live_quote() {
+    market="$1"
+    min_event_ts_ms="$2"
+    encoded_market="$(urlencode "$market")"
+    output="$tmpdir/frontend.live.quotes.json"
+    attempt=1
+    while :; do
+        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+            "${FRONTEND_BASE_URL}/quotes?symbols=${encoded_market}" \
+            -o "$output" \
+            && python3 - "$output" "$market" "$min_event_ts_ms" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+market = sys.argv[2]
+min_event_ts_ms = int(sys.argv[3])
+quotes = body.get("quotes")
+if not isinstance(quotes, list):
+    raise SystemExit("quotes missing")
+for quote in quotes:
+    if isinstance(quote, dict) and quote.get("symbol") == market:
+        source_event_id = quote.get("source_event_id") or ""
+        event_ts_ms = quote.get("event_ts_ms")
+        if source_event_id.startswith("live-product-smoke-"):
+            raise SystemExit("quote still points at smoke source")
+        if not source_event_id:
+            raise SystemExit("quote source_event_id missing")
+        if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
+            raise SystemExit("quote event_ts_ms is older than live proof event")
+        raise SystemExit(0)
+raise SystemExit("live quote not visible")
+PY
+        then
+            printf 'PASS frontend_live_quote market=%s min_event_ts_ms=%s\n' "$market" "$min_event_ts_ms"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'frontend quote did not expose non-smoke BBO: market=%s min_event_ts_ms=%s\n' \
+                "$market" "$min_event_ts_ms" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
+wait_frontend_health_non_smoke_freshness() {
+    min_event_ts_ms="$1"
+    output="$tmpdir/frontend.live.health.json"
+    attempt=1
+    while :; do
+        if curl -fsS --noproxy "$FRONTEND_NO_PROXY" "$FRONTEND_HEALTH_URL" -o "$output" \
+            && python3 - "$output" "$min_event_ts_ms" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+min_event_ts_ms = int(sys.argv[2])
+freshness = body.get("data_freshness")
+if not isinstance(freshness, dict):
+    raise SystemExit("data_freshness missing")
+source_event_id = freshness.get("source_event_id") or ""
+event_ts_ms = freshness.get("latest_event_ts_ms")
+if not source_event_id or source_event_id.startswith("live-product-smoke-"):
+    raise SystemExit("freshness does not point at non-smoke source")
+if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
+    raise SystemExit("freshness event_ts_ms is older than live proof event")
+PY
+        then
+            printf 'PASS frontend_live_health_freshness min_event_ts_ms=%s\n' "$min_event_ts_ms"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'frontend health did not expose non-smoke data freshness at or after event_ts_ms=%s\n' \
+                "$min_event_ts_ms" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
 check_optional_live_data() {
     if ! is_true "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"; then
         return 0
     fi
-    live_count="$(db_probe recentNonSmokeCanonicalEvents)"
-    if [ "$live_count" -le 0 ]; then
-        printf 'live data requirement failed: no non-smoke canonical_events in the last 15 minutes\n' >&2
-        print_diagnostics
-        return 1
-    fi
-    printf 'PASS live_data recent_non_smoke_canonical_events=%s\n' "$live_count"
+    baseline_commit_seq="$1"
+    attempt=1
+    while :; do
+        live_event="$(latest_non_smoke_canonical_after "$baseline_commit_seq")"
+        if [ -n "$live_event" ]; then
+            live_event_id="$(printf '%s\n' "$live_event" | awk -F '|' 'NR == 1 {print $1}')"
+            live_market="$(printf '%s\n' "$live_event" | awk -F '|' 'NR == 1 {print $2}')"
+            live_stream="$(printf '%s\n' "$live_event" | awk -F '|' 'NR == 1 {print $3}')"
+            live_commit_seq="$(printf '%s\n' "$live_event" | awk -F '|' 'NR == 1 {print $4}')"
+            live_event_ts_ms="$(printf '%s\n' "$live_event" | awk -F '|' 'NR == 1 {print $5}')"
+            if [ -z "$live_event_id" ] || [ -z "$live_market" ] || [ -z "$live_stream" ] \
+                || [ -z "$live_commit_seq" ] || [ -z "$live_event_ts_ms" ]; then
+                printf 'live data requirement failed: malformed live canonical row: %s\n' "$live_event" >&2
+                return 1
+            fi
+            live_cursor_seq="$(wait_featureplant_cursor_caught_up "$live_commit_seq")"
+            live_feature="$(wait_live_feature_output_for_source_event "$live_event_id")"
+            live_feature_count="$(printf '%s\n' "$live_feature" | awk -F '|' 'NR == 1 {print $1}')"
+            live_feature_name="$(printf '%s\n' "$live_feature" | awk -F '|' 'NR == 1 {print $2}')"
+            live_feature_market="$(printf '%s\n' "$live_feature" | awk -F '|' 'NR == 1 {print $3}')"
+            live_feature_event_ts_ms="$(printf '%s\n' "$live_feature" | awk -F '|' 'NR == 1 {print $4}')"
+            latest_live_feature="$(wait_latest_live_feature_output_after "$baseline_commit_seq")"
+            latest_live_feature_source="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $1}')"
+            latest_live_feature_name="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $2}')"
+            latest_live_feature_market="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $3}')"
+            latest_live_feature_commit_seq="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $6}')"
+            wait_frontend_live_feature_output "$live_feature_market" "$live_feature_name" "$live_event_id"
+            wait_frontend_health_non_smoke_freshness "$live_feature_event_ts_ms"
+            if [ "$live_feature_name" = "feature.bbo" ]; then
+                wait_frontend_live_quote "$live_feature_market" "$live_feature_event_ts_ms"
+            fi
+            printf 'PASS live_data baseline_commit_seq=%s live_event_id=%s market=%s stream=%s commit_seq=%s event_ts_ms=%s cursor_after=%s feature_outputs_for_source=%s feature=%s latest_feature_source_event_id=%s latest_feature=%s latest_feature_market=%s latest_feature_commit_seq=%s\n' \
+                "$baseline_commit_seq" "$live_event_id" "$live_market" "$live_stream" "$live_commit_seq" \
+                "$live_event_ts_ms" "$live_cursor_seq" "$live_feature_count" "$live_feature_name" \
+                "$latest_live_feature_source" "$latest_live_feature_name" "$latest_live_feature_market" \
+                "$latest_live_feature_commit_seq"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_DB_ATTEMPTS" ]; then
+            printf 'live data requirement failed: no feature-eligible non-smoke canonical_events after baseline_commit_seq=%s\n' \
+                "$baseline_commit_seq" >&2
+            print_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_DB_RETRY_SLEEP_SECONDS"
+    done
 }
 
 compose ps >/dev/null
@@ -575,6 +834,7 @@ frontend_freshness_source_event_id="$(printf '%s\n' "$frontend_before" | sed -n 
 printf 'PASS health service=frontend-adapter url=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s\n' \
     "$FRONTEND_HEALTH_URL" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id"
 check_product_static_ui
+check_product_browser_ui
 
 cursor_before="$(cursor_commit_seq)"
 max_commit_before="$(db_probe maxCanonicalCommitSeq)"
@@ -583,6 +843,7 @@ if [ "$cursor_before" -gt "$max_commit_before" ]; then
         "$cursor_before" "$max_commit_before" >&2
     exit 1
 fi
+check_optional_live_data "$max_commit_before"
 
 run_id="${LIVE_PRODUCT_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)-$$}"
 case "$run_id" in
@@ -619,7 +880,6 @@ frontend_loaded_after="$(printf '%s\n' "$frontend_after" | sed -n '2p')"
 frontend_errors_after="$(printf '%s\n' "$frontend_after" | sed -n '3p')"
 wait_frontend_feature_output "$market_ticker" "$bbo_event_id"
 wait_frontend_quote "$market_ticker"
-check_optional_live_data
 
 wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health

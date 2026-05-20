@@ -215,10 +215,12 @@ main {
     overflow-wrap: anywhere;
 }
 
+.fresh,
 #freshness-state.fresh {
     color: #2fbf71;
 }
 
+.stale,
 #freshness-state.stale {
     color: #e45757;
 }
