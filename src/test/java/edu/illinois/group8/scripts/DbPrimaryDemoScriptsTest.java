@@ -300,6 +300,76 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void rollbackGateWritesMachineReadableReleaseEvidence() throws Exception {
+        String script = read("scripts/ec2-compose-rollback-gate.sh");
+        String validator = read("scripts/validate-release-evidence.sh");
+
+        assertTrue(script.contains("RELEASE_EVIDENCE_DIR=\"$DEPLOY_STATE_DIR/releases\""));
+        assertTrue(script.contains("release_evidence_file()"));
+        assertTrue(script.contains("release_evidence_json()"));
+        assertTrue(script.contains("write_release_evidence()"));
+        assertTrue(script.contains("tmp_file=\"$target.tmp.$$\""));
+        assertTrue(script.contains("mv \"$tmp_file\" \"$target\""));
+        assertTrue(script.contains("\"release_sha\""));
+        assertTrue(script.contains("\"github_run_id\""));
+        assertTrue(script.contains("\"github_run_attempt\""));
+        assertTrue(script.contains("\"deploy_profile\""));
+        assertTrue(script.contains("\"candidate_ref\""));
+        assertTrue(script.contains("\"app_image\""));
+        assertTrue(script.contains("\"app_image_id\""));
+        assertTrue(script.contains("\"candidate_image_tar\""));
+        assertTrue(script.contains("\"env_file_sha256\""));
+        assertTrue(script.contains("\"runtime_images\""));
+        assertTrue(script.contains("\"db_preflight\""));
+        assertTrue(script.contains("\"profile_health_smoke\""));
+        assertTrue(script.contains("\"live_product_semantic_smoke\""));
+        assertTrue(script.contains("\"frontend_release_health\""));
+        assertTrue(script.contains("\"rollback\""));
+        assertTrue(script.contains("\"outcome\""));
+        assertTrue(script.contains("write_release_evidence \"candidate\" \"candidate_gates_passed\""));
+        assertTrue(script.contains("write_release_evidence \"candidate\" \"success\""));
+        assertTrue(script.contains("write_release_evidence \"candidate\" \"candidate_failed_rollback_pending\""));
+        assertTrue(script.contains("write_release_evidence \"candidate\" \"record_success_failed_rollback_pending\""));
+        assertTrue(script.contains("POST_GATE_FAILURE_CLASS=\"release_evidence_write_failed\""));
+        assertTrue(script.contains("write_release_evidence \"rollback\" \"release_evidence_failed_rollback_succeeded\""));
+        assertTrue(script.contains("write_release_evidence \"rollback\" \"release_evidence_failed_rollback_failed\""));
+        assertTrue(script.contains("write_release_evidence \"rollback\" \"candidate_failed_rollback_succeeded\""));
+        assertTrue(script.contains("write_release_evidence \"rollback\" \"candidate_failed_rollback_failed\""));
+        assertTrue(script.contains("write_release_evidence \"rollback\" \"record_success_failed_rollback_succeeded\""));
+        assertTrue(script.contains("write_release_evidence \"rollback\" \"record_success_failed_rollback_failed\""));
+        assertTrue(script.indexOf("write_release_evidence \"candidate\" \"candidate_gates_passed\"")
+            < script.indexOf("elif record_success; then"));
+        assertFalse(script.contains("release evidence recording failed; leaving deploy in failed state."));
+        assertTrue(script.indexOf("write_release_evidence \"candidate\" \"record_success_failed_rollback_pending\"")
+            < script.indexOf("log \"Candidate deploy succeeded but last-success state recording failed; attempting rollback if possible.\""));
+        assertTrue(script.contains("ROLLBACK_TARGET_REF=\"$previous_ref\""));
+        assertTrue(script.contains("ROLLBACK_TARGET_PROFILE=\"$DEPLOY_PROFILE\""));
+        assertTrue(script.contains("ROLLBACK_TARGET_IMAGE=\"$(sed -n '1p' \"$DEPLOY_STATE_DIR/last_success.image\""));
+        assertTrue(script.contains("ROLLBACK_TARGET_IMAGE_TAR=\"$(sed -n '1p' \"$DEPLOY_STATE_DIR/last_success.image_tar\""));
+        assertTrue(validator.contains("PASS release_evidence_contract"));
+        assertTrue(validator.contains("sed '/^if \\[ ! -f \"\\$CANDIDATE_ENV_FILE\" \\]; then$/,$d' \"$rollback_gate\""));
+        assertTrue(validator.contains("write_release_evidence \"candidate\" \"success\""));
+        assertTrue(validator.contains("python3 -m json.tool \"$evidence_file\""));
+        assertTrue(validator.contains("secret-db-password"));
+
+        String evidenceBlock = script.substring(
+            script.indexOf("release_evidence_json()"),
+            script.indexOf("write_release_evidence()"));
+        for (String forbidden : new String[] {
+            "DB_WRITER_DATABASE_PASSWORD",
+            "FEATUREPLANT_DB_PASSWORD",
+            "FRONTEND_ADAPTER_DB_PASSWORD",
+            "RAW_REPLAY_DATABASE_PASSWORD",
+            "LOCAL_DB_PASSWORD",
+            "KALSHI_PRIVATE_KEY",
+            "KALSHI_KEY_ID",
+            "KALSHI_KEY_PATH"
+        }) {
+            assertFalse(evidenceBlock.contains(forbidden), "release evidence must not serialize " + forbidden);
+        }
+    }
+
+    @Test
     void composeValidatorPinsLiveProductProfileAndDbWriterContract() throws Exception {
         String script = read("scripts/validate-compose-profiles.sh");
 
@@ -420,12 +490,20 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("printf -v q_featureplant_metrics_host_port '%q' \"$FEATUREPLANT_METRICS_HOST_PORT\""));
         assertTrue(workflow.contains("printf -v q_live_product_semantic_smoke_enabled '%q' \"$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED\""));
         assertTrue(workflow.contains("printf -v q_kalshi_release_sha '%q' \"$KALSHI_RELEASE_SHA\""));
+        assertTrue(workflow.contains("printf -v q_kalshi_github_run_id '%q' \"$KALSHI_GITHUB_RUN_ID\""));
+        assertTrue(workflow.contains("printf -v q_kalshi_github_run_attempt '%q' \"$KALSHI_GITHUB_RUN_ATTEMPT\""));
+        assertTrue(workflow.contains("KALSHI_RELEASE_SHA=$q_kalshi_release_sha"));
+        assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ID=$q_kalshi_github_run_id"));
+        assertTrue(workflow.contains("KALSHI_GITHUB_RUN_ATTEMPT=$q_kalshi_github_run_attempt"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_RELEASE_SHA=$q_kalshi_release_sha"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_APP_IMAGE=$q_kalshi_app_image"));
         assertTrue(workflow.contains("EXPECTED_KALSHI_DEPLOY_PROFILE=$q_deploy_profile"));
         assertTrue(workflow.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=$q_db_primary_product_frontend_host_port"));
         assertTrue(workflow.contains("FEATUREPLANT_METRICS_HOST_PORT=$q_featureplant_metrics_host_port"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=$q_live_product_semantic_smoke_enabled"));
+        assertTrue(workflow.contains("bash -n scripts/validate-release-evidence.sh"));
+        assertTrue(workflow.contains("sh -n scripts/validate-release-evidence.sh"));
+        assertTrue(workflow.contains("run: scripts/validate-release-evidence.sh"));
     }
 
     @Test

@@ -17,6 +17,30 @@ LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED="${LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED:-true
 FRONTEND_NO_PROXY="${FRONTEND_NO_PROXY:-127.0.0.1,localhost}"
 KALSHI_APP_IMAGE="${KALSHI_APP_IMAGE:-}"
 CANDIDATE_IMAGE_TAR="${CANDIDATE_IMAGE_TAR:-}"
+KALSHI_RELEASE_SHA="${KALSHI_RELEASE_SHA:-}"
+KALSHI_GITHUB_RUN_ID="${KALSHI_GITHUB_RUN_ID:-}"
+KALSHI_GITHUB_RUN_ATTEMPT="${KALSHI_GITHUB_RUN_ATTEMPT:-}"
+RELEASE_EVIDENCE_DIR="$DEPLOY_STATE_DIR/releases"
+
+COMPOSE_CONFIG_STATUS="not_run"
+APP_IMAGE_STATUS="not_run"
+DB_PREFLIGHT_STATUS="not_run"
+COMPOSE_DOWN_STATUS="not_run"
+COMPOSE_UP_STATUS="not_run"
+RUNTIME_IMAGE_STATUS="not_run"
+PROFILE_HEALTH_SMOKE_STATUS="not_run"
+LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
+RECORD_SUCCESS_STATUS="not_run"
+POST_GATE_FAILURE_CLASS="candidate_failed"
+FRONTEND_RELEASE_HEALTH_JSON='{"checked":false,"status":"not_applicable"}'
+ROLLBACK_ATTEMPTED="false"
+ROLLBACK_STATUS="not_needed"
+ROLLBACK_REASON=""
+ROLLBACK_TARGET_REF=""
+ROLLBACK_TARGET_PROFILE=""
+ROLLBACK_TARGET_IMAGE=""
+ROLLBACK_TARGET_IMAGE_TAR=""
+ROLLBACK_TARGET_IMAGE_TAR_PRESENT="false"
 
 down_all_profiles() {
     sudo docker compose --env-file "$1" \
@@ -40,6 +64,63 @@ compose_profile() {
 
 log() {
     printf '%s\n' "$*"
+}
+
+reset_gate_statuses() {
+    COMPOSE_CONFIG_STATUS="not_run"
+    APP_IMAGE_STATUS="not_run"
+    DB_PREFLIGHT_STATUS="not_run"
+    COMPOSE_DOWN_STATUS="not_run"
+    COMPOSE_UP_STATUS="not_run"
+    RUNTIME_IMAGE_STATUS="not_run"
+    PROFILE_HEALTH_SMOKE_STATUS="not_run"
+    LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
+    FRONTEND_RELEASE_HEALTH_JSON='{"checked":false,"status":"not_applicable"}'
+}
+
+json_escape() {
+    printf '%s' "$1" | awk '
+        BEGIN { ORS = "" }
+        {
+            if (NR > 1) {
+                printf "\\n"
+            }
+            gsub(/\\/, "\\\\")
+            gsub(/"/, "\\\"")
+            gsub(/\t/, "\\t")
+            gsub(/\r/, "\\r")
+            printf "%s", $0
+        }
+    '
+}
+
+json_string() {
+    printf '"'
+    json_escape "$1"
+    printf '"'
+}
+
+json_string_or_null() {
+    if [ -n "$1" ]; then
+        json_string "$1"
+    else
+        printf 'null'
+    fi
+}
+
+safe_evidence_component() {
+    value="$1"
+    if [ -z "$value" ]; then
+        value="unknown"
+    fi
+    printf '%s' "$value" | tr -c 'A-Za-z0-9_.-' '_'
+}
+
+file_sha256() {
+    file="$1"
+    if [ -s "$file" ]; then
+        sha256sum "$file" | awk '{ print $1 }'
+    fi
 }
 
 diagnose_profile() {
@@ -98,6 +179,301 @@ compose_app_image_tar() {
         image_tar="$CANDIDATE_IMAGE_TAR"
     fi
     printf '%s\n' "$image_tar"
+}
+
+evidence_env_file() {
+    if [ -f "$CANDIDATE_ENV_FILE" ]; then
+        printf '%s\n' "$CANDIDATE_ENV_FILE"
+    else
+        printf '%s\n' "$COMPOSE_ENV_FILE"
+    fi
+}
+
+release_identity_value() {
+    env_file="$1"
+    key="$2"
+    fallback="$3"
+    value="$(env_file_value "$env_file" "$key")"
+    if [ -z "$value" ]; then
+        value="$fallback"
+    fi
+    printf '%s\n' "$value"
+}
+
+release_evidence_file() {
+    kind="$1"
+    env_file="$(evidence_env_file)"
+    release_sha="$(release_identity_value "$env_file" KALSHI_RELEASE_SHA "${KALSHI_RELEASE_SHA:-$candidate_ref}")"
+    run_id="$(release_identity_value "$env_file" KALSHI_GITHUB_RUN_ID "${KALSHI_GITHUB_RUN_ID:-local}")"
+    run_attempt="$(release_identity_value "$env_file" KALSHI_GITHUB_RUN_ATTEMPT "${KALSHI_GITHUB_RUN_ATTEMPT:-1}")"
+    safe_sha="$(safe_evidence_component "$release_sha")"
+    safe_run_id="$(safe_evidence_component "$run_id")"
+    safe_run_attempt="$(safe_evidence_component "$run_attempt")"
+    case "$kind" in
+        rollback) suffix="-rollback" ;;
+        *) suffix="" ;;
+    esac
+    printf '%s/%s-%s-%s%s.json\n' "$RELEASE_EVIDENCE_DIR" "$safe_sha" "$safe_run_id" "$safe_run_attempt" "$suffix"
+}
+
+candidate_image_tar_json() {
+    env_file="$1"
+    image_tar="$(compose_app_image_tar "$env_file")"
+    image_tar_sha=""
+    image_tar_present="false"
+    if [ -n "$image_tar" ] && [ -s "$image_tar" ]; then
+        image_tar_present="true"
+        image_tar_sha="$(file_sha256 "$image_tar")"
+    fi
+    printf '{"path":'
+    json_string_or_null "$image_tar"
+    printf ',"present":%s,"sha256":' "$image_tar_present"
+    json_string_or_null "$image_tar_sha"
+    printf '}'
+}
+
+runtime_images_json() {
+    env_file="$1"
+    separator=""
+    printf '['
+    for service in $(profile_app_services); do
+        container_ids="$(compose_profile "$env_file" ps -q "$service" 2>/dev/null || true)"
+        for container in $container_ids; do
+            config_image="$(sudo docker inspect -f '{{.Config.Image}}' "$container" 2>/dev/null || true)"
+            image_id="$(sudo docker inspect -f '{{.Image}}' "$container" 2>/dev/null || true)"
+            printf '%s{"service":' "$separator"
+            json_string "$service"
+            printf ',"container_id":'
+            json_string_or_null "$container"
+            printf ',"config_image":'
+            json_string_or_null "$config_image"
+            printf ',"image_id":'
+            json_string_or_null "$image_id"
+            printf '}'
+            separator=","
+        done
+    done
+    printf ']'
+}
+
+frontend_health_url() {
+    case "$DEPLOY_PROFILE" in
+        db-primary-product|live-product)
+            printf 'http://127.0.0.1:%s/health\n' "$DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+frontend_release_health_json() {
+    if ! url="$(frontend_health_url)"; then
+        printf '{"checked":false,"status":"not_applicable"}'
+        return 0
+    fi
+    mkdir -p "$DEPLOY_STATE_DIR"
+    tmp_health="$DEPLOY_STATE_DIR/.frontend-health.$$"
+    rm -f "$tmp_health"
+    if ! curl -fsS --noproxy "$FRONTEND_NO_PROXY" --connect-timeout 1 --max-time 3 "$url" > "$tmp_health" 2>/dev/null; then
+        rm -f "$tmp_health"
+        printf '{"checked":true,"status":"failed","url":'
+        json_string "$url"
+        printf '}'
+        return 0
+    fi
+    body_sha="$(file_sha256 "$tmp_health")"
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 - "$tmp_health" "$url" "$body_sha" <<'PY'
+import json
+import sys
+
+path, url, body_sha = sys.argv[1:4]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        body = json.load(fh)
+except Exception:
+    print(json.dumps({
+        "checked": True,
+        "status": "malformed",
+        "url": url,
+        "body_sha256": body_sha,
+    }, separators=(",", ":")))
+    raise SystemExit(0)
+
+if not isinstance(body, dict):
+    body = {}
+release = body.get("release")
+if not isinstance(release, dict):
+    release = {}
+freshness = body.get("data_freshness")
+if not isinstance(freshness, dict):
+    freshness = {}
+refresh = body.get("feature_output_refresh")
+if not isinstance(refresh, dict):
+    refresh = {}
+quote_updates = body.get("quote_updates")
+if not isinstance(quote_updates, dict):
+    quote_updates = {}
+
+def pick(source, keys):
+    return {key: source.get(key) for key in keys if key in source}
+
+evidence = {
+    "checked": True,
+    "status": "observed",
+    "url": url,
+    "body_sha256": body_sha,
+    "release": pick(release, ("sha", "image", "profile", "run_id", "run_attempt")),
+    "data_freshness": {
+        "latest_event_ts_ms": freshness.get("latest_event_ts_ms"),
+        "latest_event_age_ms": freshness.get("latest_event_age_ms"),
+        "store_sequence": freshness.get("store_sequence"),
+        "symbol_present": bool(freshness.get("symbol")),
+        "source_event_id_present": bool(freshness.get("source_event_id")),
+    },
+    "feature_output_refresh": pick(
+        refresh,
+        ("enabled", "running", "total_loaded", "refresh_errors", "last_success_at", "last_error_at"),
+    ),
+    "quote_updates": pick(
+        quote_updates,
+        ("requests", "changed", "timeouts", "rejected", "active_waits", "max_waits"),
+    ),
+}
+print(json.dumps(evidence, separators=(",", ":")))
+PY
+        then
+            rm -f "$tmp_health"
+            return 0
+        fi
+    fi
+    rm -f "$tmp_health"
+    printf '{"checked":true,"status":"observed_unparsed","url":'
+    json_string "$url"
+    printf ',"body_sha256":'
+    json_string_or_null "$body_sha"
+    printf '}'
+}
+
+rollback_json() {
+    printf '{"attempted":%s,"status":' "$ROLLBACK_ATTEMPTED"
+    json_string "$ROLLBACK_STATUS"
+    printf ',"reason":'
+    json_string_or_null "$ROLLBACK_REASON"
+    printf ',"target_ref":'
+    json_string_or_null "$ROLLBACK_TARGET_REF"
+    printf ',"target_profile":'
+    json_string_or_null "$ROLLBACK_TARGET_PROFILE"
+    printf ',"target_image":'
+    json_string_or_null "$ROLLBACK_TARGET_IMAGE"
+    printf ',"target_image_tar":'
+    json_string_or_null "$ROLLBACK_TARGET_IMAGE_TAR"
+    printf ',"target_image_tar_present":%s}' "$ROLLBACK_TARGET_IMAGE_TAR_PRESENT"
+}
+
+release_evidence_json() {
+    kind="$1"
+    outcome="$2"
+    identity_env_file="$(evidence_env_file)"
+    if [ "$kind" = "rollback" ]; then
+        env_file="$COMPOSE_ENV_FILE"
+    else
+        env_file="$identity_env_file"
+    fi
+    release_sha="$(release_identity_value "$identity_env_file" KALSHI_RELEASE_SHA "${KALSHI_RELEASE_SHA:-$candidate_ref}")"
+    run_id="$(release_identity_value "$identity_env_file" KALSHI_GITHUB_RUN_ID "${KALSHI_GITHUB_RUN_ID:-local}")"
+    run_attempt="$(release_identity_value "$identity_env_file" KALSHI_GITHUB_RUN_ATTEMPT "${KALSHI_GITHUB_RUN_ATTEMPT:-1}")"
+    release_profile="$(release_identity_value "$identity_env_file" KALSHI_DEPLOY_PROFILE "$DEPLOY_PROFILE")"
+    app_image="$(compose_app_image "$env_file")"
+    app_image_id=""
+    if [ -n "$app_image" ]; then
+        app_image_id="$(sudo docker image inspect -f '{{.Id}}' "$app_image" 2>/dev/null || true)"
+    fi
+    env_sha="$(file_sha256 "$env_file")"
+    generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+    printf '{'
+    printf '"schema_version":1'
+    printf ',"evidence_type":'
+    json_string "$kind"
+    printf ',"generated_at":'
+    json_string "$generated_at"
+    printf ',"release_sha":'
+    json_string_or_null "$release_sha"
+    printf ',"github_run_id":'
+    json_string_or_null "$run_id"
+    printf ',"github_run_attempt":'
+    json_string_or_null "$run_attempt"
+    printf ',"deploy_profile":'
+    json_string "$release_profile"
+    printf ',"candidate_ref":'
+    json_string_or_null "$candidate_ref"
+    printf ',"app_image":'
+    json_string_or_null "$app_image"
+    printf ',"app_image_id":'
+    json_string_or_null "$app_image_id"
+    printf ',"candidate_image_tar":'
+    candidate_image_tar_json "$env_file"
+    printf ',"environment":{"env_file_sha256":'
+    json_string_or_null "$env_sha"
+    printf ',"redacted":true,"whitelisted":{"release_sha":'
+    json_string_or_null "$release_sha"
+    printf ',"deploy_profile":'
+    json_string "$release_profile"
+    printf ',"github_run_id":'
+    json_string_or_null "$run_id"
+    printf ',"github_run_attempt":'
+    json_string_or_null "$run_attempt"
+    printf ',"app_image":'
+    json_string_or_null "$app_image"
+    printf '}}'
+    printf ',"gates":{'
+    printf '"compose_config":'
+    json_string "$COMPOSE_CONFIG_STATUS"
+    printf ',"app_image":'
+    json_string "$APP_IMAGE_STATUS"
+    printf ',"db_preflight":'
+    json_string "$DB_PREFLIGHT_STATUS"
+    printf ',"compose_down":'
+    json_string "$COMPOSE_DOWN_STATUS"
+    printf ',"compose_up":'
+    json_string "$COMPOSE_UP_STATUS"
+    printf ',"runtime_images":'
+    json_string "$RUNTIME_IMAGE_STATUS"
+    printf ',"profile_health_smoke":'
+    json_string "$PROFILE_HEALTH_SMOKE_STATUS"
+    printf ',"live_product_semantic_smoke":'
+    json_string "$LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS"
+    printf ',"record_last_success":'
+    json_string "$RECORD_SUCCESS_STATUS"
+    printf '}'
+    printf ',"runtime_images":'
+    runtime_images_json "$env_file"
+    printf ',"frontend_release_health":%s' "$FRONTEND_RELEASE_HEALTH_JSON"
+    printf ',"rollback":'
+    rollback_json
+    printf ',"outcome":'
+    json_string "$outcome"
+    printf '}'
+}
+
+write_release_evidence() {
+    kind="$1"
+    outcome="$2"
+    mkdir -p "$RELEASE_EVIDENCE_DIR"
+    chmod 700 "$DEPLOY_STATE_DIR" "$RELEASE_EVIDENCE_DIR"
+    target="$(release_evidence_file "$kind")"
+    tmp_file="$target.tmp.$$"
+    rm -f "$tmp_file"
+    if ! release_evidence_json "$kind" "$outcome" > "$tmp_file"; then
+        rm -f "$tmp_file"
+        log "Release evidence JSON generation failed for outcome=$outcome."
+        return 1
+    fi
+    chmod 600 "$tmp_file"
+    mv "$tmp_file" "$target"
+    log "Wrote release evidence: $target outcome=$outcome."
 }
 
 load_app_image_from_tar() {
@@ -275,6 +651,7 @@ run_db_release_preflight() {
     env_file="$1"
     service="$(db_preflight_service)"
     if [ -z "$service" ]; then
+        DB_PREFLIGHT_STATUS="skipped"
         log "Skipping DB release preflight for DEPLOY_PROFILE=$DEPLOY_PROFILE."
         return 0
     fi
@@ -291,9 +668,11 @@ run_db_release_preflight() {
             ;;
         live-product)
             if ! validate_live_product_db_writer "$env_file"; then
+                DB_PREFLIGHT_STATUS="failed"
                 return 1
             fi
             if ! validate_live_product_frontend_feature_source "$env_file"; then
+                DB_PREFLIGHT_STATUS="failed"
                 return 1
             fi
             db_url="$(env_file_value "$env_file" DB_WRITER_DATABASE_URL)"
@@ -302,6 +681,7 @@ run_db_release_preflight() {
             required="true"
             log "Running live-product Flyway migration against DB_WRITER_DATABASE_URL before release preflight."
             if ! compose_profile "$env_file" run --rm --no-deps -T db-migrate-live; then
+                DB_PREFLIGHT_STATUS="failed"
                 log "live-product Flyway migration failed."
                 return 1
             fi
@@ -314,14 +694,17 @@ run_db_release_preflight() {
     esac
 
     if [ -z "$db_url" ] && ! is_true "$required"; then
+        DB_PREFLIGHT_STATUS="skipped"
         log "Skipping DB release preflight: candidate DB URL is empty and DEPLOY_DB_PREFLIGHT_REQUIRED=$required."
         return 0
     fi
     if [ -z "$db_url" ]; then
+        DB_PREFLIGHT_STATUS="failed"
         log "DB release preflight required but candidate DB URL is empty."
         return 1
     fi
 
+    DB_PREFLIGHT_STATUS="running"
     log "Running DB release preflight with candidate service $service before stopping current services."
     if ! compose_profile "$env_file" run --rm --no-deps -T \
         -e DEPLOY_DB_PREFLIGHT_REQUIRED="$required" \
@@ -329,9 +712,11 @@ run_db_release_preflight() {
         -e DB_PREFLIGHT_DATABASE_USER="$db_user" \
         -e DB_PREFLIGHT_DATABASE_PASSWORD="$db_password" \
         "$service" java -cp /app/app.jar edu.illinois.group8.storage.db.DbReleasePreflightCli; then
+        DB_PREFLIGHT_STATUS="failed"
         log "DB release preflight failed."
         return 1
     fi
+    DB_PREFLIGHT_STATUS="passed"
     log "DB release preflight passed."
 }
 
@@ -457,10 +842,12 @@ assert_runtime_container_images() {
 run_live_product_semantic_smoke() {
     env_file="$1"
     if [ "$DEPLOY_PROFILE" != "live-product" ]; then
+        LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="not_applicable"
         return 0
     fi
 
     if ! validate_live_product_frontend_feature_source "$env_file"; then
+        LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
         return 1
     fi
 
@@ -469,34 +856,45 @@ run_live_product_semantic_smoke() {
         enabled="$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED"
     fi
     if ! is_true "$enabled"; then
+        LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
         log "live-product semantic smoke must be enabled before recording a live-product deploy success."
         return 1
     fi
 
+    LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="running"
     log "Running live-product semantic smoke before recording candidate success."
     if ! COMPOSE_ENV_FILE="$env_file" \
         COMPOSE_PROFILE="$DEPLOY_PROFILE" \
         LIVE_PRODUCT_SMOKE_DOCKER_SUDO=true \
         FRONTEND_NO_PROXY="$FRONTEND_NO_PROXY" \
         sh scripts/live-product-smoke.sh; then
+        LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="failed"
         log "live-product semantic smoke failed."
         return 1
     fi
+    LIVE_PRODUCT_SEMANTIC_SMOKE_STATUS="passed"
 }
 
 deploy_env() {
     env_file="$1"
     candidate="$2"
 
+    reset_gate_statuses
     log "Validating Docker Compose config for DEPLOY_PROFILE=$DEPLOY_PROFILE."
+    COMPOSE_CONFIG_STATUS="running"
     if ! compose_profile "$env_file" config --quiet; then
+        COMPOSE_CONFIG_STATUS="failed"
         log "Docker Compose config validation failed."
         return 1
     fi
+    COMPOSE_CONFIG_STATUS="passed"
 
+    APP_IMAGE_STATUS="running"
     if ! build_or_verify_app_image "$env_file"; then
+        APP_IMAGE_STATUS="failed"
         return 1
     fi
+    APP_IMAGE_STATUS="passed"
 
     if ! run_db_release_preflight "$env_file"; then
         return 1
@@ -510,26 +908,39 @@ deploy_env() {
     fi
 
     log "Stopping existing Compose services for controlled deploy."
+    COMPOSE_DOWN_STATUS="running"
     if ! down_all_profiles "$env_file"; then
+        COMPOSE_DOWN_STATUS="failed"
         log "Docker Compose down failed."
         return 1
     fi
+    COMPOSE_DOWN_STATUS="passed"
 
     log "Starting DEPLOY_PROFILE=$DEPLOY_PROFILE with prebuilt image."
+    COMPOSE_UP_STATUS="running"
     if ! compose_profile "$env_file" up -d --no-build --remove-orphans; then
+        COMPOSE_UP_STATUS="failed"
         log "Docker Compose up failed."
         return 1
     fi
+    COMPOSE_UP_STATUS="passed"
 
+    RUNTIME_IMAGE_STATUS="running"
     if ! assert_runtime_container_images "$env_file"; then
+        RUNTIME_IMAGE_STATUS="failed"
         diagnose_profile "$env_file"
         return 1
     fi
+    RUNTIME_IMAGE_STATUS="passed"
 
+    PROFILE_HEALTH_SMOKE_STATUS="running"
     if ! profile_health_smoke; then
+        PROFILE_HEALTH_SMOKE_STATUS="failed"
         diagnose_profile "$env_file"
         return 1
     fi
+    PROFILE_HEALTH_SMOKE_STATUS="passed"
+    FRONTEND_RELEASE_HEALTH_JSON="$(frontend_release_health_json)"
 
     if ! run_live_product_semantic_smoke "$env_file"; then
         diagnose_profile "$env_file"
@@ -627,33 +1038,53 @@ load_last_success_image_if_needed() {
 }
 
 rollback_to_last_success() {
+    ROLLBACK_ATTEMPTED="true"
     ref_file="$DEPLOY_STATE_DIR/last_success.ref"
     env_file="$DEPLOY_STATE_DIR/last_success.env"
     if [ ! -s "$ref_file" ] || [ ! -s "$env_file" ]; then
+        ROLLBACK_STATUS="unavailable"
+        ROLLBACK_REASON="missing_last_success_state"
         log "No last-success deploy state exists; cannot rollback this first/unknown deploy."
         return 1
     fi
 
     previous_ref="$(sed -n '1p' "$ref_file")"
     if [ -z "$previous_ref" ]; then
+        ROLLBACK_STATUS="unavailable"
+        ROLLBACK_REASON="empty_last_success_ref"
         log "Last-success ref is empty; cannot rollback."
         return 1
     fi
+    ROLLBACK_TARGET_REF="$previous_ref"
     if [ -s "$DEPLOY_STATE_DIR/last_success.profile" ]; then
         DEPLOY_PROFILE="$(sed -n '1p' "$DEPLOY_STATE_DIR/last_success.profile")"
         if [ -z "$DEPLOY_PROFILE" ]; then
+            ROLLBACK_STATUS="unavailable"
+            ROLLBACK_REASON="empty_last_success_profile"
             log "Last-success profile is empty; cannot rollback."
             return 1
         fi
     fi
+    ROLLBACK_TARGET_PROFILE="$DEPLOY_PROFILE"
+    ROLLBACK_TARGET_IMAGE="$(sed -n '1p' "$DEPLOY_STATE_DIR/last_success.image" 2>/dev/null || true)"
+    ROLLBACK_TARGET_IMAGE_TAR="$(sed -n '1p' "$DEPLOY_STATE_DIR/last_success.image_tar" 2>/dev/null || true)"
+    if [ -n "$ROLLBACK_TARGET_IMAGE_TAR" ] && [ -s "$ROLLBACK_TARGET_IMAGE_TAR" ]; then
+        ROLLBACK_TARGET_IMAGE_TAR_PRESENT="true"
+    else
+        ROLLBACK_TARGET_IMAGE_TAR_PRESENT="false"
+    fi
 
     log "Rolling back to previous successful ref $previous_ref with DEPLOY_PROFILE=$DEPLOY_PROFILE."
     if ! load_last_success_image_if_needed; then
+        ROLLBACK_STATUS="failed"
+        ROLLBACK_REASON="image_reload_failed"
         log "Rollback image reload failed."
         return 1
     fi
 
     if ! restore_last_success_checkout "$previous_ref"; then
+        ROLLBACK_STATUS="failed"
+        ROLLBACK_REASON="checkout_failed"
         log "Rollback checkout failed."
         return 1
     fi
@@ -662,10 +1093,14 @@ rollback_to_last_success() {
     chmod 600 "$COMPOSE_ENV_FILE"
 
     if ! deploy_env "$COMPOSE_ENV_FILE" false; then
+        ROLLBACK_STATUS="failed"
+        ROLLBACK_REASON="deploy_failed"
         log "Rollback deploy failed."
         return 1
     fi
 
+    ROLLBACK_STATUS="succeeded"
+    ROLLBACK_REASON=""
     log "Rollback succeeded; candidate failed but previous deploy was restored."
     return 0
 }
@@ -679,18 +1114,48 @@ candidate_ref="$(git rev-parse HEAD)"
 log "Deploying candidate ref $candidate_ref with DEPLOY_PROFILE=$DEPLOY_PROFILE."
 
 if deploy_env "$CANDIDATE_ENV_FILE" true; then
-    if record_success; then
+    RECORD_SUCCESS_STATUS="pending"
+    if ! write_release_evidence "candidate" "candidate_gates_passed"; then
+        RECORD_SUCCESS_STATUS="not_run"
+        POST_GATE_FAILURE_CLASS="release_evidence_write_failed"
+        log "Candidate deploy passed gates but release evidence recording failed; attempting rollback if possible."
+    elif record_success; then
+        RECORD_SUCCESS_STATUS="passed"
+        if ! write_release_evidence "candidate" "success"; then
+            log "Candidate deploy succeeded but final release evidence recording failed."
+            exit 1
+        fi
         log "Candidate deploy succeeded."
         exit 0
+    else
+        RECORD_SUCCESS_STATUS="failed"
+        POST_GATE_FAILURE_CLASS="record_success_failed"
+        write_release_evidence "candidate" "record_success_failed_rollback_pending" || true
+        log "Candidate deploy succeeded but last-success state recording failed; attempting rollback if possible."
     fi
-    log "Candidate deploy succeeded but last-success state recording failed; attempting rollback if possible."
 else
+    POST_GATE_FAILURE_CLASS="candidate_failed"
+    write_release_evidence "candidate" "candidate_failed_rollback_pending" || true
     log "Candidate deploy failed; attempting rollback if last-success state exists."
 fi
 
 if rollback_to_last_success; then
+    if [ "$POST_GATE_FAILURE_CLASS" = "release_evidence_write_failed" ]; then
+        write_release_evidence "rollback" "release_evidence_failed_rollback_succeeded" || true
+    elif [ "$POST_GATE_FAILURE_CLASS" = "record_success_failed" ]; then
+        write_release_evidence "rollback" "record_success_failed_rollback_succeeded" || true
+    else
+        write_release_evidence "rollback" "candidate_failed_rollback_succeeded" || true
+    fi
     exit 1
 fi
 
+if [ "$POST_GATE_FAILURE_CLASS" = "release_evidence_write_failed" ]; then
+    write_release_evidence "rollback" "release_evidence_failed_rollback_failed" || true
+elif [ "$POST_GATE_FAILURE_CLASS" = "record_success_failed" ]; then
+    write_release_evidence "rollback" "record_success_failed_rollback_failed" || true
+else
+    write_release_evidence "rollback" "candidate_failed_rollback_failed" || true
+fi
 log "Candidate deploy failed and rollback was unavailable or unsuccessful."
 exit 1
