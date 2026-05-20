@@ -204,6 +204,39 @@ class FrontendFeatureStoreTest {
     }
 
     @Test
+    void latestFreshnessReportsDemoReplayAsSyntheticNotLive() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(demoBbo("DEMO-DBPRIMARY-26MAY19-T50", 3_000L, 700_000L));
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(3_500L);
+
+        assertEquals("DEMO-DBPRIMARY-26MAY19-T50", freshness.symbol());
+        assertEquals(3_000L, freshness.latestEventTsMs());
+        assertEquals("demo-db-primary-canonical-bbo-3000", freshness.sourceEventId());
+        assertEquals("demo", freshness.sourceKind());
+        assertTrue(freshness.synthetic());
+        assertFalse(freshness.liveDataObserved());
+        assertEquals(1L, freshness.storeSequence());
+    }
+
+    @Test
+    void latestFreshnessPrefersLiveOverNewerDemoReplay() {
+        FrontendFeatureStore store = new FrontendFeatureStore(10, 100);
+        store.accept(bbo("MKT-LIVE", 2_000L, 600_000L));
+        store.accept(demoBbo("DEMO-DBPRIMARY-26MAY19-T50", 3_000L, 700_000L));
+
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(3_500L);
+
+        assertEquals("MKT-LIVE", freshness.symbol());
+        assertEquals(2_000L, freshness.latestEventTsMs());
+        assertEquals("evt-2000", freshness.sourceEventId());
+        assertEquals("live", freshness.sourceKind());
+        assertFalse(freshness.synthetic());
+        assertTrue(freshness.liveDataObserved());
+        assertEquals(2L, freshness.storeSequence());
+    }
+
+    @Test
     void latestFreshnessFollowsRetainedMarketAfterSymbolEviction() {
         FrontendFeatureStore store = new FrontendFeatureStore(10, 1);
         store.accept(bbo("MKT-OLD", 10_000L, 600_000L));
@@ -267,6 +300,21 @@ class FrontendFeatureStoreTest {
             market,
             ts,
             "live-product-smoke-" + ts,
+            Map.of(
+                "bid_price_micros", midpoint - 100_000L,
+                "ask_price_micros", midpoint + 100_000L,
+                "midpoint_micros", midpoint
+            )
+        );
+    }
+
+    static FeatureOutput demoBbo(String market, long ts, long midpoint) {
+        return new FeatureOutput(
+            FrontendFeatureStore.BBO_FEATURE,
+            FrontendFeatureStore.BBO_FEATURE,
+            market,
+            ts,
+            "demo-db-primary-canonical-bbo-" + ts,
             Map.of(
                 "bid_price_micros", midpoint - 100_000L,
                 "ask_price_micros", midpoint + 100_000L,

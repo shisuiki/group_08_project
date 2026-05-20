@@ -90,7 +90,7 @@ public class FrontendFeatureStore {
         if (latestGlobal == null || key.compareTo(latestGlobal.key()) >= 0) {
             latestGlobal = new LatestFeature(out, key);
         }
-        if (!FrontendSyntheticData.isSmoke(out)
+        if (FrontendSyntheticData.isLive(out)
             && (latestLiveGlobal == null || key.compareTo(latestLiveGlobal.key()) >= 0)) {
             latestLiveGlobal = new LatestFeature(out, key);
         }
@@ -148,7 +148,7 @@ public class FrontendFeatureStore {
                 if (best == null || candidate.key().compareTo(best.key()) >= 0) {
                     best = candidate;
                 }
-                if (!FrontendSyntheticData.isSmoke(candidate.output())
+                if (FrontendSyntheticData.isLive(candidate.output())
                     && (bestLive == null || candidate.key().compareTo(bestLive.key()) >= 0)) {
                     bestLive = candidate;
                 }

@@ -174,11 +174,18 @@ class UdfEndpointsTest {
             "live-product-smoke-run-1-bbo-001",
             600_000L
         ));
+        store.accept(feature(
+            "DEMO-DBPRIMARY-26MAY19-T50",
+            System.currentTimeMillis() - 150L,
+            "demo-db-primary-canonical-bbo-001",
+            550_000L
+        ));
         server = new FrontendAdapterServer(
             FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
             store,
             FrontendMarketMetadataCatalog.loaded("test", List.of(
                 metadata("MKT-LIVE", "EVENT-LIVE", "SERIES-LIVE", "open"),
+                metadata("DEMO-DBPRIMARY-26MAY19-T50", "DEMO-DBPRIMARY-26MAY19", "DEMO-DBPRIMARY", "open"),
                 metadata("LIVE-PRODUCT-SMOKE-run-1", "LIVE-PRODUCT-SMOKE", "LIVE-PRODUCT-SMOKE", "open")
             )),
             () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
@@ -187,15 +194,22 @@ class UdfEndpointsTest {
         baseUrl = "http://127.0.0.1:" + server.boundPort();
 
         JsonNode markets = getJson("/markets?limit=10");
-        assertEquals(1, markets.path("count").asInt());
-        assertEquals("MKT-LIVE", markets.path("markets").get(0).path("market_ticker").asText());
+        assertEquals(2, markets.path("count").asInt());
+        assertTrue(containsMarket(markets.path("markets"), "MKT-LIVE"));
+        assertTrue(containsMarket(markets.path("markets"), "DEMO-DBPRIMARY-26MAY19-T50"));
+        JsonNode demoSearch = getJson("/datafeed/search?query=DEMO-DBPRIMARY&limit=10");
+        assertEquals(1, demoSearch.size());
+        assertEquals("demo", demoSearch.get(0).path("source_kind").asText());
+        assertTrue(demoSearch.get(0).path("synthetic").asBoolean());
+        JsonNode demoSymbols = getJson("/symbols");
+        assertTrue(containsSymbol(demoSymbols.path("symbols"), "DEMO-DBPRIMARY-26MAY19-T50"));
         JsonNode smokeHiddenSearch = getJson("/datafeed/search?query=LIVE-PRODUCT-SMOKE&limit=10");
         assertEquals(0, smokeHiddenSearch.size());
         JsonNode smokeHiddenSymbols = getJson("/symbols");
         assertFalse(containsSymbol(smokeHiddenSymbols.path("symbols"), "LIVE-PRODUCT-SMOKE-run-1"));
 
         JsonNode smokeMarkets = getJson("/markets?include_smoke=true&limit=10");
-        assertEquals(2, smokeMarkets.path("count").asInt());
+        assertEquals(3, smokeMarkets.path("count").asInt());
         assertTrue(containsMarket(smokeMarkets.path("markets"), "LIVE-PRODUCT-SMOKE-run-1"));
         JsonNode smokeSearch = getJson("/datafeed/search?query=LIVE-PRODUCT-SMOKE&include_smoke=true&limit=10");
         assertEquals(1, smokeSearch.size());
@@ -848,6 +862,37 @@ class UdfEndpointsTest {
         JsonNode body = getJson("/health");
         JsonNode freshness = body.path("data_freshness");
         assertEquals("smoke", freshness.path("source_kind").asText());
+        assertTrue(freshness.path("synthetic").asBoolean());
+        assertFalse(freshness.path("live_data_observed").asBoolean());
+        JsonNode readiness = body.path("product_readiness");
+        assertEquals("degraded", readiness.path("status").asText());
+        assertFalse(readiness.path("stale").asBoolean());
+        assertTrue(readiness.path("degraded").asBoolean());
+        assertTrue(readiness.path("reasons").toString().contains("synthetic_freshness"));
+    }
+
+    @Test
+    void healthMarksDemoReplayFreshnessAsSyntheticAndDegraded() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature(
+            "DEMO-DBPRIMARY-26MAY19-T50",
+            System.currentTimeMillis() - 100L,
+            "demo-db-primary-canonical-bbo-001",
+            600_000L
+        ));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode body = getJson("/health");
+        JsonNode freshness = body.path("data_freshness");
+        assertEquals("demo", freshness.path("source_kind").asText());
         assertTrue(freshness.path("synthetic").asBoolean());
         assertFalse(freshness.path("live_data_observed").asBoolean());
         JsonNode readiness = body.path("product_readiness");

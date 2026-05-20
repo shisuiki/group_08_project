@@ -436,7 +436,7 @@ for key in ("latest_event_ts_ms", "latest_event_age_ms", "symbol", "feature_name
     if key not in freshness:
         raise SystemExit(f"frontend data_freshness.{key} is missing")
 source_kind = freshness.get("source_kind")
-if source_kind not in ("unknown", "smoke", "live"):
+if source_kind not in ("unknown", "smoke", "demo", "live"):
     raise SystemExit(f"frontend data_freshness.source_kind is invalid: {source_kind!r}")
 synthetic = freshness.get("synthetic")
 if not isinstance(synthetic, bool):
@@ -444,7 +444,7 @@ if not isinstance(synthetic, bool):
 live_data_observed = freshness.get("live_data_observed")
 if not isinstance(live_data_observed, bool):
     raise SystemExit("frontend data_freshness.live_data_observed is not a boolean")
-if synthetic != (source_kind == "smoke"):
+if synthetic != (source_kind in ("smoke", "demo")):
     raise SystemExit("frontend data_freshness.synthetic does not match source_kind")
 readiness = body.get("product_readiness")
 if not isinstance(readiness, dict):

@@ -723,12 +723,16 @@
         const kind = freshness.source_kind || 'unknown';
         const symbol = freshness.symbol || '-';
         const source = freshness.source_event_id || '-';
-        return `${state} ${kind} / ${age} / ${symbol} / ${source}`;
+        const sourceState = state === kind ? state : `${state} ${kind}`;
+        return `${sourceState} / ${age} / ${symbol} / ${source}`;
     }
 
     function dataFreshnessLiveState(freshness) {
         if (!freshness || freshness.latest_event_age_ms == null) {
             return 'stale';
+        }
+        if (freshness.synthetic === true) {
+            return freshness.source_kind === 'demo' ? 'demo' : 'synthetic';
         }
         return Number(freshness.latest_event_age_ms) <= 15000 ? 'live' : 'stale';
     }

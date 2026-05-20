@@ -51,11 +51,11 @@ def require_freshness_contract(mapping, label):
     source_kind = at(mapping, "freshness_source_kind")
     synthetic = at(mapping, "freshness_synthetic")
     live_data_observed = at(mapping, "freshness_live_data_observed")
-    require(source_kind in {"unknown", "smoke", "live"}, f"{label} freshness_source_kind invalid")
+    require(source_kind in {"unknown", "smoke", "demo", "live"}, f"{label} freshness_source_kind invalid")
     require(isinstance(synthetic, bool), f"{label} freshness_synthetic must be boolean")
     require(isinstance(live_data_observed, bool), f"{label} freshness_live_data_observed must be boolean")
     if isinstance(synthetic, bool) and isinstance(source_kind, str):
-        require(synthetic == (source_kind == "smoke"), f"{label} freshness_synthetic must match source kind")
+        require(synthetic == (source_kind in {"smoke", "demo"}), f"{label} freshness_synthetic must match source kind")
 
 require(at(evidence, "schema_version") == 1, "schema_version must be 1")
 require(at(evidence, "evidence_type") == "candidate", "evidence_type must be candidate")
@@ -158,9 +158,9 @@ if isinstance(final, dict):
         require(at(final, "freshness_live_data_observed") is True, "required live data was not visible in frontend freshness")
         require(at(final, "freshness_source_kind") == "live", "required live data must drive frontend freshness")
     require(at(final, "product_readiness_stale") is False, "final product_readiness must not be stale")
-    if at(final, "freshness_source_kind") == "smoke":
-        require(at(final, "product_readiness_status") != "ok", "smoke-only freshness cannot report ok product readiness")
-        require(at(final, "product_readiness_degraded") is True, "smoke-only freshness must degrade product readiness")
+    if at(final, "freshness_source_kind") in {"smoke", "demo"}:
+        require(at(final, "product_readiness_status") != "ok", "synthetic freshness cannot report ok product readiness")
+        require(at(final, "product_readiness_degraded") is True, "synthetic freshness must degrade product readiness")
     elif at(final, "freshness_source_kind") == "unknown":
         require(at(final, "product_readiness_status") != "ok", "unknown freshness cannot report ok product readiness")
     else:
