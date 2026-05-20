@@ -94,29 +94,29 @@
             <section class="panel">
                 <div class="panel-heading">
                     <h2>Current Quote</h2>
-                    <span id="live-symbol">-</span>
+                    <span id="live-symbol" class="ticker-text">-</span>
                 </div>
                 <dl>
                     <dt>Event ts</dt><dd id="live-ts">-</dd>
                     <dt>Quote age</dt><dd id="live-age">-</dd>
-                    <dt>Source event</dt><dd id="source-event">-</dd>
+                    <dt>Source event</dt><dd id="source-event" class="source-event-text">-</dd>
                     <dt>Last update</dt><dd id="live-updated">-</dd>
                 </dl>
             </section>
 
-            <section id="trader-monitor-panel" class="panel">
+            <section id="trader-monitor-panel" class="panel" data-role-panel="trader">
                 <div class="panel-heading">
                     <h2>Quote Monitor</h2>
                     <span id="trader-quote-mode">-</span>
                 </div>
                 <dl>
-                    <dt>Market</dt><dd id="trader-symbol">-</dd>
+                    <dt>Market</dt><dd id="trader-symbol" class="ticker-text">-</dd>
                     <dt>Status</dt><dd id="trader-market-status">-</dd>
                     <dt>Bid</dt><dd id="trader-bid">-</dd>
                     <dt>Ask</dt><dd id="trader-ask">-</dd>
                     <dt>Mid</dt><dd id="trader-midpoint">-</dd>
                     <dt>SSE</dt><dd id="trader-sse-status">-</dd>
-                    <dt>Source event</dt><dd id="trader-source-event">-</dd>
+                    <dt>Source event</dt><dd id="trader-source-event" class="source-event-text">-</dd>
                 </dl>
             </section>
 
@@ -146,7 +146,7 @@
                 </dl>
             </section>
 
-            <section id="research-features-panel" class="panel">
+            <section id="research-features-panel" class="panel" data-role-panel="research">
                 <div class="panel-heading">
                     <h2>Research Features</h2>
                     <span id="feature-count">0</span>
@@ -180,7 +180,7 @@
                 <div id="feature-list" class="feature-list"></div>
             </section>
 
-            <section id="semantic-map-panel" class="panel">
+            <section id="semantic-map-panel" class="panel" data-role-panel="semantic">
                 <div class="panel-heading">
                     <h2>Semantic Map</h2>
                     <span id="semantic-map-count">0</span>
@@ -263,7 +263,7 @@
                 </dl>
             </section>
 
-            <section id="runtime-operator-panel" class="panel">
+            <section id="runtime-operator-panel" class="panel" data-role-panel="operator">
                 <div class="panel-heading">
                     <h2>Runtime/Operator</h2>
                     <span id="runtime-source-mode">-</span>
@@ -288,7 +288,7 @@
                 </dl>
             </section>
 
-            <section id="latency-freshness-panel" class="panel">
+            <section id="latency-freshness-panel" class="panel" data-role-panel="operator">
                 <div class="panel-heading">
                     <h2>Latency/Freshness</h2>
                     <span id="freshness-status-class">-</span>
@@ -305,7 +305,7 @@
                 </dl>
             </section>
 
-            <section id="operator-plan-panel" class="panel">
+            <section id="operator-plan-panel" class="panel" data-role-panel="operator">
                 <div class="panel-heading">
                     <h2>Operator Control</h2>
                     <span id="operator-plan-state">disabled</span>
@@ -391,7 +391,45 @@
                 <pre id="operator-env-plan" class="operator-plan-output"></pre>
             </section>
 
-            <section id="catalog-sync-panel" class="panel">
+            <section id="demo-orchestrator-panel" class="panel" data-role-panel="operator">
+                <div class="panel-heading">
+                    <h2>Demo Orchestrator / Runbook</h2>
+                    <span id="demo-run-state">idle</span>
+                </div>
+                <dl>
+                    <dt>Run</dt><dd id="demo-run-id">-</dd>
+                    <dt>Mode</dt><dd id="demo-run-mode">-</dd>
+                    <dt>Release</dt><dd id="demo-run-release">-</dd>
+                    <dt>Data source</dt><dd id="demo-run-data-source">-</dd>
+                    <dt>Freshness</dt><dd id="demo-run-freshness">-</dd>
+                    <dt>Evidence</dt><dd id="demo-run-evidence">-</dd>
+                    <dt>Error</dt><dd id="demo-run-error">-</dd>
+                </dl>
+                <div class="operator-grid demo-orchestrator-grid">
+                    <label>Action
+                        <select id="demo-run-action">
+                            <option value="product_readiness_check">Product readiness</option>
+                            <option value="replay_demo_check">Replay demo</option>
+                            <option value="catalog_status">Catalog status</option>
+                            <option value="catalog_sync_dry_run">Catalog dry-run</option>
+                            <option value="semantic_metadata_dry_run">Semantic dry-run</option>
+                            <option value="catalog_and_semantic_dry_run">Catalog + semantic dry-run</option>
+                            <option value="live_product_check">Live product check</option>
+                        </select>
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="demo-run-confirm-live" type="checkbox" />
+                        Confirm live check
+                    </label>
+                </div>
+                <div class="operator-actions">
+                    <button id="demo-run-start" type="button">Run Demo Action</button>
+                    <button id="demo-run-refresh" type="button">Refresh</button>
+                </div>
+                <pre id="demo-run-output" class="operator-plan-output"></pre>
+            </section>
+
+            <section id="catalog-sync-panel" class="panel" data-role-panel="operator">
                 <div class="panel-heading">
                     <h2>Catalog Sync</h2>
                     <span id="catalog-sync-state">idle</span>
@@ -438,7 +476,7 @@
                 <pre id="catalog-sync-output" class="operator-plan-output"></pre>
             </section>
 
-            <section id="semantic-operator-panel" class="panel">
+            <section id="semantic-operator-panel" class="panel" data-role-panel="operator">
                 <div class="panel-heading">
                     <h2>Semantic Metadata</h2>
                     <span id="semantic-run-state">idle</span>

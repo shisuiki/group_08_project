@@ -87,6 +87,7 @@ public class FrontendAdapterServer {
     private final SemanticMarketMetadataReader semanticMarketMetadataReader;
     private final SemanticMetadataOperatorService semanticMetadataOperator;
     private final CatalogSyncOperatorService catalogSyncOperator;
+    private final DemoOrchestratorService demoOrchestrator;
     private final FrontendReleaseInfo releaseInfo;
     private final OperatorControlPlane operatorControlPlane;
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -318,6 +319,13 @@ public class FrontendAdapterServer {
             : catalogSyncOperator;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
+        this.demoOrchestrator = DemoOrchestratorService.create(
+            this.config,
+            this.releaseInfo,
+            this.catalogSyncOperator,
+            this.semanticMetadataOperator,
+            this::demoProductStatusSnapshot
+        );
     }
 
     public void start() throws IOException {
@@ -345,6 +353,8 @@ public class FrontendAdapterServer {
         bind("/operator/catalog/sync-status", this::handleOperatorCatalogSyncStatus);
         bind("/operator/semantic-metadata/run", this::handleOperatorSemanticMetadataRun);
         bind("/operator/semantic-metadata/run-status", this::handleOperatorSemanticMetadataRunStatus);
+        bind("/operator/demo-orchestrator/run", this::handleOperatorDemoOrchestratorRun);
+        bind("/operator/demo-orchestrator/run-status", this::handleOperatorDemoOrchestratorRunStatus);
         bind("/", this::handleStaticAsset);
         httpExecutor = Executors.newFixedThreadPool(
             HTTP_WORKER_THREADS,
@@ -369,6 +379,7 @@ public class FrontendAdapterServer {
         }
         semanticMetadataOperator.close();
         catalogSyncOperator.close();
+        demoOrchestrator.close();
     }
 
     private void bind(String path, HttpHandler delegate) {
@@ -885,6 +896,7 @@ public class FrontendAdapterServer {
         }
         health.put("market_metadata", metadataView);
         health.put("catalog_sync", catalogSyncOperator.statusBody());
+        health.put("demo_orchestrator", demoOrchestrator.statusBody());
         Map<String, Object> fp = new LinkedHashMap<>();
         fp.put("events_in", stats.eventsIn());
         fp.put("events_out", stats.eventsOut());
@@ -957,6 +969,7 @@ public class FrontendAdapterServer {
         body.put("catalog_sync_run", catalogSyncOperator.statusBody());
         body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
         body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
+        body.put("demo_orchestrator", demoOrchestrator.statusBody());
         body.put("data_freshness", dataFreshnessBody(freshness));
         body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
         body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
@@ -1060,6 +1073,71 @@ public class FrontendAdapterServer {
             return;
         }
         writeJson(exchange, 200, semanticMetadataOperator.statusBody());
+    }
+
+    private void handleOperatorDemoOrchestratorRun(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!config.operatorControlEnabled()) {
+            writeError(exchange, 403, "operator control POST is disabled");
+            return;
+        }
+        if (!config.basicAuthEnabled()) {
+            writeError(exchange, 403, "operator control POST requires Basic Auth");
+            return;
+        }
+        try {
+            JsonNode request = mapper.readTree(exchange.getRequestBody());
+            writeJson(exchange, 202, demoOrchestrator.start(request));
+        } catch (DemoOrchestratorService.RunAlreadyActiveException e) {
+            Map<String, Object> body = new LinkedHashMap<>(demoOrchestrator.statusBody());
+            body.put("status", "blocked");
+            body.put("message", e.getMessage());
+            writeJson(exchange, 409, body);
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+        } catch (IOException e) {
+            writeError(exchange, 400, "malformed JSON payload");
+        }
+    }
+
+    private void handleOperatorDemoOrchestratorRunStatus(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        writeJson(exchange, 200, demoOrchestrator.statusBody());
+    }
+
+    private Map<String, Object> demoProductStatusSnapshot() {
+        long nowMs = System.currentTimeMillis();
+        FeatureOutputRefreshStatus refreshStatus = featureOutputRefreshStatus.get();
+        FrontendFeatureStore.DataFreshness freshness = store.latestFreshness(nowMs);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("release", releaseInfo.toBody());
+        body.put("runtime", runtimeStatusBody());
+        body.put("store", Map.of(
+            "symbols", store.symbolCount(),
+            "total_features", store.totalAccepted(),
+            "sequence", store.sequence()
+        ));
+        body.put("data_freshness", dataFreshnessBody(freshness));
+        body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
+        body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
+        body.put("quote_updates", quoteUpdatesBody());
+        body.put("quote_streams", quoteStreamsBody());
+        body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
+        body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
+        body.put("catalog_sync", catalogSyncOperator.statusBody());
+        body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
+        body.put("market_metadata", Map.of(
+            "source", metadataCatalog.source(),
+            "status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT),
+            "markets", metadataCatalog.size()
+        ));
+        return body;
     }
 
     private void refreshMetadataCatalogAfterCatalogSync(Map<String, Object> body) {

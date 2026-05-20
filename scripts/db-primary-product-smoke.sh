@@ -31,6 +31,9 @@ FRONTEND_ADAPTER_DB_USER="${FRONTEND_ADAPTER_DB_USER:-$FEATUREPLANT_DB_USER}"
 FRONTEND_ADAPTER_DB_PASSWORD="${FRONTEND_ADAPTER_DB_PASSWORD:-$FEATUREPLANT_DB_PASSWORD}"
 FRONTEND_ADAPTER_FEATURE_SOURCE_RAW="${FRONTEND_ADAPTER_FEATURE_SOURCE:-}"
 FRONTEND_ADAPTER_FEATURE_SOURCE="${FRONTEND_ADAPTER_FEATURE_SOURCE_RAW:-latest_market_state}"
+PRODUCT_DEMO_ORCHESTRATOR_SMOKE="${PRODUCT_DEMO_ORCHESTRATOR_SMOKE:-false}"
+FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED_RAW="${FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED:-}"
+FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED="${FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED_RAW:-false}"
 FRONTEND_ADAPTER_BASIC_AUTH_USER="${FRONTEND_ADAPTER_BASIC_AUTH_USER:-}"
 FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD="${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD:-}"
 FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS="${FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS:-500}"
@@ -79,6 +82,19 @@ esac
 EXPECTED_FEATURE_COUNT_MIN="${EXPECTED_FEATURE_COUNT_MIN:-1}"
 EXPECTED_HISTORY_BARS_MIN="${EXPECTED_HISTORY_BARS_MIN:-1}"
 EXPECTED_REFRESH_TOTAL_LOADED_MIN="${EXPECTED_REFRESH_TOTAL_LOADED_MIN:-1}"
+case "$PRODUCT_DEMO_ORCHESTRATOR_SMOKE" in
+    1|true|TRUE|yes|YES|on|ON)
+        if [ -z "$FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED_RAW" ]; then
+            FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED=true
+        fi
+        if [ "$FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED" != "true" ]; then
+            printf 'PRODUCT_DEMO_ORCHESTRATOR_SMOKE requires FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED=true\n' >&2
+            exit 2
+        fi
+        FRONTEND_ADAPTER_BASIC_AUTH_USER="${FRONTEND_ADAPTER_BASIC_AUTH_USER:-operator}"
+        FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD="${FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD:-product-demo-operator}"
+        ;;
+esac
 
 export LOCAL_DB_NAME LOCAL_DB_USER LOCAL_DB_PASSWORD
 export PRODUCT_DEMO_SCENARIO DEMO_SEED_SQL PRODUCT_DEMO_REPLAY_ID
@@ -91,6 +107,7 @@ export FEATUREPLANT_DB_OUTPUT_BATCH_SIZE FEATUREPLANT_DB_OUTPUT_CLOSE_TIMEOUT_MS
 export FEATUREPLANT_METRICS_HOST FEATUREPLANT_METRICS_PORT FEATUREPLANT_METRICS_HOST_PORT
 export FRONTEND_ADAPTER_DB_URL FRONTEND_ADAPTER_DB_USER FRONTEND_ADAPTER_DB_PASSWORD
 export FRONTEND_ADAPTER_FEATURE_OUTPUT_REFRESH_INTERVAL_MS
+export FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED PRODUCT_DEMO_ORCHESTRATOR_SMOKE
 export FRONTEND_ADAPTER_BASIC_AUTH_USER FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD
 export DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT
 export PRODUCT_DEMO_SEMANTIC_FIXTURE PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS EXPECTED_SEMANTIC_METADATA_MIN_ROWS
@@ -384,6 +401,102 @@ PY
     done
 }
 
+wait_demo_orchestrator_smoke() {
+    if ! truthy "$PRODUCT_DEMO_ORCHESTRATOR_SMOKE"; then
+        printf 'SKIP demo_orchestrator_smoke reason=disabled\n'
+        return 0
+    fi
+    run_file="$tmpdir/demo-orchestrator-run.json"
+    status_file="$tmpdir/demo-orchestrator-status.json"
+    heatmap_file="$tmpdir/demo-orchestrator-heatmap.json"
+    quotes_file="$tmpdir/demo-orchestrator-quotes.json"
+    latency_file="$tmpdir/demo-orchestrator-latency.json"
+    payload='{"action":"product_readiness_check"}'
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        -H 'Content-Type: application/json' \
+        -d "$payload" \
+        "${FRONTEND_BASE_URL}/operator/demo-orchestrator/run" \
+        -o "$run_file"
+    attempt=1
+    while :; do
+        if frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/operator/demo-orchestrator/run-status" \
+                -o "$status_file" \
+            && frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/api/semantic-metadata/treemap?group_by=sector&limit=20" \
+                -o "$heatmap_file" \
+            && frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/quotes?symbols=${DEMO_SYMBOL}" \
+                -o "$quotes_file" \
+            && frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+                "${FRONTEND_BASE_URL}/ops/latency" \
+                -o "$latency_file" \
+            && python3 - "$run_file" "$status_file" "$heatmap_file" "$quotes_file" "$latency_file" <<'PY'
+import json
+import sys
+
+paths = sys.argv[1:]
+bodies = []
+for path in paths:
+    with open(path, "r", encoding="utf-8") as handle:
+        bodies.append(json.load(handle))
+
+run, status, heatmap, quotes, latency = bodies
+latest = status.get("latest_run") or {}
+if latest.get("state") != "completed":
+    raise SystemExit(f"demo orchestrator state {latest.get('state')}")
+if latest.get("action") != "product_readiness_check":
+    raise SystemExit("unexpected demo orchestrator action")
+if not latest.get("evidence_urls"):
+    raise SystemExit("missing demo evidence urls")
+if "data_source" not in latest:
+    raise SystemExit("missing demo data source")
+if heatmap.get("status") not in {"ok", "disabled", "unavailable"}:
+    raise SystemExit("semantic heatmap unreadable")
+if not isinstance(quotes.get("quotes"), list):
+    raise SystemExit("quotes unreadable")
+if latency.get("status") in {"", None}:
+    raise SystemExit("latency status missing")
+raw = json.dumps(bodies, sort_keys=True)
+blocked = [
+    "OPENROUTER_API_KEY",
+    "openrouter_api_key",
+    "FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD",
+    "FEATUREPLANT_DB_PASSWORD",
+    "DB_WRITER_DATABASE_PASSWORD",
+    "raw_response",
+]
+for needle in blocked:
+    if needle in raw:
+        raise SystemExit(f"reason=secret_leaked needle={needle}")
+print(latest.get("run_id"))
+print(latest.get("mode"))
+print(latest.get("stdout_summary"))
+PY
+        then
+            run_id="$(python3 - "$status_file" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+latest = body.get("latest_run") or {}
+print(latest.get("run_id", ""))
+PY
+)"
+            printf 'PASS demo_orchestrator_smoke action=product_readiness_check run_id=%s frontend=%s\n' \
+                "$run_id" "$FRONTEND_BASE_URL"
+            return 0
+        fi
+        if [ "$attempt" -ge "$SMOKE_HTTP_ATTEMPTS" ]; then
+            printf 'Demo orchestrator smoke did not complete at %s\n' "$FRONTEND_BASE_URL" >&2
+            print_product_diagnostics
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$SMOKE_HTTP_RETRY_SLEEP_SECONDS"
+    done
+}
+
 docker compose --profile db-primary-product stop featureplant-db-follower >/dev/null 2>&1 || true
 docker compose --profile db-primary-product rm -f featureplant-db-follower >/dev/null 2>&1 || true
 
@@ -474,6 +587,8 @@ DEMO_LIMIT="$DEMO_LIMIT" \
 SMOKE_HTTP_ATTEMPTS="$SMOKE_HTTP_ATTEMPTS" \
 SMOKE_HTTP_RETRY_SLEEP_SECONDS="$SMOKE_HTTP_RETRY_SLEEP_SECONDS" \
 "$SCRIPT_DIR/db-primary-demo-smoke.sh"
+
+wait_demo_orchestrator_smoke
 
 printf 'PASS db_primary_product_smoke scenario=%s symbol=%s feature_source=%s expected_feature_source=%s frontend_started_at=%s initial_loaded=%s feature_outputs=%s expected_feature_outputs_at_least=%s cursor=%s expected_cursor_at_least=%s\n' \
     "$PRODUCT_DEMO_SCENARIO" "$DEMO_SYMBOL" "$frontend_feature_source" "$FRONTEND_ADAPTER_FEATURE_SOURCE" "$frontend_started_at" "$frontend_initial_loaded" \

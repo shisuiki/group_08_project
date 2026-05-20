@@ -431,11 +431,16 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/operator/catalog/sync-status"));
         assertTrue(app.contains("/operator/semantic-metadata/run"));
         assertTrue(app.contains("/operator/semantic-metadata/run-status"));
+        assertTrue(app.contains("/operator/demo-orchestrator/run"));
+        assertTrue(app.contains("/operator/demo-orchestrator/run-status"));
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/api/semantic-metadata/markets?"));
         assertTrue(app.contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
         assertTrue(app.contains("layoutSemanticLeafTreemap"));
         assertTrue(app.contains("semanticRenderableLeaves"));
+        assertTrue(app.contains("buildDemoRunRequest"));
+        assertTrue(app.contains("applyRoleVisibility"));
+        assertTrue(app.contains("dataFreshnessBadgeText"));
     }
 
     @Test

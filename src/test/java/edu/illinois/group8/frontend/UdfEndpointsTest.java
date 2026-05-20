@@ -346,6 +346,11 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"operator-private-key-pem-present\""));
         assertTrue(root.body().contains("id=\"operator-db-password-present\""));
         assertTrue(root.body().contains("id=\"operator-command-plan\""));
+        assertTrue(root.body().contains("id=\"demo-orchestrator-panel\""));
+        assertTrue(root.body().contains("id=\"demo-run-action\""));
+        assertTrue(root.body().contains("id=\"demo-run-confirm-live\""));
+        assertTrue(root.body().contains("id=\"demo-run-start\""));
+        assertTrue(root.body().contains("Demo Orchestrator / Runbook"));
         assertTrue(root.body().contains("id=\"semantic-operator-panel\""));
         assertTrue(root.body().contains("id=\"semantic-run-start\""));
         assertTrue(root.body().contains("id=\"semantic-run-from-catalog\""));
@@ -364,6 +369,7 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"catalog-sync-dry-run\""));
         assertTrue(root.body().contains("id=\"catalog-sync-start\""));
         assertTrue(root.body().contains("Sync Catalog"));
+        assertTrue(root.body().contains("data-role-panel=\"operator\""));
         assertTrue(root.body().contains("<dt>Release</dt>"));
         assertTrue(root.body().contains("<dt>Data age</dt>"));
         assertTrue(root.body().contains("<dt>Quote feed</dt>"));
@@ -406,6 +412,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('runtime-feature-source')"));
         assertTrue(js.body().contains("document.getElementById('freshness-age-ms')"));
         assertTrue(js.body().contains("document.getElementById('operator-env-plan')"));
+        assertTrue(js.body().contains("document.getElementById('demo-run-action')"));
+        assertTrue(js.body().contains("document.getElementById('demo-run-start')"));
         assertTrue(js.body().contains("document.getElementById('operator-control-enabled')"));
         assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
         assertTrue(js.body().contains("document.getElementById('semantic-run-start')"));
@@ -427,6 +435,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/operator/catalog/sync-status"));
         assertTrue(js.body().contains("/operator/semantic-metadata/run"));
         assertTrue(js.body().contains("/operator/semantic-metadata/run-status"));
+        assertTrue(js.body().contains("/operator/demo-orchestrator/run"));
+        assertTrue(js.body().contains("/operator/demo-orchestrator/run-status"));
         assertTrue(js.body().contains("/ops/pipeline"));
         assertTrue(js.body().contains("/ops/latency"));
         assertTrue(js.body().contains("/api/semantic-metadata/treemap?"));
@@ -439,6 +449,10 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("buildCatalogSyncRequest"));
+        assertTrue(js.body().contains("buildDemoRunRequest"));
+        assertTrue(js.body().contains("renderDemoOrchestratorStatus"));
+        assertTrue(js.body().contains("applyRoleVisibility"));
+        assertTrue(js.body().contains("dataFreshnessBadgeText"));
         assertTrue(js.body().contains("startCatalogSync"));
         assertTrue(js.body().contains("loadCatalogSyncStatus"));
         assertTrue(js.body().contains("quote_updates"));
@@ -452,6 +466,11 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("window.location.origin"));
         assertTrue(css.body().contains("chart-container"));
         assertTrue(css.body().contains("semantic-treemap"));
+        assertTrue(css.body().contains("role-hidden"));
+        assertTrue(css.body().contains("demo-orchestrator-grid"));
+        assertTrue(css.body().contains("ticker-text"));
+        assertTrue(css.body().contains("source-event-text"));
+        assertTrue(css.body().contains("text-overflow: ellipsis"));
         assertTrue(chart.body().contains("LightweightCharts"));
     }
 
@@ -1536,6 +1555,161 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void operatorDemoOrchestratorPostIsDisabledByDefault() throws Exception {
+        HttpResponse<String> response = postJson(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"product_readiness_check\"}"
+        );
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("operator control POST is disabled"));
+    }
+
+    @Test
+    void operatorDemoOrchestratorEnabledStillRequiresBasicAuth() throws Exception {
+        restartWithOperatorControl(false);
+
+        HttpResponse<String> response = postJson(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"product_readiness_check\"}"
+        );
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("requires Basic Auth"));
+    }
+
+    @Test
+    void operatorDemoOrchestratorIsProtectedByBasicAuthWhenConfigured() throws Exception {
+        restartWithOperatorControl(true);
+
+        HttpResponse<String> unauthorized = postJson(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"product_readiness_check\"}"
+        );
+        HttpResponse<String> authorized = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"product_readiness_check\"}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(401, unauthorized.statusCode());
+        assertEquals(202, authorized.statusCode());
+    }
+
+    @Test
+    void operatorDemoOrchestratorStartsSafeSemanticDryRunAndPersistsLatestStatus() throws Exception {
+        AtomicReference<SemanticMetadataConfig> observed = new AtomicReference<>();
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> {
+                observed.set(config);
+                return summary(1, 0, 0, 0, 0, 1);
+            },
+            Map.of(),
+            config -> catalogSummary(0, 0, 0, 0, 0)
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"semantic_metadata_dry_run\",\"semantic\":{\"max_markets\":1,\"max_tokens\":512}}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        assertEquals("semantic_metadata_dry_run", completed.path("latest_run").path("action").asText());
+        assertEquals("semantic_metadata", completed.path("latest_run").path("mode").asText());
+        assertEquals("scheduled semantic metadata dry-run",
+            completed.path("latest_run").path("stdout_summary").asText());
+        assertTrue(completed.path("latest_run").path("config").path("llm_dry_run").asBoolean());
+        assertEquals("/operator/semantic-metadata/run-status",
+            completed.path("latest_run").path("evidence_url").asText());
+        assertTrue(observed.get().dryRun());
+        assertEquals(1, observed.get().maxMarkets());
+        assertEquals(512, observed.get().maxTokens());
+        assertEquals("", observed.get().openRouterApiKey());
+
+        JsonNode status = MAPPER.readTree(getWithBasicAuth(
+            "/operator/status",
+            "operator",
+            "secret"
+        ).body());
+        JsonNode health = MAPPER.readTree(getWithBasicAuth("/health", "operator", "secret").body());
+        assertEquals("semantic_metadata_dry_run",
+            status.path("demo_orchestrator").path("latest_run").path("action").asText());
+        assertEquals("completed", health.path("demo_orchestrator").path("latest_run").path("state").asText());
+    }
+
+    @Test
+    void operatorDemoOrchestratorSchedulesCatalogDryRunWithSafeDefaults() throws Exception {
+        AtomicReference<CatalogSyncOperatorService.CatalogSyncRunConfig> observed = new AtomicReference<>();
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> summary(0, 0, 0, 0, 0, 0),
+            Map.of("KALSHI_KEY_ID", "", "KALSHI_KEY_PATH", ""),
+            config -> {
+                observed.set(config);
+                return catalogSummary(1, 3, 2, 0, 2);
+            }
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            """
+                {
+                  "action": "catalog_sync_dry_run",
+                  "catalog": {"dry_run": false, "limit": 25, "max_pages": 2, "max_tickers": 3}
+                }
+                """,
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        assertEquals("catalog_sync_dry_run", completed.path("latest_run").path("action").asText());
+        assertEquals("scheduled catalog sync dry-run", completed.path("latest_run").path("stdout_summary").asText());
+        assertTrue(completed.path("latest_run").path("config").path("catalog_dry_run").asBoolean());
+        assertTrue(observed.get().request().dryRun());
+        assertEquals(25, observed.get().request().limit());
+        assertEquals(2, observed.get().request().maxPages());
+        assertEquals(3, observed.get().request().maxTickers());
+    }
+
+    @Test
+    void operatorDemoOrchestratorRejectsUnsafeOrUnsupportedRequests() throws Exception {
+        restartWithOperatorControl(true);
+
+        HttpResponse<String> unknown = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"shell\"}",
+            "operator",
+            "secret"
+        );
+        HttpResponse<String> command = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"product_readiness_check\",\"command\":\"touch /tmp/pwn\"}",
+            "operator",
+            "secret"
+        );
+        HttpResponse<String> liveWithoutConfirm = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"live_product_check\"}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(400, unknown.statusCode());
+        assertTrue(unknown.body().contains("unsupported demo orchestrator action"));
+        assertEquals(400, command.statusCode());
+        assertTrue(command.body().contains("does not accept shell/env/secret"));
+        assertEquals(400, liveWithoutConfirm.statusCode());
+        assertTrue(liveWithoutConfirm.body().contains("confirm_live=true"));
+    }
+
+    @Test
     void healthReportsReleaseIdentityAndDataFreshness() throws Exception {
         server.stop();
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
@@ -2164,6 +2338,46 @@ class UdfEndpointsTest {
         baseUrl = "http://127.0.0.1:" + server.boundPort();
     }
 
+    private void restartWithDemoOperators(
+        Map<String, String> semanticEnv,
+        Function<SemanticMetadataConfig, SemanticMetadataBatchSummary> semanticRunner,
+        Map<String, String> catalogEnv,
+        Function<CatalogSyncOperatorService.CatalogSyncRunConfig, CatalogSyncSummary> catalogRunner
+    ) throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        seed(store);
+        java.util.HashMap<String, String> env = new java.util.HashMap<>();
+        env.put("FRONTEND_ADAPTER_PORT", "0");
+        env.put("FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED", "true");
+        env.put("FRONTEND_ADAPTER_BASIC_AUTH_USER", "operator");
+        env.put("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD", "secret");
+        env.put("FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi");
+        env.put("FRONTEND_ADAPTER_DB_USER", "frontend");
+        env.put("FRONTEND_ADAPTER_DB_PASSWORD", "db-secret");
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(env);
+        SemanticMetadataOperatorService semanticService =
+            new SemanticMetadataOperatorService(config, semanticEnv, Executors.newSingleThreadExecutor(), semanticRunner);
+        CatalogSyncOperatorService catalogService =
+            new CatalogSyncOperatorService(config, catalogEnv, Executors.newSingleThreadExecutor(), catalogRunner);
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("model", "fallback", "tax-v1"),
+            request -> List.of(),
+            new FrontendReleaseInfo("demo-sha", "kalshi-project:demo", "db-primary-product", "1", "1"),
+            semanticService,
+            catalogService
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
     private JsonNode waitForSemanticRunState(String expectedState) throws Exception {
         JsonNode status = null;
         for (int attempt = 0; attempt < 80; attempt++) {
@@ -2186,6 +2400,23 @@ class UdfEndpointsTest {
         for (int attempt = 0; attempt < 80; attempt++) {
             status = MAPPER.readTree(getWithBasicAuth(
                 "/operator/catalog/sync-status",
+                "operator",
+                "secret"
+            ).body());
+            if (expectedState.equals(status.path("latest_run").path("state").asText())) {
+                return status;
+            }
+            Thread.sleep(25L);
+        }
+        assertNotNull(status);
+        return status;
+    }
+
+    private JsonNode waitForDemoRunState(String expectedState) throws Exception {
+        JsonNode status = null;
+        for (int attempt = 0; attempt < 80; attempt++) {
+            status = MAPPER.readTree(getWithBasicAuth(
+                "/operator/demo-orchestrator/run-status",
                 "operator",
                 "secret"
             ).body());

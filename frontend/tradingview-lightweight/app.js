@@ -149,6 +149,19 @@
         operatorChecklist: document.getElementById('operator-checklist'),
         operatorCommandPlan: document.getElementById('operator-command-plan'),
         operatorEnvPlan: document.getElementById('operator-env-plan'),
+        demoRunState: document.getElementById('demo-run-state'),
+        demoRunId: document.getElementById('demo-run-id'),
+        demoRunMode: document.getElementById('demo-run-mode'),
+        demoRunRelease: document.getElementById('demo-run-release'),
+        demoRunDataSource: document.getElementById('demo-run-data-source'),
+        demoRunFreshness: document.getElementById('demo-run-freshness'),
+        demoRunEvidence: document.getElementById('demo-run-evidence'),
+        demoRunError: document.getElementById('demo-run-error'),
+        demoRunAction: document.getElementById('demo-run-action'),
+        demoRunConfirmLive: document.getElementById('demo-run-confirm-live'),
+        demoRunStart: document.getElementById('demo-run-start'),
+        demoRunRefresh: document.getElementById('demo-run-refresh'),
+        demoRunOutput: document.getElementById('demo-run-output'),
         catalogSyncState: document.getElementById('catalog-sync-state'),
         catalogSyncId: document.getElementById('catalog-sync-id'),
         catalogSyncCounts: document.getElementById('catalog-sync-counts'),
@@ -257,6 +270,7 @@
     let semanticActiveGroupKey = '';
     let catalogSyncStatusTimer = null;
     let semanticRunStatusTimer = null;
+    let demoRunStatusTimer = null;
     let lastCatalogSyncCompletion = '';
     let lastSemanticRunCompletion = '';
     let lastHealthBody = null;
@@ -453,7 +467,10 @@
             const button = document.createElement('button');
             button.type = 'button';
             button.dataset.symbol = entry.symbol;
-            button.innerHTML = `<strong>${escapeHtml(entry.symbol)}</strong><span>${escapeHtml(entry.status || '-')}</span>`;
+            button.title = `${entry.symbol} / ${entry.status || '-'}`;
+            button.setAttribute('aria-label', button.title);
+            button.innerHTML = `<strong class="ticker-text">${escapeHtml(entry.symbol)}</strong>` +
+                `<span>${escapeHtml(entry.status || '-')}</span>`;
             button.addEventListener('click', () => {
                 dom.symbolSelect.value = entry.symbol;
                 onSelectedSymbolChanged();
@@ -1240,19 +1257,23 @@
 
     function renderMissingQuote(symbol) {
         dom.live.symbol.textContent = symbol || '-';
+        dom.live.symbol.title = symbol || '';
         dom.live.bid.textContent = '-';
         dom.live.ask.textContent = '-';
         dom.live.midpoint.textContent = '-';
         dom.live.ts.textContent = '-';
         dom.live.age.textContent = '-';
         dom.live.sourceEvent.textContent = '-';
+        dom.live.sourceEvent.title = '';
         dom.live.freshness.textContent = 'waiting';
         dom.live.updated.textContent = new Date().toLocaleTimeString();
         dom.traderSymbol.textContent = symbol || '-';
+        dom.traderSymbol.title = symbol || '';
         dom.traderBid.textContent = '-';
         dom.traderAsk.textContent = '-';
         dom.traderMidpoint.textContent = '-';
         dom.traderSourceEvent.textContent = '-';
+        dom.traderSourceEvent.title = '';
     }
 
     function renderQuote(symbol, quote, serverTsMs) {
@@ -1261,17 +1282,21 @@
             return;
         }
         dom.live.symbol.textContent = quote.symbol;
+        dom.live.symbol.title = quote.symbol || '';
         dom.live.bid.textContent = formatMicros(quote.bid_micros);
         dom.live.ask.textContent = formatMicros(quote.ask_micros);
         dom.live.midpoint.textContent = formatMicros(quote.midpoint_micros);
         dom.live.ts.textContent = formatEventTs(quote.event_ts_ms);
         dom.live.sourceEvent.textContent = quote.source_event_id || '-';
+        dom.live.sourceEvent.title = quote.source_event_id || '';
         dom.live.updated.textContent = new Date().toLocaleTimeString();
         dom.traderSymbol.textContent = quote.symbol || symbol || '-';
+        dom.traderSymbol.title = quote.symbol || symbol || '';
         dom.traderBid.textContent = formatMicros(quote.bid_micros);
         dom.traderAsk.textContent = formatMicros(quote.ask_micros);
         dom.traderMidpoint.textContent = formatMicros(quote.midpoint_micros);
         dom.traderSourceEvent.textContent = quote.source_event_id || '-';
+        dom.traderSourceEvent.title = quote.source_event_id || '';
         renderFreshness(quote.event_ts_ms, serverTsMs);
     }
 
@@ -1429,6 +1454,9 @@
         if (body.semantic_metadata_run) {
             renderSemanticRunStatus(body.semantic_metadata_run);
         }
+        if (body.demo_orchestrator) {
+            renderDemoOrchestratorStatus(body.demo_orchestrator, body);
+        }
         const semanticConfig = body.semantic_metadata || {};
         if (!dom.semanticRunModel.value && semanticConfig.model) {
             dom.semanticRunModel.value = semanticConfig.model;
@@ -1457,6 +1485,19 @@
             dom.semanticRunError.textContent = err.message;
             dom.semanticRunStart.disabled = true;
             dom.semanticRunOutput.textContent = '';
+        }
+    }
+
+    async function loadDemoOrchestratorStatus() {
+        try {
+            const body = await fetchJson('/operator/demo-orchestrator/run-status');
+            renderDemoOrchestratorStatus(body, lastHealthBody);
+        } catch (err) {
+            dom.demoRunState.textContent = 'unavailable';
+            dom.demoRunState.className = 'stale';
+            dom.demoRunError.textContent = err.message;
+            dom.demoRunStart.disabled = true;
+            dom.demoRunOutput.textContent = '';
         }
     }
 
@@ -1595,6 +1636,61 @@
         }
     }
 
+    function renderDemoOrchestratorStatus(body, healthBody) {
+        const latest = body?.latest_run || null;
+        const summary = latest?.summary || {};
+        const dataSource = summary?.data_source || latest?.data_source || body?.data_source || {};
+        const release = summary?.release || body?.release || healthBody?.release || {};
+        const freshness = healthBody?.data_freshness || summary?.status_snapshot?.data_freshness || {};
+        const state = latest?.state || body?.status || 'idle';
+        dom.demoRunState.textContent = state;
+        dom.demoRunState.className = state === 'completed' ? 'fresh'
+            : state === 'running' ? ''
+            : state === 'idle' ? ''
+            : 'stale';
+        dom.demoRunId.textContent = latest
+            ? `${latest.run_id} / ${latest.started_at || '-'}${latest.finished_at ? ' -> ' + latest.finished_at : ''}`
+            : '-';
+        dom.demoRunMode.textContent = latest
+            ? `${latest.mode || '-'} / ${latest.action || '-'}`
+            : (Array.isArray(body?.actions) ? `${body.actions.length} action(s)` : '-');
+        dom.demoRunRelease.textContent = releaseStatusText(release);
+        dom.demoRunDataSource.textContent =
+            `${dataSource.source_mode || healthBody?.source_mode || 'unknown'}` +
+            ` / ${dataSource.feature_source || healthBody?.feature_source || 'unknown'}` +
+            ` / db ${yesNo(dataSource.db_configured)}`;
+        dom.demoRunFreshness.textContent = dataFreshnessBadgeText(freshness);
+        dom.demoRunFreshness.className = dataFreshnessClass(freshness);
+        const evidence = latest?.evidence_url || summary?.evidence_url || '-';
+        dom.demoRunEvidence.textContent = evidence;
+        dom.demoRunEvidence.title = Array.isArray(latest?.evidence_urls)
+            ? latest.evidence_urls.join('\n')
+            : evidence;
+        dom.demoRunError.textContent = latest?.last_error || (state === 'disabled' ? 'operator control disabled' : '-');
+        dom.demoRunStart.disabled = body?.running === true || body?.operator_control_enabled !== true;
+        dom.demoRunOutput.textContent = latest ? JSON.stringify({
+            state: latest.state,
+            action: latest.action,
+            mode: latest.mode,
+            stdout_summary: latest.stdout_summary,
+            evidence_urls: latest.evidence_urls,
+            release_sha: latest.release_sha,
+            release_profile: latest.release_profile,
+            data_source: latest.data_source,
+            summary,
+            last_error: latest.last_error || null
+        }, null, 2) : JSON.stringify({
+            actions: body?.actions || [],
+            safe_defaults: body?.safe_defaults || {},
+            data_source: body?.data_source || {}
+        }, null, 2);
+        if (body?.running === true) {
+            scheduleDemoRunStatusRefresh();
+        } else {
+            clearDemoRunStatusTimer();
+        }
+    }
+
     function renderProductReadiness(body) {
         const readiness = body.product_readiness || {};
         const freshness = body.data_freshness || {};
@@ -1727,6 +1823,15 @@
         const source = freshness.source_event_id || '-';
         const sourceState = state === kind ? state : `${state} ${kind}`;
         return `${sourceState} / ${age} / ${symbol} / ${source}`;
+    }
+
+    function dataFreshnessBadgeText(freshness) {
+        if (!freshness || freshness.latest_event_ts_ms == null) {
+            return 'waiting / unknown';
+        }
+        const state = dataFreshnessLiveState(freshness);
+        const age = freshness.latest_event_age_ms == null ? '-' : formatAge(Number(freshness.latest_event_age_ms));
+        return `${state} / ${freshness.source_kind || 'unknown'} / ${age}`;
     }
 
     function readinessText(readiness) {
@@ -1906,6 +2011,38 @@
         return request;
     }
 
+    function buildDemoRunRequest() {
+        return {
+            action: dom.demoRunAction.value || 'product_readiness_check',
+            confirm_live: dom.demoRunConfirmLive.checked,
+            catalog: {
+                dry_run: true,
+                limit: Number(dom.catalogSyncLimit.value || 20) || 20,
+                max_pages: Number(dom.catalogSyncMaxPages.value || 1) || 1,
+                max_tickers: Number(dom.catalogSyncMaxTickers.value || 5) || 5,
+                series_ticker: dom.catalogSyncSeries.value.trim(),
+                market_status: dom.catalogSyncStatus.value.trim(),
+                mve_filter: dom.catalogSyncMveFilter.value.trim()
+            },
+            semantic: {
+                dry_run: true,
+                overwrite: false,
+                allow_paid_fallback: false,
+                max_markets: Number(dom.semanticRunMaxMarkets.value || 5) || 5,
+                max_tokens: Number(dom.semanticRunMaxTokens.value || 2200) || 2200,
+                max_retries: Number(dom.semanticRunMaxRetries.value || 2) || 2,
+                market_ticker: dom.semanticRunMarketTicker.value.trim(),
+                series_ticker: dom.semanticRunSeriesTicker.value.trim(),
+                market_status: dom.semanticRunMarketStatus.value.trim() || 'active',
+                taxonomy_version: dom.semanticRunTaxonomy.value.trim(),
+                model: dom.semanticRunModel.value.trim(),
+                fallback_model: dom.semanticRunFallbackModel.value.trim(),
+                budget_usd: dom.semanticRunBudgetUsd.value.trim() || '0',
+                estimated_paid_request_cost_usd: dom.semanticRunEstimatedCost.value.trim() || '0.01'
+            }
+        };
+    }
+
     async function startCatalogSync() {
         dom.catalogSyncStart.disabled = true;
         dom.catalogSyncState.textContent = 'starting';
@@ -1947,6 +2084,33 @@
         }
     }
 
+    async function startDemoOrchestratorRun() {
+        dom.demoRunStart.disabled = true;
+        dom.demoRunState.textContent = 'starting';
+        dom.demoRunError.textContent = '-';
+        try {
+            const body = await fetchJson('/operator/demo-orchestrator/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildDemoRunRequest())
+            });
+            renderDemoOrchestratorStatus(body, lastHealthBody);
+        } catch (err) {
+            dom.demoRunState.textContent = 'blocked';
+            dom.demoRunState.className = 'stale';
+            dom.demoRunError.textContent = err.message;
+        } finally {
+            await loadOperatorStatus();
+            if ((dom.demoRunAction.value || '').includes('semantic')) {
+                await loadSemanticRunStatus();
+                await loadSemanticMap();
+            }
+            if ((dom.demoRunAction.value || '').includes('catalog')) {
+                await loadCatalogSyncStatus();
+            }
+        }
+    }
+
     async function startSemanticRunFromCatalog() {
         applyCatalogSyncToSemanticRun(buildCatalogSyncRequest(), null);
         await startSemanticMetadataRun();
@@ -1973,6 +2137,18 @@
         if (catalogSyncStatusTimer != null) {
             clearTimeout(catalogSyncStatusTimer);
             catalogSyncStatusTimer = null;
+        }
+    }
+
+    function scheduleDemoRunStatusRefresh() {
+        clearDemoRunStatusTimer();
+        demoRunStatusTimer = setTimeout(loadDemoOrchestratorStatus, 2500);
+    }
+
+    function clearDemoRunStatusTimer() {
+        if (demoRunStatusTimer != null) {
+            clearTimeout(demoRunStatusTimer);
+            demoRunStatusTimer = null;
         }
     }
 
@@ -2232,6 +2408,7 @@
             const active = button.dataset.role === role;
             button.setAttribute('aria-selected', active ? 'true' : 'false');
         }
+        applyRoleVisibility(role);
         const button = document.querySelector(`#view-tabs [data-role="${role}"]`);
         const target = button ? document.getElementById(button.dataset.target) : null;
         if (target) {
@@ -2243,6 +2420,16 @@
         });
         if (role === 'semantic') {
             loadSemanticMap();
+        }
+    }
+
+    function applyRoleVisibility(role) {
+        for (const panel of document.querySelectorAll('[data-role-panel]')) {
+            const roles = String(panel.dataset.rolePanel || '')
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+            panel.classList.toggle('role-hidden', roles.length > 0 && !roles.includes(role));
         }
     }
 
@@ -2283,6 +2470,8 @@
     dom.catalogSyncUseForSemantic.addEventListener('click', () => applyCatalogSyncToSemanticRun(buildCatalogSyncRequest(), null));
     dom.semanticRunFromCatalog.addEventListener('click', startSemanticRunFromCatalog);
     dom.semanticRunRefresh.addEventListener('click', loadSemanticRunStatus);
+    dom.demoRunStart.addEventListener('click', startDemoOrchestratorRun);
+    dom.demoRunRefresh.addEventListener('click', loadDemoOrchestratorStatus);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
     for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
         button.addEventListener('click', () => setActiveRole(button.dataset.role));
@@ -2298,8 +2487,10 @@
         loadSemanticMap();
         loadCatalogSyncStatus();
         loadSemanticRunStatus();
+        loadDemoOrchestratorStatus();
     });
 
+    applyRoleVisibility('viewer');
     setInterval(() => {
         loadHealth();
         loadOpsTelemetry();
@@ -2312,5 +2503,6 @@
         loadSemanticMap();
         loadCatalogSyncStatus();
         loadSemanticRunStatus();
+        loadDemoOrchestratorStatus();
     });
 })();
