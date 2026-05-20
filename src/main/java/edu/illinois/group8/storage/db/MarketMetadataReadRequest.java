@@ -4,7 +4,8 @@ public record MarketMetadataReadRequest(
     String marketTicker,
     String seriesTicker,
     String status,
-    int maxRows
+    int maxRows,
+    String excludeGeneratedTaxonomyVersion
 ) {
     public static final int DEFAULT_MAX_ROWS = 100;
     public static final int MAX_ROWS = 1_000;
@@ -13,6 +14,7 @@ public record MarketMetadataReadRequest(
         marketTicker = normalize(marketTicker);
         seriesTicker = normalize(seriesTicker);
         status = normalize(status);
+        excludeGeneratedTaxonomyVersion = normalize(excludeGeneratedTaxonomyVersion);
         if (maxRows < 1) {
             throw new IllegalArgumentException("maxRows must be positive");
         }
@@ -20,7 +22,7 @@ public record MarketMetadataReadRequest(
     }
 
     public static MarketMetadataReadRequest byTicker(String marketTicker) {
-        MarketMetadataReadRequest request = new MarketMetadataReadRequest(marketTicker, null, null, 1);
+        MarketMetadataReadRequest request = new MarketMetadataReadRequest(marketTicker, null, null, 1, null);
         if (request.marketTicker() == null) {
             throw new IllegalArgumentException("marketTicker must not be blank");
         }
@@ -28,11 +30,25 @@ public record MarketMetadataReadRequest(
     }
 
     public static MarketMetadataReadRequest search(String seriesTicker, String status, int maxRows) {
-        return new MarketMetadataReadRequest(null, seriesTicker, status, maxRows);
+        return new MarketMetadataReadRequest(null, seriesTicker, status, maxRows, null);
+    }
+
+    public static MarketMetadataReadRequest searchWithoutGenerated(
+        String seriesTicker,
+        String status,
+        int maxRows,
+        String taxonomyVersion
+    ) {
+        MarketMetadataReadRequest request =
+            new MarketMetadataReadRequest(null, seriesTicker, status, maxRows, taxonomyVersion);
+        if (request.excludeGeneratedTaxonomyVersion() == null) {
+            throw new IllegalArgumentException("taxonomyVersion must not be blank");
+        }
+        return request;
     }
 
     public static MarketMetadataReadRequest defaultSearch() {
-        return new MarketMetadataReadRequest(null, null, null, DEFAULT_MAX_ROWS);
+        return new MarketMetadataReadRequest(null, null, null, DEFAULT_MAX_ROWS, null);
     }
 
     private static String normalize(String value) {

@@ -196,6 +196,14 @@
                         </select>
                     </label>
                     <label class="compact-field">
+                        View
+                        <select id="semantic-render-mode" aria-label="Semantic map view mode">
+                            <option value="groups">Groups</option>
+                            <option value="top_markets">Top markets</option>
+                            <option value="all">All leaves</option>
+                        </select>
+                    </label>
+                    <label class="compact-field">
                         Status
                         <select id="semantic-status-filter" aria-label="Semantic metadata status">
                             <option value="">Any status</option>
@@ -218,14 +226,23 @@
                         <input id="semantic-search" type="search" autocomplete="off" />
                     </label>
                     <button id="semantic-refresh" type="button">Refresh</button>
+                    <button id="semantic-drillup" type="button">Back</button>
                 </div>
                 <div id="semantic-map-state" class="semantic-map-state">Loading semantic metadata...</div>
                 <div id="semantic-group-summary" class="semantic-group-summary"></div>
                 <div id="semantic-treemap" class="semantic-treemap" aria-label="semantic metadata treemap"></div>
                 <dl id="semantic-market-detail" class="semantic-market-detail">
                     <dt>Market</dt><dd id="semantic-detail-market">-</dd>
+                    <dt>Title</dt><dd id="semantic-detail-title">-</dd>
+                    <dt>Status</dt><dd id="semantic-detail-status">-</dd>
                     <dt>Group</dt><dd id="semantic-detail-group">-</dd>
+                    <dt>Sector</dt><dd id="semantic-detail-sector">-</dd>
+                    <dt>Subsector</dt><dd id="semantic-detail-subsector">-</dd>
+                    <dt>Event type</dt><dd id="semantic-detail-event-type">-</dd>
+                    <dt>Tags</dt><dd id="semantic-detail-tags">-</dd>
                     <dt>Confidence</dt><dd id="semantic-detail-confidence">-</dd>
+                    <dt>Open interest</dt><dd id="semantic-detail-open-interest">-</dd>
+                    <dt>Freshness</dt><dd id="semantic-detail-freshness">-</dd>
                     <dt>Quote</dt><dd id="semantic-detail-quote">-</dd>
                 </dl>
             </section>
@@ -457,10 +474,16 @@
                         </select>
                     </label>
                     <label>Max markets
-                        <input id="semantic-run-max-markets" type="number" min="1" max="500" value="25" />
+                        <input id="semantic-run-max-markets" type="number" min="1" max="500" value="5" />
+                    </label>
+                    <label>Max tokens
+                        <input id="semantic-run-max-tokens" type="number" min="1" max="4096" value="2200" />
+                    </label>
+                    <label>Max retries
+                        <input id="semantic-run-max-retries" type="number" min="0" max="10" value="2" />
                     </label>
                     <label>Budget USD
-                        <input id="semantic-run-budget-usd" type="number" min="0" step="0.01" value="1.00" />
+                        <input id="semantic-run-budget-usd" type="number" min="0" step="0.01" value="0.50" />
                     </label>
                     <label>Paid request estimate
                         <input id="semantic-run-estimated-cost" type="number" min="0.0001" step="0.0001" value="0.01" />
@@ -473,8 +496,12 @@
                         Use server key
                     </label>
                     <label class="checkbox-row">
-                        <input id="semantic-run-dry-run" type="checkbox" checked />
+                        <input id="semantic-run-dry-run" type="checkbox" />
                         Dry run
+                    </label>
+                    <label class="checkbox-row">
+                        <input id="semantic-run-overwrite" type="checkbox" />
+                        Overwrite
                     </label>
                     <label class="checkbox-row">
                         <input id="semantic-run-allow-paid-fallback" type="checkbox" />
@@ -482,7 +509,9 @@
                     </label>
                 </div>
                 <div class="operator-actions">
-                    <button id="semantic-run-start" type="button">Start Run</button>
+                    <button id="semantic-run-start" type="button">Run Semantic Labels</button>
+                    <button id="catalog-sync-use-for-semantic" type="button">Use Catalog Filters</button>
+                    <button id="semantic-run-from-catalog" type="button">Run From Catalog</button>
                     <button id="semantic-run-refresh" type="button">Refresh</button>
                 </div>
                 <pre id="semantic-run-output" class="operator-plan-output"></pre>

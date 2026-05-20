@@ -129,7 +129,10 @@ final class SemanticMetadataOperatorService implements AutoCloseable {
     private RunConfig runConfig(JsonNode request) {
         Map<String, String> env = new HashMap<>(baseEnv);
         putBoolean(env, "LLM_METADATA_DRY_RUN", request, "dry_run");
+        putBoolean(env, "LLM_METADATA_OVERWRITE", request, "overwrite");
         putInt(env, "LLM_METADATA_MAX_MARKETS", request, "max_markets");
+        putInt(env, "LLM_METADATA_MAX_RETRIES", request, "max_retries");
+        putInt(env, "LLM_METADATA_MAX_TOKENS", request, "max_tokens");
         putString(env, "LLM_METADATA_MARKET_TICKER", request, "market_ticker");
         putString(env, "LLM_METADATA_SERIES_TICKER", request, "series_ticker");
         putString(env, "LLM_METADATA_MARKET_STATUS", request, "market_status");
@@ -156,7 +159,10 @@ final class SemanticMetadataOperatorService implements AutoCloseable {
     private Map<String, Object> redactedConfig(SemanticMetadataConfig config, RunConfig runConfig) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("dry_run", config.dryRun());
+        body.put("overwrite", config.overwrite());
         body.put("max_markets", config.maxMarkets());
+        body.put("max_retries", config.maxRetries());
+        body.put("max_tokens", config.maxTokens());
         body.put("market_ticker", emptyToNull(config.marketTicker()));
         body.put("series_ticker", emptyToNull(config.seriesTicker()));
         body.put("market_status", emptyToNull(config.marketStatus()));
@@ -344,6 +350,10 @@ final class SemanticMetadataOperatorService implements AutoCloseable {
             body.put("primary_model", summary.primaryModel());
             body.put("fallback_model", summary.fallbackModel());
             body.put("outcome", outcome(summary));
+            if (summary.reviewRequired() > 0) {
+                body.put("review_required_hint",
+                    "Inspect market_semantic_metadata.error and raw_response; parse failures may need higher max_tokens.");
+            }
             return body;
         }
 

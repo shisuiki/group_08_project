@@ -77,6 +77,18 @@ public final class JdbcMarketMetadataReader implements MarketMetadataReader {
             sql.append(" and status = ?");
             bindings.add(request.status());
         }
+        if (request.excludeGeneratedTaxonomyVersion() != null) {
+            sql.append("""
+                 and not exists (
+                    select 1
+                    from market_semantic_metadata smm
+                    where smm.market_ticker = market_metadata.market_ticker
+                      and smm.taxonomy_version = ?
+                      and smm.status = 'generated'
+                )
+                """);
+            bindings.add(request.excludeGeneratedTaxonomyVersion());
+        }
         sql.append(" order by series_ticker asc nulls last, market_ticker asc");
         sql.append(" limit ?");
         bindings.add(request.maxRows());

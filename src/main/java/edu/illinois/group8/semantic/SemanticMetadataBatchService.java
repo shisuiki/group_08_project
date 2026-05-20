@@ -111,7 +111,7 @@ public final class SemanticMetadataBatchService {
     }
 
     private static boolean reusableTerminalStatus(String status) {
-        return "generated".equals(status) || "review_required".equals(status);
+        return "generated".equals(status);
     }
 
     private Result classifyAndPersist(
@@ -182,7 +182,7 @@ public final class SemanticMetadataBatchService {
                 attempt.attempts(), null, null, usagePayload(completion.usage(), budgetTracker));
             return new Result("generated");
         } catch (IllegalArgumentException e) {
-            String error = e.getMessage();
+            String error = parseFailureError(e, completion, config);
             persistStatusOnly(identity, market, config, actualModel, "review_required", error, completion.rawResponse());
             upsertJob(identity, market, config, config.model(), actualModel, "review_required",
                 attempt.attempts(), null, error, usagePayload(completion.usage(), budgetTracker));
@@ -358,11 +358,54 @@ public final class SemanticMetadataBatchService {
         if (!config.marketTicker().isBlank()) {
             return MarketMetadataReadRequest.byTicker(config.marketTicker());
         }
+        if (!config.overwrite() && !config.dryRun()) {
+            return MarketMetadataReadRequest.searchWithoutGenerated(
+                config.seriesTicker().isBlank() ? null : config.seriesTicker(),
+                config.marketStatus().isBlank() ? null : config.marketStatus(),
+                config.maxMarkets(),
+                config.taxonomyVersion()
+            );
+        }
         return MarketMetadataReadRequest.search(
             config.seriesTicker().isBlank() ? null : config.seriesTicker(),
             config.marketStatus().isBlank() ? null : config.marketStatus(),
             config.maxMarkets()
         );
+    }
+
+    private String parseFailureError(
+        IllegalArgumentException failure,
+        OpenRouterCompletion completion,
+        SemanticMetadataConfig config
+    ) {
+        String base = failure.getMessage() == null || failure.getMessage().isBlank()
+            ? "Failed to parse semantic metadata JSON"
+            : failure.getMessage();
+        if (!looksTruncated(completion)) {
+            return base;
+        }
+        return base
+            + "; response appears truncated or ended by provider length limit at max_tokens="
+            + config.maxTokens()
+            + ". Retry with higher max_tokens; review_required rows are retried by default unless generated metadata exists.";
+    }
+
+    private boolean looksTruncated(OpenRouterCompletion completion) {
+        String content = completion.content() == null ? "" : completion.content().trim();
+        if (content.isBlank() || !content.endsWith("}")) {
+            return true;
+        }
+        try {
+            JsonNode root = mapper.readTree(completion.rawResponse());
+            JsonNode choices = root.path("choices");
+            if (choices.isArray() && choices.size() > 0) {
+                String finishReason = choices.get(0).path("finish_reason").asText("");
+                return "length".equalsIgnoreCase(finishReason);
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String errorPayload(String error) {

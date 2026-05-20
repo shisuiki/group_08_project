@@ -8,7 +8,9 @@ import com.sun.net.httpserver.HttpServer;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
+import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
@@ -75,7 +77,8 @@ public class FrontendAdapterServer {
 
     private final FrontendAdapterConfig config;
     private final FrontendFeatureStore store;
-    private final FrontendMarketMetadataCatalog metadataCatalog;
+    private volatile FrontendMarketMetadataCatalog metadataCatalog;
+    private volatile String lastCatalogMetadataRefreshKey = "";
     private final Supplier<FeaturePlantStats> featurePlantStats;
     private final Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus;
     private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
@@ -1046,7 +1049,9 @@ public class FrontendAdapterServer {
             writeError(exchange, 405, "method not allowed");
             return;
         }
-        writeJson(exchange, 200, catalogSyncOperator.statusBody());
+        Map<String, Object> body = catalogSyncOperator.statusBody();
+        refreshMetadataCatalogAfterCatalogSync(body);
+        writeJson(exchange, 200, body);
     }
 
     private void handleOperatorSemanticMetadataRunStatus(HttpExchange exchange) throws IOException {
@@ -1055,6 +1060,30 @@ public class FrontendAdapterServer {
             return;
         }
         writeJson(exchange, 200, semanticMetadataOperator.statusBody());
+    }
+
+    private void refreshMetadataCatalogAfterCatalogSync(Map<String, Object> body) {
+        if (config.dbUrl().isBlank()) {
+            return;
+        }
+        Object latest = body == null ? null : body.get("latest_run");
+        if (!(latest instanceof Map<?, ?> latestRun) || !"completed".equals(String.valueOf(latestRun.get("state")))) {
+            return;
+        }
+        String key = String.valueOf(latestRun.get("run_id")) + ":" + String.valueOf(latestRun.get("finished_at"));
+        if (key.equals(lastCatalogMetadataRefreshKey)) {
+            return;
+        }
+        try {
+            JdbcMarketMetadataReader reader =
+                JdbcMarketMetadataReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+            List<MarketMetadata> rows =
+                reader.read(MarketMetadataReadRequest.search(null, null, config.metadataMaxRows()));
+            metadataCatalog = FrontendMarketMetadataCatalog.loaded("db", rows);
+            lastCatalogMetadataRefreshKey = key;
+        } catch (RuntimeException e) {
+            metadataCatalog = FrontendMarketMetadataCatalog.unavailable("db", e.getMessage());
+        }
     }
 
     private void handleMetrics(HttpExchange exchange) throws IOException {
@@ -1501,6 +1530,8 @@ public class FrontendAdapterServer {
             Map<String, Object> leaf = new LinkedHashMap<>();
             leaf.put("label", firstNonBlank(row.marketTitle(), row.marketTicker()));
             leaf.put("market_ticker", row.marketTicker());
+            leaf.put("title", row.marketTitle());
+            leaf.put("market_status", row.marketStatus());
             leaf.put("value", leafValue);
             leaf.put("color_metric", row.confidence());
             leaf.put("semantic_status", row.semanticStatus());
@@ -1509,6 +1540,7 @@ public class FrontendAdapterServer {
             leaf.put("subsector", row.subsector());
             leaf.put("event_type", row.eventType());
             leaf.put("tags", row.tags());
+            leaf.put("open_interest", row.openInterest());
             leaf.put("quote", semanticQuoteBody(row));
             leaves.add(leaf);
         }

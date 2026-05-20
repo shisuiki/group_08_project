@@ -380,6 +380,11 @@ main {
 
 .semantic-controls button:hover { background: #236052; }
 .semantic-controls button:active { background: #1d5146; }
+.semantic-controls button:disabled {
+    background: #30373c;
+    color: #80878d;
+    cursor: default;
+}
 
 .semantic-map-state {
     min-height: 16px;
@@ -404,6 +409,15 @@ main {
     border-radius: 4px;
     padding: 6px 7px;
     overflow: hidden;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.semantic-group-chip:hover,
+.semantic-group-chip:focus-visible {
+    border-color: #5a6a72;
+    outline: none;
 }
 
 .semantic-group-chip strong,
@@ -516,6 +530,15 @@ main {
 .semantic-tile-tiny strong {
     font-size: 9px;
     line-height: 1;
+}
+
+.semantic-group-tile {
+    grid-template-rows: auto 1fr auto;
+    border-color: rgba(244, 247, 249, 0.24);
+}
+
+.semantic-other-tile {
+    border-style: dashed;
 }
 
 .semantic-empty {

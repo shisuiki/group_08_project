@@ -434,7 +434,8 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/api/semantic-metadata/markets?"));
         assertTrue(app.contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
-        assertTrue(app.contains("layoutSemanticTreemap"));
+        assertTrue(app.contains("layoutSemanticLeafTreemap"));
+        assertTrue(app.contains("semanticRenderableLeaves"));
     }
 
     @Test

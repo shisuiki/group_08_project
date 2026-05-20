@@ -32,11 +32,13 @@ class SemanticMetadataConfigTest {
         assertEquals("v1", config.taxonomyVersion());
         assertEquals(10, config.maxMarkets());
         assertEquals(2, config.maxRetries());
+        assertEquals(SemanticMetadataConfig.DEFAULT_MAX_TOKENS, config.maxTokens());
         assertEquals("10.00", config.budgetUsd().toPlainString());
         assertEquals("0.01", config.estimatedPaidRequestCostUsd().toPlainString());
         assertEquals("sk-test-key", config.openRouterApiKey());
         assertTrue(config.redactedSummary().contains("openrouter_key=[configured]"));
         assertTrue(config.redactedSummary().contains("budget_usd=10.00"));
+        assertTrue(config.redactedSummary().contains("max_tokens=" + SemanticMetadataConfig.DEFAULT_MAX_TOKENS));
         assertTrue(!config.redactedSummary().contains("sk-test-key"));
     }
 
@@ -103,6 +105,10 @@ class SemanticMetadataConfigTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> SemanticMetadataConfig.from(Map.of("LLM_METADATA_ESTIMATED_PAID_REQUEST_COST_USD", "0"))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> SemanticMetadataConfig.from(Map.of("LLM_METADATA_MAX_TOKENS", "4097"))
         );
     }
 }

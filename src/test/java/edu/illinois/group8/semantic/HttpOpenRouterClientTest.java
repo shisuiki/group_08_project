@@ -50,6 +50,7 @@ class HttpOpenRouterClientTest {
             assertEquals("requested", request.path("model").asText());
             assertEquals(50, request.path("max_tokens").asInt());
             assertEquals("json_object", request.path("response_format").path("type").asText());
+            assertTrue(request.path("reasoning").isMissingNode());
             assertEquals("actual", completion.model());
             assertTrue(completion.content().contains("\"sector\":\"politics\""));
             assertEquals(12, mapper.readTree(completion.usage()).path("total_tokens").asInt());

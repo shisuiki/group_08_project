@@ -105,8 +105,22 @@ class JdbcMarketMetadataReaderTest {
     }
 
     @Test
+    void searchWithoutGeneratedFiltersGeneratedSemanticRowsByTaxonomy() {
+        RecordingJdbc jdbc = new RecordingJdbc(List.of());
+        JdbcMarketMetadataReader reader = new JdbcMarketMetadataReader(jdbc::openConnection);
+
+        reader.read(MarketMetadataReadRequest.searchWithoutGenerated("SERIES-1", "open", 5, " tax-v1 "));
+
+        String sql = jdbc.preparedSql.toLowerCase(Locale.ROOT);
+        assertTrue(sql.contains("not exists"));
+        assertTrue(sql.contains("from market_semantic_metadata smm"));
+        assertTrue(sql.contains("smm.status = 'generated'"));
+        assertEquals(List.of("SERIES-1", "open", "tax-v1", 5), jdbc.bindings);
+    }
+
+    @Test
     void requestNormalizesBlankFiltersAndRejectsInvalidLimit() {
-        MarketMetadataReadRequest request = new MarketMetadataReadRequest(" ", " SERIES-1 ", " ", 10);
+        MarketMetadataReadRequest request = new MarketMetadataReadRequest(" ", " SERIES-1 ", " ", 10, " ");
 
         assertEquals(null, request.marketTicker());
         assertEquals("SERIES-1", request.seriesTicker());
@@ -114,11 +128,15 @@ class JdbcMarketMetadataReaderTest {
         assertEquals(10, request.maxRows());
         assertThrows(
             IllegalArgumentException.class,
-            () -> new MarketMetadataReadRequest(null, null, null, 0)
+            () -> new MarketMetadataReadRequest(null, null, null, 0, null)
         );
         assertThrows(
             IllegalArgumentException.class,
             () -> MarketMetadataReadRequest.byTicker(" ")
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> MarketMetadataReadRequest.searchWithoutGenerated(null, null, 10, " ")
         );
     }
 

@@ -336,6 +336,8 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"research-export-csv\""));
         assertTrue(root.body().contains("id=\"semantic-map-panel\""));
         assertTrue(root.body().contains("id=\"semantic-group-by\""));
+        assertTrue(root.body().contains("id=\"semantic-render-mode\""));
+        assertTrue(root.body().contains("id=\"semantic-drillup\""));
         assertTrue(root.body().contains("id=\"semantic-treemap\""));
         assertTrue(root.body().contains("id=\"operator-e2e-latency\""));
         assertTrue(root.body().contains("id=\"operator-pipeline-counts\""));
@@ -346,6 +348,10 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"operator-command-plan\""));
         assertTrue(root.body().contains("id=\"semantic-operator-panel\""));
         assertTrue(root.body().contains("id=\"semantic-run-start\""));
+        assertTrue(root.body().contains("id=\"semantic-run-from-catalog\""));
+        assertTrue(root.body().contains("id=\"semantic-run-max-tokens\""));
+        assertTrue(root.body().contains("id=\"semantic-run-max-retries\""));
+        assertTrue(root.body().contains("id=\"semantic-run-overwrite\""));
         assertTrue(root.body().contains("id=\"semantic-run-openrouter-key\""));
         assertTrue(root.body().contains("id=\"catalog-sync-panel\""));
         assertTrue(root.body().contains("id=\"catalog-sync-series\""));
@@ -424,7 +430,9 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/api/semantic-metadata/treemap?"));
         assertTrue(js.body().contains("/api/semantic-metadata/markets?"));
         assertTrue(js.body().contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
-        assertTrue(js.body().contains("layoutSemanticTreemap"));
+        assertTrue(js.body().contains("layoutSemanticLeafTreemap"));
+        assertTrue(js.body().contains("semanticRenderableLeaves"));
+        assertTrue(js.body().contains("SEMANTIC_RENDER_LEAF_LIMIT"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("buildCatalogSyncRequest"));
@@ -1259,7 +1267,10 @@ class UdfEndpointsTest {
         String request = """
             {
               "dry_run": false,
+              "overwrite": true,
               "max_markets": 2,
+              "max_tokens": 2200,
+              "max_retries": 3,
               "market_ticker": "MKT-SEM",
               "model": "deepseek/deepseek-v4-flash:free",
               "fallback_model": "deepseek/deepseek-v4-flash",
@@ -1277,6 +1288,9 @@ class UdfEndpointsTest {
         assertFalse(response.body().contains(requestKey));
         assertTrue(started.await(2, TimeUnit.SECONDS));
         assertEquals("MKT-SEM", observed.get().marketTicker());
+        assertTrue(observed.get().overwrite());
+        assertEquals(2200, observed.get().maxTokens());
+        assertEquals(3, observed.get().maxRetries());
         assertEquals(observed.get().model(), observed.get().fallbackModel());
         assertEquals(409, postJsonWithBasicAuth(
             "/operator/semantic-metadata/run",
@@ -1288,6 +1302,9 @@ class UdfEndpointsTest {
         release.countDown();
         JsonNode completed = waitForSemanticRunState("completed");
         assertEquals(1, completed.path("latest_run").path("summary").path("generated").asInt());
+        assertEquals(2200, completed.path("latest_run").path("config").path("max_tokens").asInt());
+        assertEquals(3, completed.path("latest_run").path("config").path("max_retries").asInt());
+        assertTrue(completed.path("latest_run").path("config").path("overwrite").asBoolean());
         assertFalse(completed.toString().contains(requestKey));
     }
 

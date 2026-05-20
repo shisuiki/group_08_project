@@ -46,6 +46,7 @@ class SemanticMetadataBatchServiceTest {
         assertEquals("generated", store.jobs.get(store.jobs.size() - 1).status());
         assertTrue(store.jobs.get(store.jobs.size() - 1).usage().contains("\"provider_usage\""));
         assertTrue(store.jobs.get(store.jobs.size() - 1).usage().contains("\"estimated_spend_usd\""));
+        assertEquals(List.of(SemanticMetadataConfig.DEFAULT_MAX_TOKENS), client.maxTokens);
     }
 
     @Test
@@ -163,6 +164,8 @@ class SemanticMetadataBatchServiceTest {
         assertEquals(1, reviewSummary.reviewRequired());
         assertEquals("review_required", reviewStore.metadata.get(0).status());
         assertTrue(reviewStore.metadata.get(0).rawResponse().contains("\"raw\""));
+        assertTrue(reviewStore.metadata.get(0).error().contains("max_tokens"));
+        assertTrue(reviewStore.metadata.get(0).error().contains("truncated"));
 
         FakeOpenRouter dryRunClient = new FakeOpenRouter(List.of());
         SemanticMetadataBatchSummary dryRunSummary = service(new FakeStore(), dryRunClient)
@@ -182,6 +185,71 @@ class SemanticMetadataBatchServiceTest {
 
         assertEquals(0, summary.processed());
         assertEquals(1, summary.skipped());
+    }
+
+    @Test
+    void reviewRequiredMetadataIsRetriedWithSameInputIdentity() {
+        FakeStore store = new FakeStore();
+        store.existingMetadata = new MarketSemanticMetadata(
+            "M",
+            "v1",
+            "m",
+            "v1",
+            new SemanticMetadataPromptBuilder().promptHash("v1"),
+            new SemanticMetadataPromptBuilder().sourcePayloadSha256(market()),
+            new SemanticMetadataPromptBuilder().sourceFingerprint(market(), config(Map.of("OPENROUTER_API_KEY", "sk-test"))),
+            new SemanticMetadataPromptBuilder().idempotencyKey(market(), config(Map.of("OPENROUTER_API_KEY", "sk-test"))),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "[]",
+            null,
+            null,
+            "{\"raw\":true}",
+            "review_required",
+            "old parse failure",
+            null
+        );
+        FakeOpenRouter client = new FakeOpenRouter(List.of(new OpenRouterCompletion(
+            "m",
+            validContent("sports"),
+            "{\"raw\":true}",
+            null
+        )));
+
+        SemanticMetadataBatchSummary summary = service(store, client)
+            .run(config(Map.of("OPENROUTER_API_KEY", "sk-test")));
+
+        assertEquals(1, summary.processed());
+        assertEquals(1, summary.generated());
+        assertEquals(1, client.models.size());
+        assertEquals("generated", store.metadata.get(0).status());
+    }
+
+    @Test
+    void defaultSelectionExcludesAlreadyGeneratedRowsByTaxonomy() {
+        FakeStore store = new FakeStore();
+        FakeOpenRouter client = new FakeOpenRouter(List.of(new OpenRouterCompletion(
+            "m",
+            validContent("sports"),
+            "{\"raw\":true}",
+            null
+        )));
+        List<MarketMetadataReadRequest> requests = new ArrayList<>();
+        SemanticMetadataBatchService service =
+            new SemanticMetadataBatchService(request -> {
+                requests.add(request);
+                return List.of(market());
+            }, store, client);
+
+        service.run(config(Map.of("OPENROUTER_API_KEY", "sk-test")));
+
+        assertEquals(1, requests.size());
+        assertEquals("v1", requests.get(0).excludeGeneratedTaxonomyVersion());
     }
 
     @Test
@@ -292,6 +360,7 @@ class SemanticMetadataBatchServiceTest {
     private static final class FakeOpenRouter implements OpenRouterClient {
         private final List<Object> responses;
         private final List<String> models = new ArrayList<>();
+        private final List<Integer> maxTokens = new ArrayList<>();
         private int index;
 
         private FakeOpenRouter(List<Object> responses) {
@@ -301,6 +370,7 @@ class SemanticMetadataBatchServiceTest {
         @Override
         public OpenRouterCompletion complete(String model, List<OpenRouterMessage> messages, int maxTokens) {
             models.add(model);
+            this.maxTokens.add(maxTokens);
             Object response = responses.get(index++);
             if (response instanceof OpenRouterException exception) {
                 throw exception;

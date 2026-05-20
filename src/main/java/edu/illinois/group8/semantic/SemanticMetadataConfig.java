@@ -36,6 +36,8 @@ public record SemanticMetadataConfig(
     public static final String DEFAULT_FALLBACK_MODEL = "deepseek/deepseek-v4-flash";
     public static final String DEFAULT_TAXONOMY_VERSION = "v1";
     public static final String DEFAULT_PROMPT_VERSION = "v1";
+    public static final int DEFAULT_MAX_TOKENS = 2_200;
+    public static final int MAX_MAX_TOKENS = 4_096;
 
     public SemanticMetadataConfig {
         dbUrl = value(dbUrl);
@@ -73,6 +75,9 @@ public record SemanticMetadataConfig(
         if (maxTokens < 1) {
             throw new IllegalArgumentException("LLM_METADATA_MAX_TOKENS must be positive");
         }
+        if (maxTokens > MAX_MAX_TOKENS) {
+            throw new IllegalArgumentException("LLM_METADATA_MAX_TOKENS must be <= " + MAX_MAX_TOKENS);
+        }
     }
 
     public static SemanticMetadataConfig fromEnvironment() {
@@ -101,7 +106,7 @@ public record SemanticMetadataConfig(
             decimal(env, "LLM_METADATA_ESTIMATED_PAID_REQUEST_COST_USD", "0.01"),
             positiveInt(env, "LLM_METADATA_REQUEST_TIMEOUT_MS", 30_000),
             nonNegativeInt(env, "LLM_METADATA_RETRY_BACKOFF_MS", 2_000),
-            positiveInt(env, "LLM_METADATA_MAX_TOKENS", 900),
+            positiveInt(env, "LLM_METADATA_MAX_TOKENS", DEFAULT_MAX_TOKENS),
             value(env, "LLM_METADATA_MARKET_TICKER", ""),
             value(env, "LLM_METADATA_SERIES_TICKER", ""),
             value(env, "LLM_METADATA_MARKET_STATUS", "open"),
@@ -176,6 +181,7 @@ public record SemanticMetadataConfig(
             + " prompt_version=" + promptVersion
             + " max_markets=" + maxMarkets
             + " max_retries=" + maxRetries
+            + " max_tokens=" + maxTokens
             + " budget_usd=" + budgetUsd
             + " estimated_paid_request_cost_usd=" + estimatedPaidRequestCostUsd
             + " dry_run=" + dryRun

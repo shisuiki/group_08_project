@@ -176,6 +176,31 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void realSemanticMetadataSmokeIsOptionalFileBackedAndRedacted() throws Exception {
+        String script = read("scripts/semantic-metadata-real-smoke.sh");
+
+        assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_ENABLED=\"${SEMANTIC_METADATA_REAL_SMOKE_ENABLED:-false}\""));
+        assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_REQUIRED=\"${SEMANTIC_METADATA_REAL_SMOKE_REQUIRED:-false}\""));
+        assertTrue(script.contains("SEMANTIC_METADATA_REAL_SMOKE_MAX_TOKENS=\"${SEMANTIC_METADATA_REAL_SMOKE_MAX_TOKENS:-2200}\""));
+        assertTrue(script.contains("skip_or_fail \"disabled\""));
+        assertTrue(script.contains("OPENROUTER_API_KEY_FILE"));
+        assertTrue(script.contains("env -u OPENROUTER_API_KEY"));
+        assertTrue(script.contains("edu.illinois.group8.semantic.SemanticMetadataCli"));
+        assertTrue(script.contains("--limit=1"));
+        assertTrue(script.contains("--max-tokens=$SEMANTIC_METADATA_REAL_SMOKE_MAX_TOKENS"));
+        assertTrue(script.contains("generated + review_required"));
+        assertTrue(script.contains("rate_limited != 0"));
+        assertTrue(script.contains("failed != 0"));
+        assertTrue(script.contains("reason=secret_leaked"));
+        assertTrue(script.contains("if len(secret) >= 8"));
+        assertTrue(script.contains("review_required_inspect_market_semantic_metadata_error_or_raw_response"));
+        assertFalse(script.contains("OPENROUTER_API_KEY=\"$"));
+        assertFalse(script.contains("cat \"$OPENROUTER_API_KEY_FILE\""));
+        assertFalse(script.contains("docker compose up"));
+        assertFalse(script.contains("semantic-metadata-demo-seed.sh"));
+    }
+
+    @Test
     void productDemoLauncherCreatesIsolatedStackEvidenceAndCleanup() throws Exception {
         String up = read("scripts/product-demo-up.sh");
         String down = read("scripts/product-demo-down.sh");
@@ -777,7 +802,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/operator/semantic-metadata/run"));
         assertTrue(app.contains("/operator/catalog/sync"));
-        assertTrue(app.contains("layoutSemanticTreemap"));
+        assertTrue(app.contains("layoutSemanticLeafTreemap"));
+        assertTrue(app.contains("semanticRenderableLeaves"));
+        assertTrue(app.contains("SEMANTIC_RENDER_LEAF_LIMIT"));
+        assertTrue(app.contains("semantic-run-from-catalog"));
         assertTrue(app.contains("semanticTileSizeClass"));
         assertTrue(app.contains("semanticTileTitle"));
         assertTrue(styles.contains("semantic-tile-small"));

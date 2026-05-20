@@ -11,6 +11,7 @@
     const MARKET_CATALOG_LIMIT = 200;
     const SEMANTIC_MAP_DEFAULT_LIMIT = 200;
     const SEMANTIC_MAP_MAX_LIMIT = 500;
+    const SEMANTIC_RENDER_LEAF_LIMIT = 120;
     const SEMANTIC_SEARCH_DEBOUNCE_MS = 300;
     const OPERATOR_LATENCY_BUDGET_MS = 30000;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
@@ -63,17 +64,27 @@
         semanticTab: document.getElementById('semantic-tab'),
         semanticMapCount: document.getElementById('semantic-map-count'),
         semanticGroupBy: document.getElementById('semantic-group-by'),
+        semanticRenderMode: document.getElementById('semantic-render-mode'),
         semanticStatusFilter: document.getElementById('semantic-status-filter'),
         semanticLimit: document.getElementById('semantic-limit'),
         semanticTagFilter: document.getElementById('semantic-tag-filter'),
         semanticSearch: document.getElementById('semantic-search'),
         semanticRefresh: document.getElementById('semantic-refresh'),
+        semanticDrillup: document.getElementById('semantic-drillup'),
         semanticMapState: document.getElementById('semantic-map-state'),
         semanticGroupSummary: document.getElementById('semantic-group-summary'),
         semanticTreemap: document.getElementById('semantic-treemap'),
         semanticDetailMarket: document.getElementById('semantic-detail-market'),
+        semanticDetailTitle: document.getElementById('semantic-detail-title'),
+        semanticDetailStatus: document.getElementById('semantic-detail-status'),
         semanticDetailGroup: document.getElementById('semantic-detail-group'),
+        semanticDetailSector: document.getElementById('semantic-detail-sector'),
+        semanticDetailSubsector: document.getElementById('semantic-detail-subsector'),
+        semanticDetailEventType: document.getElementById('semantic-detail-event-type'),
+        semanticDetailTags: document.getElementById('semantic-detail-tags'),
         semanticDetailConfidence: document.getElementById('semantic-detail-confidence'),
+        semanticDetailOpenInterest: document.getElementById('semantic-detail-open-interest'),
+        semanticDetailFreshness: document.getElementById('semantic-detail-freshness'),
         semanticDetailQuote: document.getElementById('semantic-detail-quote'),
         adapterHealth: document.getElementById('adapter-health'),
         releaseIdentity: document.getElementById('release-identity'),
@@ -165,13 +176,18 @@
         semanticRunSeriesTicker: document.getElementById('semantic-run-series-ticker'),
         semanticRunMarketStatus: document.getElementById('semantic-run-market-status'),
         semanticRunMaxMarkets: document.getElementById('semantic-run-max-markets'),
+        semanticRunMaxTokens: document.getElementById('semantic-run-max-tokens'),
+        semanticRunMaxRetries: document.getElementById('semantic-run-max-retries'),
         semanticRunBudgetUsd: document.getElementById('semantic-run-budget-usd'),
         semanticRunEstimatedCost: document.getElementById('semantic-run-estimated-cost'),
         semanticRunOpenRouterKey: document.getElementById('semantic-run-openrouter-key'),
         semanticRunOpenRouterKeyPresent: document.getElementById('semantic-run-openrouter-key-present'),
         semanticRunDryRun: document.getElementById('semantic-run-dry-run'),
+        semanticRunOverwrite: document.getElementById('semantic-run-overwrite'),
         semanticRunAllowPaidFallback: document.getElementById('semantic-run-allow-paid-fallback'),
         semanticRunStart: document.getElementById('semantic-run-start'),
+        catalogSyncUseForSemantic: document.getElementById('catalog-sync-use-for-semantic'),
+        semanticRunFromCatalog: document.getElementById('semantic-run-from-catalog'),
         semanticRunRefresh: document.getElementById('semantic-run-refresh'),
         semanticRunOutput: document.getElementById('semantic-run-output'),
         live: {
@@ -237,6 +253,8 @@
     let marketSearchTimer = null;
     let semanticSearchTimer = null;
     let semanticMapGeneration = 0;
+    let lastSemanticMapBody = null;
+    let semanticActiveGroupKey = '';
     let catalogSyncStatusTimer = null;
     let semanticRunStatusTimer = null;
     let lastCatalogSyncCompletion = '';
@@ -245,6 +263,8 @@
     let lastOpsPipeline = null;
     let lastOpsLatency = null;
     let lastResearchOutputs = [];
+
+    dom.semanticDrillup.disabled = true;
 
     function setStatus(message, tone) {
         dom.statusLine.textContent = message;
@@ -636,10 +656,12 @@
 
     function renderSemanticMap(body) {
         const groups = Array.isArray(body?.groups) ? body.groups : [];
+        lastSemanticMapBody = body || null;
         const leaves = semanticLeaves(groups);
         dom.semanticMapCount.textContent = String(body?.count ?? leaves.length);
         dom.semanticTreemap.innerHTML = '';
         dom.semanticGroupSummary.innerHTML = '';
+        dom.semanticDrillup.disabled = !semanticActiveGroupKey;
         if (body?.status === 'disabled') {
             dom.semanticMapState.textContent = 'Semantic metadata disabled';
             renderSemanticDetail(null);
@@ -656,16 +678,42 @@
             renderSemanticDetail(null);
             return;
         }
-        dom.semanticMapState.textContent =
-            `${leaves.length} market(s) grouped by ${body.group_by || dom.semanticGroupBy.value || 'sector'}`;
+        const groupBy = body.group_by || dom.semanticGroupBy.value || 'sector';
         renderSemanticGroupSummary(groups);
+        const activeGroup = semanticActiveGroupKey
+            ? groups.find(group => String(group.key || 'unknown') === semanticActiveGroupKey)
+            : null;
+        if (semanticActiveGroupKey && !activeGroup) {
+            semanticActiveGroupKey = '';
+            dom.semanticDrillup.disabled = true;
+        }
+        const mode = dom.semanticRenderMode.value || 'groups';
+        if (!semanticActiveGroupKey && mode === 'groups') {
+            dom.semanticMapState.textContent =
+                `${groups.length} group(s) / ${leaves.length} market(s) grouped by ${groupBy}`;
+            renderSemanticGroupTiles(groups);
+            const firstGroup = groups.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0))[0];
+            renderSemanticDetailFromGroup(firstGroup);
+            return;
+        }
+        const selectedGroups = activeGroup ? [activeGroup] : groups;
+        const limit = mode === 'top_markets'
+            ? Math.min(60, SEMANTIC_RENDER_LEAF_LIMIT)
+            : SEMANTIC_RENDER_LEAF_LIMIT;
+        const displayLeaves = semanticRenderableLeaves(selectedGroups, limit);
+        const hiddenCount = Number(displayLeaves.find(leaf => leaf.is_other)?.hidden_count || 0);
+        dom.semanticMapState.textContent =
+            `${displayLeaves.length} rendered / ${leaves.length} market(s)` +
+            `${hiddenCount > 0 ? ` / ${hiddenCount} in Other` : ''}` +
+            `${activeGroup ? ` / ${activeGroup.label || activeGroup.key}` : ` / grouped by ${groupBy}`}`;
         const fragment = document.createDocumentFragment();
-        for (const rect of layoutSemanticTreemap(groups)) {
+        for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
             const tile = document.createElement('button');
             const sizeClass = semanticTileSizeClass(rect);
             const title = semanticTileTitle(rect.leaf, rect.groupKey);
             tile.type = 'button';
-            tile.className = `semantic-tile ${sizeClass} semantic-${semanticStatusClass(rect.leaf.semantic_status)}`;
+            tile.className = `semantic-tile ${sizeClass} semantic-${semanticStatusClass(rect.leaf.semantic_status)}` +
+                `${rect.leaf.is_other ? ' semantic-other-tile' : ''}`;
             tile.dataset.market = rect.leaf.market_ticker || '';
             tile.title = title;
             tile.setAttribute('aria-label', title.replace(/\n/g, '; '));
@@ -675,11 +723,17 @@
             tile.style.height = `${rect.height}%`;
             tile.style.background = semanticTileColor(rect.leaf);
             tile.innerHTML = semanticTileMarkup(rect.leaf, rect.groupKey, sizeClass);
-            tile.addEventListener('click', () => selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey));
+            tile.addEventListener('click', () => {
+                if (rect.leaf.market_ticker) {
+                    selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey);
+                } else {
+                    renderSemanticDetailFromLeaf(rect.leaf);
+                }
+            });
             fragment.appendChild(tile);
         }
         dom.semanticTreemap.appendChild(fragment);
-        const first = leaves[0];
+        const first = displayLeaves[0];
         if (first) {
             renderSemanticDetailFromLeaf(first);
         }
@@ -698,52 +752,113 @@
     function renderSemanticGroupSummary(groups) {
         const ordered = groups.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0)).slice(0, 6);
         for (const group of ordered) {
-            const chip = document.createElement('div');
+            const chip = document.createElement('button');
+            chip.type = 'button';
             chip.className = 'semantic-group-chip';
             chip.innerHTML =
                 `<strong>${escapeHtml(group.label || group.key || 'unknown')}</strong>` +
                 `<span>${Number(group.count || 0)} / ${formatCompactNumber(group.value || 0)}</span>`;
+            chip.addEventListener('click', () => selectSemanticGroup(group.key || 'unknown'));
             dom.semanticGroupSummary.appendChild(chip);
         }
     }
 
-    function layoutSemanticTreemap(groups) {
-        const sourceGroups = groups
-            .map(group => ({
-                key: group.key || 'unknown',
-                value: Math.max(1, Number(group.value || 0)),
-                leaves: (Array.isArray(group.leaves) ? group.leaves : [])
-                    .filter(leaf => leaf && leaf.market_ticker)
-                    .map(leaf => Object.assign({}, leaf, {
-                        value: Math.max(1, Number(leaf.value || 0))
-                    }))
-            }))
-            .filter(group => group.leaves.length > 0);
+    function renderSemanticGroupTiles(groups) {
+        const sourceGroups = groups.map(group => ({
+            key: group.key || 'unknown',
+            label: group.label || group.key || 'unknown',
+            count: Number(group.count || 0),
+            value: Math.max(1, Number(group.value || 0)),
+            generated_count: Number(group.generated_count || 0),
+            review_required_count: Number(group.review_required_count || 0),
+            average_confidence: group.average_confidence
+        })).filter(group => group.count > 0);
         const groupRects = sliceDice(
             sourceGroups.map(group => ({ item: group, value: group.value })),
             { x: 0, y: 0, width: 100, height: 100 },
             true
         );
-        const rects = [];
         for (const groupRect of groupRects) {
             const group = groupRect.item;
-            const leafRects = sliceDice(
-                group.leaves.map(leaf => ({ item: leaf, value: leaf.value })),
-                insetRect(groupRect, 0.25),
-                groupRect.height > groupRect.width
-            );
-            for (const leafRect of leafRects) {
-                rects.push({
-                    groupKey: group.key,
-                    leaf: leafRect.item,
-                    x: leafRect.x,
-                    y: leafRect.y,
-                    width: leafRect.width,
-                    height: leafRect.height
-                });
-            }
+            const tile = document.createElement('button');
+            tile.type = 'button';
+            tile.className = 'semantic-tile semantic-group-tile';
+            tile.title = `${group.label}\n${group.count} market(s) / ${formatCompactNumber(group.value)}`;
+            tile.setAttribute('aria-label', tile.title.replace(/\n/g, '; '));
+            tile.style.left = `${groupRect.x}%`;
+            tile.style.top = `${groupRect.y}%`;
+            tile.style.width = `${groupRect.width}%`;
+            tile.style.height = `${groupRect.height}%`;
+            tile.style.background = semanticGroupTileColor(group);
+            tile.innerHTML =
+                `<strong>${escapeHtml(group.label)}</strong>` +
+                `<span>${group.count} market(s)</span>` +
+                `<small>${formatCompactNumber(group.value)} value / ${confidenceText(group.average_confidence)}</small>`;
+            tile.addEventListener('click', () => selectSemanticGroup(group.key));
+            dom.semanticTreemap.appendChild(tile);
         }
+    }
+
+    function semanticRenderableLeaves(groups, limit) {
+        const leaves = semanticLeaves(groups)
+            .filter(leaf => leaf && leaf.market_ticker)
+            .map(leaf => Object.assign({}, leaf, {
+                value: Math.max(1, Number(leaf.value || 0))
+            }))
+            .sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
+        if (leaves.length <= limit) {
+            return leaves;
+        }
+        const visible = leaves.slice(0, Math.max(1, limit - 1));
+        const hidden = leaves.slice(visible.length);
+        visible.push(semanticOtherLeaf(hidden));
+        return visible;
+    }
+
+    function semanticOtherLeaf(hidden) {
+        const value = hidden.reduce((sum, leaf) => sum + Math.max(1, Number(leaf.value || 0)), 0);
+        const groupKeys = Array.from(new Set(hidden.map(leaf => leaf.group_key || 'unknown')));
+        const confidenceValues = hidden
+            .map(leaf => Number(leaf.metadata_confidence))
+            .filter(value => Number.isFinite(value));
+        const confidence = confidenceValues.length === 0
+            ? null
+            : confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length;
+        return {
+            is_other: true,
+            label: `Other (${hidden.length})`,
+            market_ticker: '',
+            group_key: groupKeys.length === 1 ? groupKeys[0] : 'multiple groups',
+            value,
+            semantic_status: 'other',
+            metadata_confidence: confidence,
+            tags: [],
+            quote: null,
+            hidden_count: hidden.length
+        };
+    }
+
+    function layoutSemanticLeafTreemap(leaves) {
+        const rects = sliceDice(
+            leaves.map(leaf => ({ item: leaf, value: Math.max(1, Number(leaf.value || 0)) })),
+            { x: 0, y: 0, width: 100, height: 100 },
+            true
+        ).map(rect => ({
+            groupKey: rect.item.group_key || 'unknown',
+            leaf: rect.item,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height
+        }));
         return rects;
+    }
+
+    function semanticGroupTileColor(group) {
+        const confidence = Math.max(0, Math.min(1, Number(group.average_confidence)));
+        const confidenceValue = Number.isFinite(confidence) ? confidence : 0.5;
+        const hueOffset = semanticStableHueOffset(group.key || group.label || '');
+        return `hsl(${154 + Math.round(confidenceValue * 18) + hueOffset}, 42%, ${Math.round(28 + confidenceValue * 11)}%)`;
     }
 
     function sliceDice(items, rect, horizontal) {
@@ -792,6 +907,24 @@
         await loadSemanticMarketDetails(marketTicker, groupKey);
     }
 
+    function selectSemanticGroup(groupKey) {
+        semanticActiveGroupKey = String(groupKey || 'unknown');
+        dom.semanticDrillup.disabled = false;
+        if (lastSemanticMapBody) {
+            renderSemanticMap(lastSemanticMapBody);
+        }
+    }
+
+    function clearSemanticGroupDrilldown() {
+        semanticActiveGroupKey = '';
+        dom.semanticDrillup.disabled = true;
+        if (lastSemanticMapBody) {
+            renderSemanticMap(lastSemanticMapBody);
+        } else {
+            loadSemanticMap();
+        }
+    }
+
     function ensureSymbolOption(symbol) {
         if (!Array.from(dom.symbolSelect.options).some(option => option.value === symbol)) {
             const opt = document.createElement('option');
@@ -832,9 +965,38 @@
     function renderSemanticDetailFromLeaf(leaf) {
         renderSemanticDetail({
             market: leaf.market_ticker,
+            title: leaf.title || leaf.label,
+            status: leaf.market_status || leaf.semantic_status,
             group: leaf.group_key || '-',
+            sector: leaf.sector,
+            subsector: leaf.subsector,
+            eventType: leaf.event_type,
+            tags: Array.isArray(leaf.tags) ? leaf.tags.join(', ') : '',
             confidence: confidenceText(leaf.metadata_confidence),
+            openInterest: leaf.open_interest == null ? null : formatCompactNumber(leaf.open_interest),
+            freshness: semanticFreshnessText(leaf.quote),
             quote: semanticQuoteText(leaf.quote)
+        });
+    }
+
+    function renderSemanticDetailFromGroup(group) {
+        if (!group) {
+            renderSemanticDetail(null);
+            return;
+        }
+        renderSemanticDetail({
+            market: '-',
+            title: group.label || group.key || 'unknown',
+            status: `${Number(group.generated_count || 0)} generated / ${Number(group.review_required_count || 0)} review`,
+            group: group.key || 'unknown',
+            sector: dom.semanticGroupBy.value === 'sector' ? group.key : '-',
+            subsector: dom.semanticGroupBy.value === 'subsector' ? group.key : '-',
+            eventType: dom.semanticGroupBy.value === 'event_type' ? group.key : '-',
+            tags: dom.semanticGroupBy.value === 'tag' ? group.key : '-',
+            confidence: confidenceText(group.average_confidence),
+            openInterest: formatCompactNumber(group.value || 0),
+            freshness: `${Number(group.count || 0)} market(s)`,
+            quote: '-'
         });
     }
 
@@ -846,17 +1008,42 @@
         const metadata = row.semantic_metadata || {};
         renderSemanticDetail({
             market: row.market_ticker,
+            title: row.title,
+            status: `${row.status || '-'} / ${metadata.status || '-'}`,
             group: groupKey || metadata.sector || metadata.event_type || '-',
+            sector: metadata.sector,
+            subsector: metadata.subsector,
+            eventType: metadata.event_type,
+            tags: Array.isArray(metadata.tags) ? metadata.tags.join(', ') : '',
             confidence: `${confidenceText(metadata.confidence)} / ${metadata.status || '-'}`,
+            openInterest: row.quote?.open_interest == null ? null : formatCompactNumber(row.quote.open_interest),
+            freshness: semanticFreshnessText(row.quote),
             quote: semanticQuoteText(row.quote)
         });
     }
 
     function renderSemanticDetail(detail) {
         dom.semanticDetailMarket.textContent = detail?.market || '-';
+        dom.semanticDetailTitle.textContent = detail?.title || '-';
+        dom.semanticDetailStatus.textContent = detail?.status || '-';
         dom.semanticDetailGroup.textContent = detail?.group || '-';
+        dom.semanticDetailSector.textContent = detail?.sector || '-';
+        dom.semanticDetailSubsector.textContent = detail?.subsector || '-';
+        dom.semanticDetailEventType.textContent = detail?.eventType || '-';
+        dom.semanticDetailTags.textContent = detail?.tags || '-';
         dom.semanticDetailConfidence.textContent = detail?.confidence || '-';
+        dom.semanticDetailOpenInterest.textContent = detail?.openInterest || '-';
+        dom.semanticDetailFreshness.textContent = detail?.freshness || '-';
         dom.semanticDetailQuote.textContent = detail?.quote || '-';
+    }
+
+    function semanticFreshnessText(quote) {
+        if (!quote) {
+            return '-';
+        }
+        const state = quote.freshness_status || 'unknown';
+        const age = quote.latest_state_age_ms == null ? '-' : formatAge(Number(quote.latest_state_age_ms));
+        return `${state} / ${age}`;
     }
 
     function renderSemanticMapError(message) {
@@ -894,6 +1081,11 @@
     }
 
     function semanticTileMarkup(leaf, groupKey, sizeClass) {
+        if (leaf.is_other) {
+            return `<strong>${escapeHtml(leaf.label || 'Other')}</strong>` +
+                `<span>${escapeHtml(groupKey || '-')}</span>` +
+                `<small>${Number(leaf.hidden_count || 0)} hidden market(s)</small>`;
+        }
         const ticker = escapeHtml(leaf.market_ticker || '-');
         if (sizeClass === 'semantic-tile-tiny') {
             return `<strong>${ticker}</strong>`;
@@ -909,6 +1101,13 @@
     }
 
     function semanticTileTitle(leaf, groupKey) {
+        if (leaf.is_other) {
+            return [
+                leaf.label || 'Other',
+                `${Number(leaf.hidden_count || 0)} hidden market(s)`,
+                groupKey || 'multiple groups'
+            ].join('\n');
+        }
         return [
             leaf.market_ticker || '-',
             leaf.label || '-',
@@ -919,6 +1118,9 @@
 
     function semanticTileColor(leaf) {
         const status = String(leaf.semantic_status || '').toLowerCase();
+        if (leaf.is_other) {
+            return 'hsl(210, 20%, 30%)';
+        }
         const confidence = Math.max(0, Math.min(1, Number(leaf.metadata_confidence)));
         const confidenceValue = Number.isFinite(confidence) ? confidence : 0.5;
         const hueOffset = semanticStableHueOffset(leaf.market_ticker || leaf.label || '');
@@ -1316,8 +1518,26 @@
             : '';
         if (completionKey && completionKey !== lastCatalogSyncCompletion) {
             lastCatalogSyncCompletion = completionKey;
+            applyCatalogSyncToSemanticRun(config, summary);
             loadSymbols();
         }
+    }
+
+    function applyCatalogSyncToSemanticRun(config, summary) {
+        if (!config) {
+            return;
+        }
+        if (config.series_ticker) {
+            dom.semanticRunSeriesTicker.value = config.series_ticker;
+        }
+        if (config.market_status != null) {
+            dom.semanticRunMarketStatus.value = config.market_status || '';
+        }
+        const selected = Number(summary?.rows_upserted || summary?.markets_selected || config.max_tickers || 0);
+        if (selected > 0) {
+            dom.semanticRunMaxMarkets.value = String(Math.max(1, Math.min(5, selected)));
+        }
+        dom.semanticRunMarketTicker.value = '';
     }
 
     function renderSemanticRunStatus(body) {
@@ -1341,7 +1561,9 @@
             : '-';
         dom.semanticRunConfig.textContent = latest
             ? `model ${config.model || '-'} / fallback ${config.fallback_model || '-'} / taxonomy ${config.taxonomy_version || '-'}` +
-                ` / max ${config.max_markets || '-'} / dry ${yesNo(config.dry_run)}` +
+                ` / max ${config.max_markets || '-'} / tokens ${config.max_tokens || '-'}` +
+                ` / retries ${config.max_retries ?? '-'} / overwrite ${yesNo(config.overwrite)}` +
+                ` / dry ${yesNo(config.dry_run)}` +
                 ` / db ${yesNo(config.db_configured)} / key ${yesNo(config.openrouter_api_key_configured)}`
             : `db ${yesNo(body?.db_configured)} / key ${yesNo(body?.openrouter_api_key_configured)}`;
         dom.semanticRunError.textContent = latest?.last_error || (state === 'disabled' ? 'operator control disabled' : '-');
@@ -1621,9 +1843,15 @@
     }
 
     function buildSemanticRunRequest() {
+        const maxMarkets = Number(dom.semanticRunMaxMarkets.value);
+        const maxTokens = Number(dom.semanticRunMaxTokens.value);
+        const maxRetries = Number(dom.semanticRunMaxRetries.value);
         const request = {
             dry_run: dom.semanticRunDryRun.checked,
-            max_markets: Number(dom.semanticRunMaxMarkets.value || 25) || 25,
+            overwrite: dom.semanticRunOverwrite.checked,
+            max_markets: Number.isFinite(maxMarkets) && maxMarkets > 0 ? maxMarkets : 5,
+            max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 2200,
+            max_retries: Number.isFinite(maxRetries) && maxRetries >= 0 ? maxRetries : 2,
             taxonomy_version: dom.semanticRunTaxonomy.value.trim(),
             model: dom.semanticRunModel.value.trim(),
             fallback_model: dom.semanticRunFallbackModel.value.trim(),
@@ -1703,15 +1931,20 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(buildSemanticRunRequest())
             });
-            dom.semanticRunOpenRouterKey.value = '';
             renderSemanticRunStatus(body);
         } catch (err) {
             dom.semanticRunState.textContent = 'blocked';
             dom.semanticRunState.className = 'stale';
             dom.semanticRunError.textContent = err.message;
         } finally {
+            dom.semanticRunOpenRouterKey.value = '';
             await loadOperatorStatus();
         }
+    }
+
+    async function startSemanticRunFromCatalog() {
+        applyCatalogSyncToSemanticRun(buildCatalogSyncRequest(), null);
+        await startSemanticMetadataRun();
     }
 
     function scheduleSemanticRunStatusRefresh() {
@@ -2021,15 +2254,29 @@
     dom.researchFeatureLimit.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
     dom.researchFeatureWindow.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
     dom.researchExportCsv.addEventListener('click', exportResearchCsv);
-    dom.semanticGroupBy.addEventListener('change', loadSemanticMap);
+    dom.semanticGroupBy.addEventListener('change', () => {
+        semanticActiveGroupKey = '';
+        loadSemanticMap();
+    });
+    dom.semanticRenderMode.addEventListener('change', () => {
+        semanticActiveGroupKey = '';
+        if (lastSemanticMapBody) {
+            renderSemanticMap(lastSemanticMapBody);
+        } else {
+            loadSemanticMap();
+        }
+    });
     dom.semanticStatusFilter.addEventListener('change', loadSemanticMap);
     dom.semanticLimit.addEventListener('change', loadSemanticMap);
     dom.semanticTagFilter.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticSearch.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticRefresh.addEventListener('click', loadSemanticMap);
+    dom.semanticDrillup.addEventListener('click', clearSemanticGroupDrilldown);
     dom.catalogSyncStart.addEventListener('click', startCatalogSync);
     dom.catalogSyncRefresh.addEventListener('click', loadCatalogSyncStatus);
     dom.semanticRunStart.addEventListener('click', startSemanticMetadataRun);
+    dom.catalogSyncUseForSemantic.addEventListener('click', () => applyCatalogSyncToSemanticRun(buildCatalogSyncRequest(), null));
+    dom.semanticRunFromCatalog.addEventListener('click', startSemanticRunFromCatalog);
     dom.semanticRunRefresh.addEventListener('click', loadSemanticRunStatus);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
     for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
