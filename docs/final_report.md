@@ -409,7 +409,7 @@ GitHub: [@Yakobbb](https://github.com/Yakobbb) · Email: jakobjb2@illinois.edu �
 
 **Amish Prasad — Frontend & Research Integration (Plan 03).**
 Built the consumer side of the Feature Plant: the research-export CLI, the frontend datafeed adapter implementing the TradingView UDF protocol, and the TradingView Lightweight Charts demo page — all attaching to the `FeatureOutputSink` boundary, with accompanying tests and runbooks.
-GitHub: [@sudo111](https://github.com/sudo111) · Email: amishp2@illinois.edu · LinkedIn: *[add]*
+GitHub: [@sudo111](https://github.com/sudo111) · Email: amishp2@illinois.edu · LinkedIn: *[https://www.linkedin.com/in/amish-prasad/]*
 
 **Iven Guzel — Analysis & Queueing Theory.**
 Contributed queueing-theory perspective on the system's capacity and fan-out characteristics (subscription and downstream-stream limits under bandwidth/compute constraints).
