@@ -1,5 +1,6 @@
 const REFRESH_MS = 3000;
 const REQUEST_TIMEOUT_MS = 5500;
+const OPTIONAL_REQUEST_TIMEOUT_MS = 1800;
 const LATENCY_BAR_MAX_MS = 1000;
 
 const PROMETHEUS_ROWS = [
@@ -13,6 +14,8 @@ const PROMETHEUS_ROWS = [
   ['frontend_adapter_quote_stream_events_total', 'SSE events emitted'],
   ['frontend_adapter_quote_stream_active', 'Active SSE streams']
 ];
+
+const liveSnapshot = {};
 
 function byId(id) {
   return document.getElementById(id);
@@ -120,9 +123,9 @@ function statusClass(status) {
   return normalized ? 'bad' : 'neutral';
 }
 
-async function fetchWithTimeout(path, accept) {
+async function fetchWithTimeout(path, accept, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, {
       cache: 'no-store',
@@ -139,8 +142,8 @@ async function fetchWithTimeout(path, accept) {
   }
 }
 
-async function fetchJson(path) {
-  return JSON.parse(await fetchWithTimeout(path, 'application/json'));
+async function fetchJson(path, timeoutMs = REQUEST_TIMEOUT_MS) {
+  return JSON.parse(await fetchWithTimeout(path, 'application/json', timeoutMs));
 }
 
 async function fetchPrometheus() {
@@ -169,7 +172,14 @@ function parsePrometheus(text) {
 
 function renderPipeline(pipeline) {
   const body = pipeline && pipeline.pipeline ? pipeline.pipeline : pipeline || {};
+  const status = body.status || (pipeline && pipeline.status) || 'unknown';
   const windowSeconds = nested(body, ['recent_window_seconds'], 1);
+  setText('product-status', status);
+  setText('runtime-profile', 'live-product');
+  setText('data-age', formatAge(body.latest_state_age_ms));
+  setText('data-source', body.latest_market_state_commit_seq
+    ? `latest state commit ${body.latest_market_state_commit_seq}`
+    : 'latest state');
   setText('canonical-rate', formatRate(body.recent_canonical_events, windowSeconds));
   setText('canonical-total', `${formatNumber(body.recent_canonical_events)} events in ${formatNumber(windowSeconds)}s`);
   setText('feature-rate', formatRate(body.recent_feature_outputs, windowSeconds));
@@ -178,6 +188,12 @@ function renderPipeline(pipeline) {
   setText('state-total', `${formatNumber(body.recent_latest_market_states)} latest states in ${formatNumber(windowSeconds)}s`);
   setText('cursor-lag', formatNumber(body.cursor_lag_events));
   setText('latest-state-age', `latest state ${formatAge(body.latest_state_age_ms)}`);
+  if (!liveSnapshot.latency) {
+    setPill('latency-status', status === 'ok' ? 'pipeline proxy' : status, statusClass(status));
+    setText('e2e-latency', formatAge(body.latest_state_age_ms));
+    setText('latency-source', 'latest-state age proxy');
+    setLatencyBar('canonical-state', body.latest_state_age_ms);
+  }
 }
 
 function renderHealth(health, operator) {
@@ -210,6 +226,16 @@ function renderLatency(latency) {
   setLatencyBar('canonical-feature', latency && latency.canonical_to_feature_ms);
   setLatencyBar('feature-state', latency && latency.feature_to_latest_state_ms);
   setLatencyBar('canonical-state', latency && latency.canonical_to_latest_state_ms);
+}
+
+function renderLatencyUnavailable(reason) {
+  const body = liveSnapshot.pipeline && liveSnapshot.pipeline.pipeline ? liveSnapshot.pipeline.pipeline : {};
+  setPill('latency-status', reason || 'timeout', 'warn');
+  setText('e2e-latency', formatAge(body.latest_state_age_ms));
+  setText('latency-source', 'latest-state age proxy');
+  setLatencyBar('canonical-feature', null);
+  setLatencyBar('feature-state', null);
+  setLatencyBar('canonical-state', body.latest_state_age_ms);
 }
 
 function setLatencyBar(prefix, value) {
@@ -260,37 +286,57 @@ function renderError(error) {
 }
 
 async function refresh() {
-  const results = await Promise.allSettled([
-    fetchJson('/ops/pipeline'),
-    fetchJson('/ops/latency'),
-    fetchJson('/health'),
-    fetchJson('/operator/status'),
-    fetchPrometheus()
-  ]);
-  const [pipeline, latency, health, operator, prometheus] = results.map((result) =>
-    result.status === 'fulfilled' ? result.value : null
-  );
-  try {
-    renderPipeline(pipeline);
-    renderLatency(latency || {});
-    renderHealth(health || {}, operator || {});
-    if (prometheus) {
-      renderPrometheus(prometheus);
-    } else {
-      setPill('prometheus-status', 'unavailable', 'warn');
-    }
-    renderRaw({
-      pipeline: pipeline,
-      latency: latency,
-      health: health,
-      operator_status: operator,
-      errors: results
-        .map((result, index) => result.status === 'rejected' ? `${index}: ${result.reason}` : null)
-        .filter(Boolean)
+  setText('last-refresh', new Date().toLocaleTimeString());
+  const errors = [];
+  const record = (key, value) => {
+    liveSnapshot[key] = value;
+    renderRaw(liveSnapshot);
+  };
+  fetchJson('/ops/pipeline')
+    .then((body) => {
+      record('pipeline', body);
+      renderPipeline(body);
+    })
+    .catch((error) => {
+      errors.push(`pipeline: ${error}`);
+      record('errors', errors);
+      setText('product-status', 'pipeline unavailable');
     });
-  } catch (error) {
-    renderError(error);
-  }
+  fetchPrometheus()
+    .then((body) => {
+      record('prometheus', 'loaded');
+      renderPrometheus(body);
+    })
+    .catch((error) => {
+      errors.push(`prometheus: ${error}`);
+      record('errors', errors);
+      setPill('prometheus-status', 'unavailable', 'warn');
+    });
+  fetchJson('/ops/latency', OPTIONAL_REQUEST_TIMEOUT_MS)
+    .then((body) => {
+      record('latency', body);
+      renderLatency(body);
+    })
+    .catch((error) => {
+      errors.push(`latency: ${error}`);
+      record('errors', errors);
+      renderLatencyUnavailable('timeout');
+    });
+  Promise.allSettled([
+    fetchJson('/health', OPTIONAL_REQUEST_TIMEOUT_MS),
+    fetchJson('/operator/status', OPTIONAL_REQUEST_TIMEOUT_MS)
+  ]).then((results) => {
+    const health = results[0].status === 'fulfilled' ? results[0].value : null;
+    const operator = results[1].status === 'fulfilled' ? results[1].value : null;
+    if (health || operator) {
+      record('health', health);
+      record('operator_status', operator);
+      renderHealth(health || {}, operator || {});
+    } else {
+      errors.push('health: timeout', 'operator_status: timeout');
+      record('errors', errors);
+    }
+  }).catch(renderError);
 }
 
 refresh();
