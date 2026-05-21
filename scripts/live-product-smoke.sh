@@ -105,6 +105,8 @@ case "$COMPOSE_PROFILE" in
 esac
 EXPECTED_FEATURE_SOURCE="$(env_or_file FRONTEND_ADAPTER_FEATURE_SOURCE latest_market_state)"
 KALSHI_APP_IMAGE="$(env_or_file KALSHI_APP_IMAGE kalshi-project:local)"
+KALSHI_MARKET_DISCOVERY_MAX_MARKETS="$(env_or_file KALSHI_MARKET_DISCOVERY_MAX_MARKETS 0)"
+LIVE_PRODUCT_REHEARSAL_MODE="$(env_or_file LIVE_PRODUCT_REHEARSAL_MODE release-smoke)"
 
 WSCLIENT_HEALTH_URL="${WSCLIENT_HEALTH_URL:-http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health}"
 STREAM_TAP_HEALTH_URL="${STREAM_TAP_HEALTH_URL:-http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health}"
@@ -1176,8 +1178,8 @@ frontend_freshness_live_data_observed="$(printf '%s\n' "$frontend_before" | sed 
 frontend_readiness_status="$(printf '%s\n' "$frontend_before" | sed -n '15p')"
 frontend_readiness_stale="$(printf '%s\n' "$frontend_before" | sed -n '16p')"
 frontend_readiness_degraded="$(printf '%s\n' "$frontend_before" | sed -n '17p')"
-printf 'PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s freshness_source_kind=%s freshness_synthetic=%s freshness_live_data_observed=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s require_live_data=%s\n' \
-    "$FRONTEND_HEALTH_URL" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_freshness_source_kind" "$frontend_freshness_synthetic" "$frontend_freshness_live_data_observed" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded" "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA"
+printf 'PASS health service=frontend-adapter url=%s feature_source=%s expected_feature_source=%s started_at=%s feature_output_refresh_total_loaded=%s refresh_errors=%s release_sha=%s release_image=%s release_profile=%s freshness_event_ts_ms=%s freshness_age_ms=%s freshness_symbol=%s freshness_source_event_id=%s freshness_source_kind=%s freshness_synthetic=%s freshness_live_data_observed=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s require_live_data=%s market_discovery_max_markets=%s rehearsal_mode=%s\n' \
+    "$FRONTEND_HEALTH_URL" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_freshness_source_kind" "$frontend_freshness_synthetic" "$frontend_freshness_live_data_observed" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded" "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA" "$KALSHI_MARKET_DISCOVERY_MAX_MARKETS" "$LIVE_PRODUCT_REHEARSAL_MODE"
 check_product_static_ui
 check_product_browser_ui
 
@@ -1287,8 +1289,9 @@ wait_plain_health wsclient "$WSCLIENT_HEALTH_URL"
 wait_streamtap_health
 wait_plain_health featureplant-db-follower "$FEATUREPLANT_HEALTH_URL"
 
-printf 'PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s freshness_source_kind=%s freshness_synthetic=%s freshness_live_data_observed=%s live_data_observed=%s require_live_data=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
+printf 'PASS live_product_smoke market=%s run_id=%s feature_source=%s expected_feature_source=%s cursor_before=%s target_commit_seq=%s cursor_after=%s feature_outputs=%s frontend_started_at=%s frontend_total_loaded_before=%s frontend_total_loaded_after=%s frontend_refresh_errors_after=%s freshness_source_kind=%s freshness_synthetic=%s freshness_live_data_observed=%s live_data_observed=%s require_live_data=%s market_discovery_max_markets=%s rehearsal_mode=%s product_readiness_status=%s product_readiness_stale=%s product_readiness_degraded=%s\n' \
     "$market_ticker" "$run_id" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$cursor_before" "$target_commit_seq" "$cursor_after" "$feature_outputs_after" \
     "$frontend_started_at_after" "$frontend_loaded_before" "$frontend_loaded_after" "$frontend_errors_after" \
     "$frontend_freshness_source_kind_after" "$frontend_freshness_synthetic_after" "$frontend_freshness_live_data_observed_after" "$LIVE_DATA_OBSERVED" "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA" \
+    "$KALSHI_MARKET_DISCOVERY_MAX_MARKETS" "$LIVE_PRODUCT_REHEARSAL_MODE" \
     "$frontend_readiness_status_after" "$frontend_readiness_stale_after" "$frontend_readiness_degraded_after"

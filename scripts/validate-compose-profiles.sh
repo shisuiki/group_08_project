@@ -1027,10 +1027,14 @@ assert_live_product_manual_smoke_contract() {
         "run_live_product_smoke:" \
         "run_live_product_browser_smoke:" \
         "require_live_product_data:" \
+        "live_product_smoke_max_markets:" \
+        "live_product_load_stress_rehearsal:" \
         "DEPLOY_PROFILE: \${{ github.event_name == 'workflow_dispatch' && inputs.deploy_profile || vars.DEPLOY_PROFILE || 'cluster-live' }}" \
         "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_smoke) || 'false' }}" \
         "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_browser_smoke) || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}" \
         "REQUIRE_LIVE_PRODUCT_DATA: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.require_live_product_data) || 'false' }}" \
+        "LIVE_PRODUCT_SMOKE_MAX_MARKETS: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_smoke_max_markets) || vars.LIVE_PRODUCT_SMOKE_MAX_MARKETS || '3' }}" \
+        "LIVE_PRODUCT_LOAD_STRESS_REHEARSAL: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_load_stress_rehearsal) || vars.LIVE_PRODUCT_LOAD_STRESS_REHEARSAL || 'false' }}" \
         "LIVE_PRODUCT_REHEARSAL_ARTIFACT_NAME: live-product-rehearsal-\${{ github.sha }}-\${{ github.run_id }}-\${{ github.run_attempt }}" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \
         "FRONTEND_ADAPTER_FEATURE_SOURCE: \${{ vars.FRONTEND_ADAPTER_FEATURE_SOURCE || 'latest_market_state' }}" \
@@ -1043,13 +1047,18 @@ assert_live_product_manual_smoke_contract() {
         "require_live_product_data=true requires run_live_product_smoke=true" \
         "run_live_product_browser_smoke=true requires run_live_product_smoke=true" \
         "run_live_product_smoke=true requires deploy_profile=live-product or live-product-local-db" \
+        "live-product load/stress market cap must be <=300" \
+        "live-product release smoke market cap must be <=25 unless live_product_load_stress_rehearsal=true" \
         "live-product rehearsal required configuration missing: %s" \
         "live-product|live-product-local-db|db-primary-product" \
         "requires FRONTEND_ADAPTER_FEATURE_SOURCE=feature_outputs or latest_market_state" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED=\$q_live_product_semantic_smoke_enabled" \
         "REQUIRE_LIVE_PRODUCT_DATA=\$q_require_live_product_data FRONTEND_ADAPTER_BASIC_AUTH_USER=\$q_frontend_basic_auth_user FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD=\$q_frontend_basic_auth_password sh scripts/ec2-compose-rollback-gate.sh" \
+        'EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS="$LIVE_PRODUCT_SMOKE_MAX_MARKETS"' \
         'EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS=300' \
+        'EFFECTIVE_LIVE_PRODUCT_REHEARSAL_MODE=load-stress' \
+        'LIVE_PRODUCT_REHEARSAL_MODE=$EFFECTIVE_LIVE_PRODUCT_REHEARSAL_MODE' \
         'KALSHI_MARKET_DISCOVERY_MAX_MARKETS=$EFFECTIVE_KALSHI_MARKET_DISCOVERY_MAX_MARKETS' \
         "env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db'" \
         "(env.DEPLOY_PROFILE == 'live-product' || env.DEPLOY_PROFILE == 'live-product-local-db') && env.RUN_LIVE_PRODUCT_SMOKE == 'true'" \
@@ -1135,6 +1144,10 @@ assert_live_product_manual_smoke_contract() {
         'docker_compose --profile "$COMPOSE_PROFILE" "$@"' \
         'docker_cmd run --rm --network "$network"' \
         'KALSHI_APP_IMAGE="$(env_or_file KALSHI_APP_IMAGE kalshi-project:local)"' \
+        'KALSHI_MARKET_DISCOVERY_MAX_MARKETS="$(env_or_file KALSHI_MARKET_DISCOVERY_MAX_MARKETS 0)"' \
+        'LIVE_PRODUCT_REHEARSAL_MODE="$(env_or_file LIVE_PRODUCT_REHEARSAL_MODE release-smoke)"' \
+        'market_discovery_max_markets=%s' \
+        'rehearsal_mode=%s' \
         'LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA'; do
         if ! grep -Fq "$expected" "$smoke_script"; then
             printf 'live-product smoke script missing contract fragment: %s\n' "$expected" >&2
