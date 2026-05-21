@@ -28,7 +28,13 @@ public record MarketCapability(
     long featureCount,
     long bboSampleCount,
     long tradeSampleCount,
-    long tickerSampleCount
+    long tickerSampleCount,
+    long historyBars24hCount,
+    long trade24hCount,
+    long quote24hCount,
+    Long lastEventTsMs,
+    Long liquidityRank,
+    boolean displayEligible
 ) {
     public MarketCapability {
         marketTicker = nonBlank(marketTicker, "marketTicker");
@@ -39,7 +45,9 @@ public record MarketCapability(
         chartStatus = value(chartStatus);
         chartReason = value(chartReason);
         semanticStatus = value(semanticStatus);
-        if (featureCount < 0 || bboSampleCount < 0 || tradeSampleCount < 0 || tickerSampleCount < 0) {
+        if (featureCount < 0 || bboSampleCount < 0 || tradeSampleCount < 0 || tickerSampleCount < 0
+            || historyBars24hCount < 0 || trade24hCount < 0 || quote24hCount < 0
+            || (liquidityRank != null && liquidityRank < 0)) {
             throw new IllegalArgumentException("feature/sample counts must be non-negative");
         }
     }

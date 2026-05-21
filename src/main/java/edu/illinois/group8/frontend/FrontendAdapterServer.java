@@ -71,6 +71,8 @@ public class FrontendAdapterServer {
     private static final long MAX_QUOTE_UPDATE_TIMEOUT_MS = 30_000L;
     private static final long QUOTE_STREAM_HEARTBEAT_MS = 1_000L;
     private static final long DATA_FRESHNESS_STALE_AFTER_MS = 15_000L;
+    private static final long DISPLAY_ELIGIBLE_WINDOW_MS = 86_400_000L;
+    private static final long DISPLAY_ELIGIBLE_MIN_BARS_24H = 10L;
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
         "app.js",
@@ -963,13 +965,15 @@ public class FrontendAdapterServer {
             writeError(exchange, 405, "method not allowed");
             return;
         }
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
         MarketCapabilityReadRequest request;
         try {
-            request = marketCapabilityReadRequest(parseQuery(exchange.getRequestURI()));
+            request = marketCapabilityReadRequest(params);
         } catch (IllegalArgumentException e) {
             writeError(exchange, 400, e.getMessage());
             return;
         }
+        int subscriptionCap = marketSubscriptionCap(params);
 
         String responseStatus = "ok";
         String source = config.dbUrl().isBlank() ? "memory" : "db";
@@ -999,7 +1003,7 @@ public class FrontendAdapterServer {
         body.put("count", page.markets().size());
         body.put("total_count", page.totalCount());
         body.put("has_more", page.offset() + page.markets().size() < page.totalCount());
-        body.put("summary", marketCapabilitySummaryBody(page.summary()));
+        body.put("summary", marketCapabilitySummaryBody(page.summary(), subscriptionCap));
         body.put("markets", page.markets().stream()
             .map(FrontendAdapterServer::marketCapabilityBody)
             .toList());
@@ -2045,6 +2049,14 @@ public class FrontendAdapterServer {
         body.put("bbo_sample_count", capability.bboSampleCount());
         body.put("trade_sample_count", capability.tradeSampleCount());
         body.put("ticker_sample_count", capability.tickerSampleCount());
+        body.put("bars_24h_count", capability.historyBars24hCount());
+        body.put("history_bars_24h", capability.historyBars24hCount());
+        body.put("trade_24h_count", capability.trade24hCount());
+        body.put("quote_24h_count", capability.quote24hCount());
+        body.put("last_event_ts_ms", capability.lastEventTsMs());
+        body.put("liquidity_rank", capability.liquidityRank());
+        body.put("eligible", capability.displayEligible());
+        body.put("display_eligible", capability.displayEligible());
         body.put("feature_counts", Map.of(
             "bbo", capability.bboSampleCount(),
             "trade", capability.tradeSampleCount(),
@@ -2056,10 +2068,21 @@ public class FrontendAdapterServer {
         return body;
     }
 
-    private static Map<String, Object> marketCapabilitySummaryBody(MarketCapabilitySummary summary) {
+    private static Map<String, Object> marketCapabilitySummaryBody(MarketCapabilitySummary summary, int subscriptionCap) {
         MarketCapabilitySummary view = summary == null ? MarketCapabilitySummary.empty() : summary;
+        long subscribedCount = subscriptionCap <= 0
+            ? view.displayEligibleCount()
+            : Math.min(view.displayEligibleCount(), subscriptionCap);
+        long cappedCount = Math.max(0L, view.displayEligibleCount() - subscribedCount);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("total_assets", view.totalAssets());
+        body.put("eligible_count", view.displayEligibleCount());
+        body.put("display_eligible_count", view.displayEligibleCount());
+        body.put("filtered_out_count", view.displayIneligibleCount());
+        body.put("excluded_count", view.displayIneligibleCount());
+        body.put("subscription_cap", subscriptionCap);
+        body.put("subscribed_count", subscribedCount);
+        body.put("capped_count", cappedCount);
         body.put("chartable_count", view.chartableCount());
         body.put("quote_count", view.quoteCount());
         body.put("stale_quote_count", view.staleQuoteCount());
@@ -2068,7 +2091,10 @@ public class FrontendAdapterServer {
         body.put("semantic_failed_count", view.semanticFailedCount());
         body.put("semantic_rate_limited_count", view.semanticRateLimitedCount());
         body.put("semantic_missing_count", view.semanticMissingCount());
+        body.put("semantic_eligible_generated_count", view.semanticEligibleGeneratedCount());
+        body.put("semantic_eligible_missing_count", view.semanticEligibleMissingCount());
         body.put("metadata_only_count", view.metadataOnlyCount());
+        body.put("min_bars_24h", DISPLAY_ELIGIBLE_MIN_BARS_24H);
         return body;
     }
 
@@ -2091,7 +2117,8 @@ public class FrontendAdapterServer {
             limit,
             offset,
             taxonomyVersion,
-            includeSmokeMarkets(params)
+            includeSmokeMarkets(params),
+            booleanParam(params, "include_ineligible", false)
         );
     }
 
@@ -2099,6 +2126,7 @@ public class FrontendAdapterServer {
         List<MarketCapability> all = inMemoryCapabilityRows(request);
         MarketCapabilitySummary summary = summarizeCapabilities(all);
         List<MarketCapability> filtered = all.stream()
+            .filter(capability -> request.includeIneligible() || capability.displayEligible())
             .filter(capability -> matchesCapabilityFilter(capability, request.capabilityFilter()))
             .sorted(FrontendAdapterServer::compareCapabilities)
             .toList();
@@ -2183,6 +2211,21 @@ public class FrontendAdapterServer {
         boolean hasQuote = eventTsMs != null && midpoint != null;
         Long quoteAgeMs = eventTsMs == null ? null : Math.max(0L, nowMs - eventTsMs);
         String quoteStatus = quoteStatus(hasQuote, quoteAgeMs);
+        long historyBars24h = store.barSeries(
+            marketTicker,
+            nowMs - DISPLAY_ELIGIBLE_WINDOW_MS,
+            nowMs,
+            BarResolution.M1
+        ).bars().size();
+        boolean displayEligible = historyBars24h >= DISPLAY_ELIGIBLE_MIN_BARS_24H;
+        long trade24h = tradeFeatures.stream().filter(output -> inWindow(output, nowMs, DISPLAY_ELIGIBLE_WINDOW_MS)).count();
+        long quote24h = bboFeatures.stream().filter(output -> inWindow(output, nowMs, DISPLAY_ELIGIBLE_WINDOW_MS)).count()
+            + tickerFeatures.stream().filter(output -> inWindow(output, nowMs, DISPLAY_ELIGIBLE_WINDOW_MS)).count();
+        Long lastEventTsMs = allFeatures.stream()
+            .map(FeatureOutput::eventTsMs)
+            .filter(ts -> ts != null)
+            .max(Long::compareTo)
+            .orElse(null);
         boolean chartable = chartableFromBbo || chartableFromTicker || chartableFromTrade;
         String bestChartSource = bestChartSource(chartableFromBbo, chartableFromTicker, chartableFromTrade);
         String chartStatus = chartable1h > 0L ? "chartable_1h"
@@ -2223,7 +2266,13 @@ public class FrontendAdapterServer {
             allFeatures.size(),
             bboFeatures.size(),
             tradeCount,
-            tickerCount
+            tickerCount,
+            historyBars24h,
+            trade24h,
+            quote24h,
+            lastEventTsMs,
+            null,
+            displayEligible
         );
     }
 
@@ -2261,7 +2310,16 @@ public class FrontendAdapterServer {
         long semanticRateLimited = 0L;
         long semanticMissing = 0L;
         long metadataOnly = 0L;
+        long displayEligible = 0L;
+        long displayIneligible = 0L;
+        long semanticEligibleGenerated = 0L;
+        long semanticEligibleMissing = 0L;
         for (MarketCapability capability : capabilities) {
+            if (capability.displayEligible()) {
+                displayEligible++;
+            } else {
+                displayIneligible++;
+            }
             if (capability.chartable()) {
                 chartable++;
             }
@@ -2286,6 +2344,12 @@ public class FrontendAdapterServer {
             if ("missing".equals(capability.semanticStatus())) {
                 semanticMissing++;
             }
+            if (capability.displayEligible() && "generated".equals(capability.semanticStatus())) {
+                semanticEligibleGenerated++;
+            }
+            if (capability.displayEligible() && "missing".equals(capability.semanticStatus())) {
+                semanticEligibleMissing++;
+            }
             if (capability.metadataOnly()) {
                 metadataOnly++;
             }
@@ -2300,7 +2364,11 @@ public class FrontendAdapterServer {
             semanticFailed,
             semanticRateLimited,
             semanticMissing,
-            metadataOnly
+            metadataOnly,
+            displayEligible,
+            displayIneligible,
+            semanticEligibleGenerated,
+            semanticEligibleMissing
         );
     }
 
@@ -2330,7 +2398,7 @@ public class FrontendAdapterServer {
     private static boolean matchesCapabilityFilter(MarketCapability capability, String filter) {
         return switch (filter) {
             case "all" -> true;
-            case "chart_ready" -> capability.chartable();
+            case "chart_ready" -> capability.displayEligible();
             case "quote_available" -> capability.hasQuote();
             case "quote_only" -> capability.hasQuote() && !capability.chartable();
             case "quote_stale" -> "stale_quote".equals(capability.quoteStatus());
@@ -2347,6 +2415,24 @@ public class FrontendAdapterServer {
         if (leftRank != rightRank) {
             return Integer.compare(leftRank, rightRank);
         }
+        int bars = Long.compare(right.historyBars24hCount(), left.historyBars24hCount());
+        if (bars != 0) {
+            return bars;
+        }
+        int trades = Long.compare(right.trade24hCount(), left.trade24hCount());
+        if (trades != 0) {
+            return trades;
+        }
+        int quotes = Long.compare(right.quote24hCount(), left.quote24hCount());
+        if (quotes != 0) {
+            return quotes;
+        }
+        long leftLast = left.lastEventTsMs() == null ? Long.MIN_VALUE : left.lastEventTsMs();
+        long rightLast = right.lastEventTsMs() == null ? Long.MIN_VALUE : right.lastEventTsMs();
+        int last = Long.compare(rightLast, leftLast);
+        if (last != 0) {
+            return last;
+        }
         long leftTs = left.quoteEventTsMs() == null ? Long.MIN_VALUE : left.quoteEventTsMs();
         long rightTs = right.quoteEventTsMs() == null ? Long.MIN_VALUE : right.quoteEventTsMs();
         int ts = Long.compare(rightTs, leftTs);
@@ -2354,19 +2440,22 @@ public class FrontendAdapterServer {
     }
 
     private static int capabilityRank(MarketCapability capability) {
-        if (capability.chartable1h()) {
+        if (capability.displayEligible()) {
             return 0;
         }
-        if (capability.chartable24h()) {
+        if (capability.chartable1h()) {
             return 1;
         }
-        if (capability.hasQuote()) {
+        if (capability.chartable24h()) {
             return 2;
         }
-        if (capability.chartable()) {
+        if (capability.hasQuote()) {
             return 3;
         }
-        return 4;
+        if (capability.chartable()) {
+            return 4;
+        }
+        return 5;
     }
 
     private static boolean chartableOutput(FeatureOutput output) {
@@ -2490,6 +2579,34 @@ public class FrontendAdapterServer {
             case "0", "false", "no", "n", "off" -> false;
             default -> config.includeSmokeMarkets();
         };
+    }
+
+    private static boolean booleanParam(Map<String, String> params, String name, boolean defaultValue) {
+        String raw = params.get(name);
+        if (raw == null) {
+            return defaultValue;
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "1", "true", "yes", "y", "on" -> true;
+            case "0", "false", "no", "n", "off" -> false;
+            default -> defaultValue;
+        };
+    }
+
+    private static int marketSubscriptionCap(Map<String, String> params) {
+        String raw = firstNonBlankOrNull(
+            params.get("subscription_cap"),
+            System.getenv("KALSHI_MARKET_DISCOVERY_MAX_MARKETS")
+        );
+        if (raw == null) {
+            return 0;
+        }
+        try {
+            int parsed = Integer.parseInt(raw);
+            return Math.max(0, parsed);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static int parseLimit(String raw, int defaultLimit, int maxLimit) {

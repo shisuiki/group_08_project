@@ -720,6 +720,89 @@ check_product_browser_ui() {
         sh "$FRONTEND_BROWSER_SMOKE_SCRIPT"
 }
 
+check_top_eligible_history() {
+    capabilities_json="$tmpdir/market-capabilities.json"
+    top_markets="$tmpdir/top-eligible-markets.txt"
+    frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+        "${FRONTEND_BASE_URL}/api/markets/capabilities?limit=20" \
+        -o "$capabilities_json"
+    python3 - "$capabilities_json" "$top_markets" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+if body.get("status") != "ok":
+    raise SystemExit("market capability response is not ok")
+summary = body.get("summary")
+if not isinstance(summary, dict):
+    raise SystemExit("market capability summary missing")
+for key in (
+    "eligible_count",
+    "display_eligible_count",
+    "subscribed_count",
+    "capped_count",
+    "excluded_count",
+    "min_bars_24h",
+):
+    if key not in summary:
+        raise SystemExit(f"market capability summary missing {key}")
+markets = body.get("markets")
+if not isinstance(markets, list) or not markets:
+    raise SystemExit("market capability response has no eligible markets")
+previous_rank = 0
+with open(sys.argv[2], "w", encoding="utf-8") as output:
+    for index, market in enumerate(markets, start=1):
+        if not isinstance(market, dict):
+            raise SystemExit("market capability row is not an object")
+        ticker = market.get("market_ticker")
+        if not ticker:
+            raise SystemExit("market capability row missing market_ticker")
+        if market.get("eligible") is not True and market.get("display_eligible") is not True:
+            raise SystemExit(f"market {ticker} is not display eligible")
+        bars = int(market.get("bars_24h_count") or market.get("history_bars_24h") or 0)
+        if bars < 10:
+            raise SystemExit(f"market {ticker} has only {bars} 24h bars")
+        rank = int(market.get("liquidity_rank") or 0)
+        if rank < 1:
+            raise SystemExit(f"market {ticker} missing positive liquidity_rank")
+        if previous_rank and rank < previous_rank:
+            raise SystemExit("liquidity_rank order is not monotonic")
+        previous_rank = rank
+        output.write(f"{ticker}\n")
+PY
+
+    history_from="$(( $(date +%s) - 86400 ))"
+    history_to="$(date +%s)"
+    checked=0
+    while IFS= read -r market; do
+        [ -n "$market" ] || continue
+        encoded_market="$(urlencode "$market")"
+        history_json="$tmpdir/history-${checked}.json"
+        frontend_curl -fsS --noproxy "$FRONTEND_NO_PROXY" \
+            "${FRONTEND_BASE_URL}/datafeed/history?symbol=${encoded_market}&resolution=1&from=${history_from}&to=${history_to}" \
+            -o "$history_json"
+        python3 - "$history_json" "$market" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    body = json.load(handle)
+if body.get("s") != "ok":
+    raise SystemExit(f"history for {sys.argv[2]} is not ok")
+times = body.get("t")
+if not isinstance(times, list) or len(times) < 10:
+    raise SystemExit(f"history for {sys.argv[2]} has fewer than 10 bars")
+PY
+        checked=$((checked + 1))
+    done < "$top_markets"
+    if [ "$checked" -lt 1 ]; then
+        printf 'no eligible markets checked for 24h chart history\n' >&2
+        exit 1
+    fi
+    printf 'PASS product_universe_chartable checked_markets=%s min_history_bars_24h=10\n' "$checked"
+}
+
 wait_frontend_feature_output() {
     market="$1"
     source_event_id="$2"
@@ -1182,6 +1265,7 @@ printf 'PASS health service=frontend-adapter url=%s feature_source=%s expected_f
     "$FRONTEND_HEALTH_URL" "$frontend_feature_source_before" "$EXPECTED_FEATURE_SOURCE" "$frontend_started_at_before" "$frontend_loaded_before" "$frontend_errors_before" "$frontend_release_sha" "$frontend_release_image" "$frontend_release_profile" "$frontend_freshness_event_ts_ms" "$frontend_freshness_age_ms" "$frontend_freshness_symbol" "$frontend_freshness_source_event_id" "$frontend_freshness_source_kind" "$frontend_freshness_synthetic" "$frontend_freshness_live_data_observed" "$frontend_readiness_status" "$frontend_readiness_stale" "$frontend_readiness_degraded" "$LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA" "$KALSHI_MARKET_DISCOVERY_MAX_MARKETS" "$LIVE_PRODUCT_REHEARSAL_MODE"
 check_product_static_ui
 check_product_browser_ui
+check_top_eligible_history
 
 cursor_before="$(cursor_commit_seq)"
 max_commit_before="$(db_probe maxCanonicalCommitSeq)"

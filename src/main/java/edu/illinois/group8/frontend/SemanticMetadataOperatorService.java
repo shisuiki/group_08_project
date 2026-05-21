@@ -159,6 +159,7 @@ final class SemanticMetadataOperatorService implements AutoCloseable {
     private Map<String, Object> redactedConfig(SemanticMetadataConfig config, RunConfig runConfig) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("dry_run", config.dryRun());
+        body.put("eligible_only", config.marketTicker().isBlank());
         body.put("overwrite", config.overwrite());
         body.put("max_markets", config.maxMarkets());
         body.put("max_retries", config.maxRetries());

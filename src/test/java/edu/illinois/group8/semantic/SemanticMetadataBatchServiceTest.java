@@ -250,6 +250,7 @@ class SemanticMetadataBatchServiceTest {
 
         assertEquals(1, requests.size());
         assertEquals("v1", requests.get(0).excludeGeneratedTaxonomyVersion());
+        assertTrue(requests.get(0).eligibleOnly());
     }
 
     @Test

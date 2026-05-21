@@ -95,6 +95,7 @@ class DbReleasePreflightCliTest {
         assertTrue(output.stdout().contains("flyway_v013=success"));
         assertTrue(output.stdout().contains("flyway_v014=success"));
         assertTrue(output.stdout().contains("flyway_v015=success"));
+        assertTrue(output.stdout().contains("flyway_v016=success"));
         assertTrue(output.stdout().contains("canonical_replay_index=ok"));
     }
 
@@ -201,6 +202,7 @@ class DbReleasePreflightCliTest {
             jdbc.withMigrationRows("013", List.<Object[]>of(row(true)));
             jdbc.withMigrationRows("014", List.<Object[]>of(row(true)));
             jdbc.withMigrationRows("015", List.<Object[]>of(row(true)));
+            jdbc.withMigrationRows("016", List.<Object[]>of(row(true)));
             jdbc.withRows(
                 DbReleasePreflightCheck.CANONICAL_REPLAY_INDEX_SQL,
                 List.<Object[]>of(row("""

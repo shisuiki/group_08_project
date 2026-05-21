@@ -1033,7 +1033,7 @@ assert_live_product_manual_smoke_contract() {
         "RUN_LIVE_PRODUCT_SMOKE: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_smoke) || 'false' }}" \
         "LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_browser_smoke) || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}" \
         "REQUIRE_LIVE_PRODUCT_DATA: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.require_live_product_data) || 'false' }}" \
-        "LIVE_PRODUCT_SMOKE_MAX_MARKETS: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_smoke_max_markets) || vars.LIVE_PRODUCT_SMOKE_MAX_MARKETS || '3' }}" \
+        "LIVE_PRODUCT_SMOKE_MAX_MARKETS: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_smoke_max_markets) || vars.LIVE_PRODUCT_SMOKE_MAX_MARKETS || '20' }}" \
         "LIVE_PRODUCT_LOAD_STRESS_REHEARSAL: \${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_load_stress_rehearsal) || vars.LIVE_PRODUCT_LOAD_STRESS_REHEARSAL || 'false' }}" \
         "LIVE_PRODUCT_REHEARSAL_ARTIFACT_NAME: live-product-rehearsal-\${{ github.sha }}-\${{ github.run_id }}-\${{ github.run_attempt }}" \
         "LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: \${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}" \

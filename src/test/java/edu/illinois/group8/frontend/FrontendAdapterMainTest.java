@@ -450,7 +450,7 @@ class FrontendAdapterMainTest {
         assertFalse(app.contains("loadSemanticMap();\n        loadCatalogSyncStatus();"));
         assertTrue(app.contains("layoutSemanticLeafTreemap"));
         assertTrue(app.contains("semanticRenderableLeaves"));
-        assertTrue(app.contains("Classified subset"));
+        assertTrue(app.contains("Eligible generated"));
         assertTrue(app.contains("buildDemoRunRequest"));
         assertTrue(app.contains("applyRoleVisibility"));
         assertTrue(app.contains("dataFreshnessBadgeText"));

@@ -43,7 +43,11 @@ class JdbcMarketCapabilityReaderTest {
                 "semantic_failed_count", 3L,
                 "semantic_rate_limited_count", 2L,
                 "semantic_missing_count", 128_010L,
-                "metadata_only_count", 100_000L
+                "metadata_only_count", 100_000L,
+                "display_eligible_count", 120L,
+                "display_ineligible_count", 137_915L,
+                "semantic_eligible_generated_count", 100L,
+                "semantic_eligible_missing_count", 20L
             )),
             List.of(row(
                 "filtered_count", 21_590L,
@@ -74,7 +78,13 @@ class JdbcMarketCapabilityReaderTest {
                 "feature_count", 12L,
                 "bbo_sample_count", 0L,
                 "trade_sample_count", 12L,
-                "ticker_sample_count", 0L
+                "ticker_sample_count", 0L,
+                "history_bars_24h_count", 12L,
+                "trade_24h_count", 12L,
+                "quote_24h_count", 0L,
+                "last_event_ts_ms", 1_234_000L,
+                "liquidity_rank", 3L,
+                "display_eligible", true
             ))
         ));
         JdbcMarketCapabilityReader reader = new JdbcMarketCapabilityReader(jdbc::openConnection);
@@ -86,6 +96,7 @@ class JdbcMarketCapabilityReaderTest {
             50,
             100,
             "v1",
+            false,
             false
         ));
 
@@ -101,7 +112,7 @@ class JdbcMarketCapabilityReaderTest {
         assertTrue(pageSql.contains("market_feature_stats mfs"));
         assertEquals(-1, pageSql.indexOf("from feature_outputs"));
         assertTrue(pageSql.contains("best_chart_source"));
-        assertTrue(pageSql.contains("and chartable"));
+        assertTrue(pageSql.contains("and display_eligible"));
         assertTrue(summarySql.contains("stale_quote_count"));
         assertTrue(summarySql.contains("semantic_rate_limited_count"));
         assertEquals(List.of(
@@ -122,6 +133,8 @@ class JdbcMarketCapabilityReaderTest {
         assertEquals(138_035L, page.summary().totalAssets());
         assertEquals(47L, page.summary().staleQuoteCount());
         assertEquals(2L, page.summary().semanticRateLimitedCount());
+        assertEquals(120L, page.summary().displayEligibleCount());
+        assertEquals(20L, page.summary().semanticEligibleMissingCount());
         assertEquals(21_590L, page.totalCount());
         assertEquals(100, page.offset());
         assertEquals(50, page.limit());
@@ -132,11 +145,14 @@ class JdbcMarketCapabilityReaderTest {
         assertEquals("trade_tape", capability.bestChartSource());
         assertTrue(capability.chartableFromTradeTape());
         assertEquals("trade_tape_history_available", capability.chartReason());
+        assertTrue(capability.displayEligible());
+        assertEquals(12L, capability.historyBars24hCount());
+        assertEquals(3L, capability.liquidityRank());
     }
 
     @Test
     void supportsQuoteAndSemanticCapabilityFilters() {
-        assertSqlFilter("chart_ready", "and chartable");
+        assertSqlFilter("chart_ready", "and display_eligible");
         assertSqlFilter("quote_available", "and has_quote");
         assertSqlFilter("quote_only", "and has_quote and not chartable");
         assertSqlFilter("quote_stale", "quote_status = 'stale_quote'");
@@ -164,6 +180,7 @@ class JdbcMarketCapabilityReaderTest {
                 5,
                 0,
                 "v1",
+                false,
                 false
             ), bindings).toLowerCase(Locale.ROOT);
             String normalizedSql = sql.replaceAll("\\s+", " ");
@@ -180,7 +197,7 @@ class JdbcMarketCapabilityReaderTest {
 
     private static String expectedPredicate(String filter) {
         return switch (filter) {
-            case "chart_ready" -> "and chartable";
+            case "chart_ready" -> "and display_eligible";
             case "quote_available" -> "and has_quote";
             case "quote_only" -> "and has_quote and not chartable";
             case "quote_stale" -> "and quote_status = 'stale_quote'";
@@ -201,6 +218,7 @@ class JdbcMarketCapabilityReaderTest {
             50,
             100,
             "v1",
+            false,
             false
         );
         List<Object> summaryBindings = new ArrayList<>();
@@ -214,9 +232,29 @@ class JdbcMarketCapabilityReaderTest {
         assertTrue(summarySql.contains("market_feature_stats"));
         assertTrue(pageSql.contains("coalesce(mfs.feature_count, 0)"));
         assertTrue(pageSql.contains("coalesce(mfs.bbo_chart_count, 0) > 0"));
+        assertTrue(pageSql.contains("history_bars_24h_count desc"));
+        assertTrue(pageSql.contains("trade_24h_count desc"));
+        assertTrue(pageSql.contains("quote_24h_count desc"));
+        assertTrue(pageSql.contains("and display_eligible"));
         assertTrue(pageSql.contains("mfs.last_chart_ts_ms"));
         assertEquals(-1, summarySql.toLowerCase(Locale.ROOT).indexOf("from feature_outputs"));
         assertEquals(-1, pageSql.toLowerCase(Locale.ROOT).indexOf("from feature_outputs"));
+    }
+
+    @Test
+    void rankedCteDoesNotSelfReference() {
+        List<Object> bindings = new ArrayList<>();
+        String sql = JdbcMarketCapabilityReader.pageSql(MarketCapabilityReadRequest.defaultRequest(), bindings)
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("\\s+", " ");
+
+        int rankedStart = sql.indexOf("ranked as");
+        int rankedEnd = sql.indexOf(") select *, count(*) over() as filtered_count from ranked", rankedStart);
+        assertTrue(rankedStart >= 0, "ranked CTE must be present");
+        assertTrue(rankedEnd > rankedStart, "page query must read from ranked CTE");
+        String rankedCte = sql.substring(rankedStart, rankedEnd);
+        assertTrue(rankedCte.contains("from enriched"), rankedCte);
+        assertEquals(-1, rankedCte.indexOf("from ranked"), rankedCte);
     }
 
     @Test
@@ -243,6 +281,7 @@ class JdbcMarketCapabilityReaderTest {
             10,
             0,
             "v1",
+            false,
             false
         ), bindings).toLowerCase(Locale.ROOT);
 

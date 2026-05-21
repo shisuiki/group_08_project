@@ -89,7 +89,40 @@ public final class JdbcMarketMetadataReader implements MarketMetadataReader {
                 """);
             bindings.add(request.excludeGeneratedTaxonomyVersion());
         }
-        sql.append(" order by series_ticker asc nulls last, market_ticker asc");
+        if (request.eligibleOnly()) {
+            sql.append("""
+                 and exists (
+                    select 1
+                    from market_feature_stats mfs
+                    where mfs.market_ticker = market_metadata.market_ticker
+                      and mfs.display_eligible
+                )
+                """);
+        }
+        if (request.eligibleOnly()) {
+            sql.append("""
+                 order by
+                    (
+                        select mfs.history_bars_24h_count
+                        from market_feature_stats mfs
+                        where mfs.market_ticker = market_metadata.market_ticker
+                    ) desc nulls last,
+                    (
+                        select mfs.trade_24h_count
+                        from market_feature_stats mfs
+                        where mfs.market_ticker = market_metadata.market_ticker
+                    ) desc nulls last,
+                    (
+                        select mfs.quote_24h_count
+                        from market_feature_stats mfs
+                        where mfs.market_ticker = market_metadata.market_ticker
+                    ) desc nulls last,
+                    series_ticker asc nulls last,
+                    market_ticker asc
+                """);
+        } else {
+            sql.append(" order by series_ticker asc nulls last, market_ticker asc");
+        }
         sql.append(" limit ?");
         bindings.add(request.maxRows());
         return sql.toString();

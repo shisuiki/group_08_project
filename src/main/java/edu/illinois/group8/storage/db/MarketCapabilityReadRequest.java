@@ -9,7 +9,8 @@ public record MarketCapabilityReadRequest(
     int limit,
     int offset,
     String taxonomyVersion,
-    boolean includeSmoke
+    boolean includeSmoke,
+    boolean includeIneligible
 ) {
     public static final int DEFAULT_LIMIT = 100;
     public static final int MAX_LIMIT = 5_000;
@@ -41,6 +42,7 @@ public record MarketCapabilityReadRequest(
             DEFAULT_LIMIT,
             DEFAULT_OFFSET,
             DEFAULT_TAXONOMY_VERSION,
+            false,
             false
         );
     }

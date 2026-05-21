@@ -49,9 +49,12 @@ class JdbcSemanticMarketMetadataReaderTest {
         assertTrue(sql.contains("from market_semantic_metadata smm"));
         assertTrue(sql.contains("left join market_metadata mm"));
         assertTrue(sql.contains("left join latest_market_state lms"));
+        assertTrue(sql.contains("left join market_feature_stats mfs"));
+        assertTrue(sql.contains("coalesce(mfs.display_eligible, false)"));
+        assertTrue(sql.contains("mfs.history_bars_24h_count desc"));
         assertTrue(sql.contains("smm.tags::text as tags"));
         assertTrue(sql.contains("lms.last_canonical_commit_seq"));
-        assertTrue(sql.contains("order by lms.last_canonical_commit_seq desc nulls last"));
+        assertTrue(sql.contains("lms.last_canonical_commit_seq desc nulls last"));
         assertTrue(sql.contains("limit ?"));
         assertFalse(sql.contains("raw_response"));
         assertEquals(List.of("tax-v1", SemanticMarketMetadataReadRequest.DEFAULT_MAX_ROWS), jdbc.bindings);

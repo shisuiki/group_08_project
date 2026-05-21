@@ -76,6 +76,8 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             on mm.market_ticker = smm.market_ticker
         left join latest_market_state lms
             on lms.market_ticker = smm.market_ticker
+        left join market_feature_stats mfs
+            on mfs.market_ticker = smm.market_ticker
         """;
 
     private final JdbcConnectionFactory connectionFactory;
@@ -156,7 +158,17 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             bindings.add(pattern);
             bindings.add(pattern);
         }
-        sql.append(" order by lms.last_canonical_commit_seq desc nulls last, smm.updated_at desc, smm.market_ticker asc");
+        sql.append(" and coalesce(mfs.display_eligible, false)");
+        sql.append("""
+             order by
+                mfs.history_bars_24h_count desc nulls last,
+                mfs.trade_24h_count desc nulls last,
+                mfs.quote_24h_count desc nulls last,
+                lms.last_event_ts_ms desc nulls last,
+                lms.last_canonical_commit_seq desc nulls last,
+                smm.updated_at desc,
+                smm.market_ticker asc
+            """);
         sql.append(" limit ?");
         bindings.add(request.maxRows());
         return sql.toString();

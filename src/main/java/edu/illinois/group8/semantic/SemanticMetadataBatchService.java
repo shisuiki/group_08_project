@@ -364,13 +364,13 @@ public final class SemanticMetadataBatchService {
                 config.marketStatus().isBlank() ? null : config.marketStatus(),
                 config.maxMarkets(),
                 config.taxonomyVersion()
-            );
+            ).withEligibleOnly();
         }
         return MarketMetadataReadRequest.search(
             config.seriesTicker().isBlank() ? null : config.seriesTicker(),
             config.marketStatus().isBlank() ? null : config.marketStatus(),
             config.maxMarkets()
-        );
+        ).withEligibleOnly();
     }
 
     private String parseFailureError(

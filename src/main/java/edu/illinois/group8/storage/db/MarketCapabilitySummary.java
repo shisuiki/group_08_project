@@ -10,18 +10,23 @@ public record MarketCapabilitySummary(
     long semanticFailedCount,
     long semanticRateLimitedCount,
     long semanticMissingCount,
-    long metadataOnlyCount
+    long metadataOnlyCount,
+    long displayEligibleCount,
+    long displayIneligibleCount,
+    long semanticEligibleGeneratedCount,
+    long semanticEligibleMissingCount
 ) {
     public MarketCapabilitySummary {
         if (totalAssets < 0 || chartableCount < 0 || quoteCount < 0
             || staleQuoteCount < 0 || semanticGeneratedCount < 0 || semanticReviewRequiredCount < 0
             || semanticFailedCount < 0 || semanticRateLimitedCount < 0 || semanticMissingCount < 0
-            || metadataOnlyCount < 0) {
+            || metadataOnlyCount < 0 || displayEligibleCount < 0 || displayIneligibleCount < 0
+            || semanticEligibleGeneratedCount < 0 || semanticEligibleMissingCount < 0) {
             throw new IllegalArgumentException("summary counts must be non-negative");
         }
     }
 
     public static MarketCapabilitySummary empty() {
-        return new MarketCapabilitySummary(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
+        return new MarketCapabilitySummary(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L);
     }
 }

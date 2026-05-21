@@ -570,6 +570,12 @@
             bboSampleCount: Number(row.bbo_sample_count || 0),
             tradeSampleCount: Number(row.trade_sample_count || 0),
             tickerSampleCount: Number(row.ticker_sample_count || 0),
+            bars24hCount: Number(row.bars_24h_count || row.history_bars_24h || 0),
+            trade24hCount: Number(row.trade_24h_count || 0),
+            quote24hCount: Number(row.quote_24h_count || 0),
+            lastEventTsMs: row.last_event_ts_ms == null ? null : Number(row.last_event_ts_ms),
+            liquidityRank: row.liquidity_rank == null ? null : Number(row.liquidity_rank),
+            displayEligible: row.display_eligible === true || row.eligible === true,
             sourceKind: row.source_kind || '-',
             catalogSource: row.catalog_source || 'catalog',
             synthetic: row.synthetic === true
@@ -682,8 +688,25 @@
 
     function sortMarketEntries(entries) {
         return entries.slice().sort((left, right) => {
-            if (left.chartable !== right.chartable) {
-                return left.chartable ? -1 : 1;
+            if (left.displayEligible !== right.displayEligible) {
+                return left.displayEligible ? -1 : 1;
+            }
+            const leftRank = Number(left.liquidityRank || 0);
+            const rightRank = Number(right.liquidityRank || 0);
+            if (leftRank > 0 && rightRank > 0 && leftRank !== rightRank) {
+                return leftRank - rightRank;
+            }
+            const barsDiff = Number(right.bars24hCount || 0) - Number(left.bars24hCount || 0);
+            if (barsDiff !== 0) {
+                return barsDiff;
+            }
+            const tradeDiff = Number(right.trade24hCount || 0) - Number(left.trade24hCount || 0);
+            if (tradeDiff !== 0) {
+                return tradeDiff;
+            }
+            const quoteDiff = Number(right.quote24hCount || 0) - Number(left.quote24hCount || 0);
+            if (quoteDiff !== 0) {
+                return quoteDiff;
             }
             if (left.chartable24h !== right.chartable24h) {
                 return left.chartable24h ? -1 : 1;
@@ -691,7 +714,8 @@
             if (left.hasQuote !== right.hasQuote) {
                 return left.hasQuote ? -1 : 1;
             }
-            const timeDiff = Number(right.quoteEventTsMs || 0) - Number(left.quoteEventTsMs || 0);
+            const timeDiff = Number(right.lastEventTsMs || right.quoteEventTsMs || 0)
+                - Number(left.lastEventTsMs || left.quoteEventTsMs || 0);
             if (timeDiff !== 0) {
                 return timeDiff;
             }
@@ -701,7 +725,7 @@
 
     function populateSymbolDropdown(entries, preferredSymbol) {
         dom.symbolSelect.innerHTML = '';
-        const selectable = entries.filter(entry => entry.chartable || entry.hasQuote);
+        const selectable = entries.filter(entry => entry.displayEligible || entry.chartable || entry.hasQuote);
         const dropdownEntries = selectable.length > 0 ? selectable : entries;
         if (dropdownEntries.length === 0) {
             const opt = document.createElement('option');
@@ -790,10 +814,17 @@
     }
 
     function marketCatalogStatusText(entry) {
-        return `${entry.status || '-'} / ${marketCapabilityLabel(entry)}`;
+        const rank = entry.liquidityRank ? `#${entry.liquidityRank}` : null;
+        const bars = entry.displayEligible ? `${formatCompactNumber(entry.bars24hCount || 0)} 24h bars` : null;
+        return [entry.status || '-', rank, marketCapabilityLabel(entry), bars]
+            .filter(Boolean)
+            .join(' / ');
     }
 
     function marketCapabilityLabel(entry) {
+        if (entry.displayEligible) {
+            return `${chartSourceLabel(entry.bestChartSource)} eligible`;
+        }
         if (entry.chartable1h) {
             return `${chartSourceLabel(entry.bestChartSource)} 1h`;
         }
@@ -836,6 +867,12 @@
         if (entry.bestChartSource) {
             parts.push(`chart source ${chartSourceLabel(entry.bestChartSource)}`);
         }
+        if (entry.bars24hCount != null) {
+            parts.push(`${formatCompactNumber(entry.bars24hCount)} 24h bars`);
+        }
+        if (entry.liquidityRank) {
+            parts.push(`rank ${entry.liquidityRank}`);
+        }
         if (entry.semanticStatus) {
             parts.push(`semantic ${entry.semanticStatus}`);
         }
@@ -852,12 +889,19 @@
             return;
         }
         const total = Number(summary.total_assets || 0);
+        const eligible = Number(summary.display_eligible_count || summary.eligible_count || 0);
+        const filteredOut = Number(summary.filtered_out_count || summary.excluded_count || 0);
+        const subscribed = Number(summary.subscribed_count || eligible);
+        const capped = Number(summary.capped_count || 0);
         const items = [
-            ['Total assets', total],
+            ['Catalog total', total],
+            ['Eligible', eligible],
+            ['Filtered <10 bars', filteredOut],
+            ['Subscribed', subscribed],
+            ['Remaining cap', capped],
             ['Chartable', summary.chartable_count],
             ['With quote', summary.quote_count],
-            ['Stale quote', summary.stale_quote_count],
-            ['Metadata only', summary.metadata_only_count]
+            ['Stale quote', summary.stale_quote_count]
         ];
         dom.marketCapabilitySummary.innerHTML = items.map(([label, value]) =>
             `<div class="capability-chip"><strong>${escapeHtml(formatCompactNumber(value || 0))}</strong>` +
@@ -875,20 +919,20 @@
                 '<div class="coverage-chip"><strong>-</strong><span>coverage unavailable</span></div>';
             return;
         }
-        const generated = Number(summary.semantic_generated_count || 0);
-        const missing = Number(summary.semantic_missing_count || 0);
-        const total = Number(summary.total_assets || 0);
+        const generated = Number(summary.semantic_eligible_generated_count || summary.semantic_generated_count || 0);
+        const missing = Number(summary.semantic_eligible_missing_count || summary.semantic_missing_count || 0);
+        const total = Number(summary.display_eligible_count || summary.eligible_count || summary.total_assets || 0);
         const review = Number(summary.semantic_review_required_count || 0);
         const failed = Number(summary.semantic_failed_count || 0);
         const rateLimited = Number(summary.semantic_rate_limited_count || 0);
         const items = [
-            ['Catalog assets', total],
+            ['Eligible assets', total],
             ['Generated', generated],
             ['Review', review],
             ['Failed', failed],
             ['Rate limited', rateLimited],
             ['Missing', missing],
-            ['Classified subset', generated]
+            ['Eligible generated', generated]
         ];
         dom.semanticCoverageSummary.innerHTML = items.map(([label, value]) =>
             `<div class="coverage-chip"><strong>${escapeHtml(formatCompactNumber(value || 0))}</strong>` +
@@ -1138,8 +1182,16 @@
         }
         const groupBy = body.group_by || dom.semanticGroupBy.value || 'sector';
         const coverageSuffix = marketCapabilitySummary
-            ? ` / classified ${formatCompactNumber(marketCapabilitySummary.semantic_generated_count || 0)}` +
-                ` of ${formatCompactNumber(marketCapabilitySummary.total_assets || 0)} catalog asset(s)`
+            ? ` / classified ${formatCompactNumber(
+                marketCapabilitySummary.semantic_eligible_generated_count
+                    || marketCapabilitySummary.semantic_generated_count
+                    || 0
+            )}` +
+                ` of ${formatCompactNumber(
+                    marketCapabilitySummary.display_eligible_count
+                        || marketCapabilitySummary.eligible_count
+                        || 0
+                )} eligible asset(s)`
             : '';
         renderSemanticGroupSummary(groups);
         const activeGroup = semanticActiveGroupKey

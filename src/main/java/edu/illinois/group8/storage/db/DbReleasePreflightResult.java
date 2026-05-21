@@ -17,6 +17,7 @@ public record DbReleasePreflightResult(
             "flyway_v013=success",
             "flyway_v014=success",
             "flyway_v015=success",
+            "flyway_v016=success",
             "canonical_replay_index=ok"
         );
     }

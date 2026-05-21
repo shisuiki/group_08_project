@@ -11,6 +11,7 @@ import java.util.Objects;
 
 public final class JdbcMarketCapabilityReader implements MarketCapabilityReader {
     static final long LIVE_QUOTE_STALE_AFTER_MS = 15_000L;
+    static final long DISPLAY_ELIGIBLE_MIN_HISTORY_BARS_24H = 10L;
     private static final String TABLE_NAME =
         "market_metadata + latest_market_state + market_feature_stats + market_semantic_metadata";
     private static final String CTE_SQL = """
@@ -61,6 +62,15 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                 coalesce(mfs.bbo_sample_count, 0) as bbo_sample_count,
                 coalesce(mfs.trade_sample_count, 0) as trade_sample_count,
                 coalesce(mfs.ticker_sample_count, 0) as ticker_sample_count,
+                coalesce(mfs.history_bars_24h_count, 0) as history_bars_24h_count,
+                coalesce(mfs.trade_24h_count, 0) as trade_24h_count,
+                coalesce(mfs.quote_24h_count, 0) as quote_24h_count,
+                case
+                    when mfs.latest_feature_event_ts_ms is not null and lms.last_event_ts_ms is not null
+                        then greatest(mfs.latest_feature_event_ts_ms, lms.last_event_ts_ms)
+                    else coalesce(mfs.latest_feature_event_ts_ms, lms.last_event_ts_ms)
+                end as last_event_ts_ms,
+                coalesce(mfs.display_eligible, false) as display_eligible,
                 (coalesce(mfs.bbo_chart_count, 0) > 0) as has_bbo_history,
                 (coalesce(mfs.bbo_chart_count, 0) > 0) as chartable_from_bbo,
                 (coalesce(mfs.ticker_chart_count, 0) > 0) as chartable_from_ticker_snapshot,
@@ -76,7 +86,7 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                     false
                 ) as chartable_1h,
                 coalesce(
-                    mfs.last_chart_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000),
+                    mfs.history_bars_24h_count > 0,
                     false
                 ) as chartable_24h,
                 (
@@ -90,7 +100,7 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                         false
                     ) then 'chartable_1h'
                     when coalesce(
-                        mfs.last_chart_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000),
+                        mfs.history_bars_24h_count > 0,
                         false
                     ) then 'chartable_24h'
                     when coalesce(mfs.bbo_chart_count, 0) > 0
@@ -127,6 +137,23 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
             left join market_semantic_metadata smm
                 on smm.market_ticker = u.market_ticker
                and smm.taxonomy_version = ?
+        ),
+        ranked as (
+            select
+                enriched.*,
+                case
+                    when display_eligible then row_number() over (
+                        partition by display_eligible
+                        order by
+                            history_bars_24h_count desc,
+                            trade_24h_count desc,
+                            quote_24h_count desc,
+                            last_event_ts_ms desc nulls last,
+                            market_ticker asc
+                    )
+                    else null
+                end as liquidity_rank
+            from enriched
         )
         """;
 
@@ -180,10 +207,18 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                       and not has_quote
                       and not chartable
                       and feature_count = 0
-                ) as metadata_only_count
-            from enriched
+                ) as metadata_only_count,
+                count(*) filter (where display_eligible) as display_eligible_count,
+                count(*) filter (where not display_eligible) as display_ineligible_count,
+                count(*) filter (
+                    where display_eligible and semantic_status = 'generated'
+                ) as semantic_eligible_generated_count,
+                count(*) filter (
+                    where display_eligible and semantic_status = 'missing'
+                ) as semantic_eligible_missing_count
+            from ranked
             """);
-        appendBaseWhere(sql, request, bindings);
+        appendBaseWhere(sql, request, bindings, false);
         return sql.toString();
     }
 
@@ -194,19 +229,24 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
             select
                 *,
                 count(*) over() as filtered_count
-            from enriched
+            from ranked
             """);
-        appendBaseWhere(sql, request, bindings);
+        appendBaseWhere(sql, request, bindings, true);
         appendCapabilityFilter(sql, request);
         sql.append("""
             order by
-                case when chartable_1h then 0
-                     when chartable_24h then 1
-                     when has_quote then 2
-                     when has_bbo_history then 3
-                     else 4
+                case when display_eligible then 0
+                     when chartable_1h then 1
+                     when chartable_24h then 2
+                     when has_quote then 3
+                     when has_bbo_history then 4
+                     else 5
                 end,
-                quote_event_ts_ms desc nulls last,
+                liquidity_rank asc nulls last,
+                history_bars_24h_count desc,
+                trade_24h_count desc,
+                quote_24h_count desc,
+                last_event_ts_ms desc nulls last,
                 market_ticker asc
             offset ? limit ?
             """);
@@ -235,7 +275,11 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                     longValue(resultSet, "semantic_failed_count"),
                     longValue(resultSet, "semantic_rate_limited_count"),
                     longValue(resultSet, "semantic_missing_count"),
-                    longValue(resultSet, "metadata_only_count")
+                    longValue(resultSet, "metadata_only_count"),
+                    longValue(resultSet, "display_eligible_count"),
+                    longValue(resultSet, "display_ineligible_count"),
+                    longValue(resultSet, "semantic_eligible_generated_count"),
+                    longValue(resultSet, "semantic_eligible_missing_count")
                 );
             }
         }
@@ -267,7 +311,8 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
     private static void appendBaseWhere(
         StringBuilder sql,
         MarketCapabilityReadRequest request,
-        List<Object> bindings
+        List<Object> bindings,
+        boolean applyDisplayEligibility
     ) {
         sql.append(" where 1 = 1");
         if (!request.includeSmoke()) {
@@ -298,13 +343,16 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
             sql.append(" and status = ?");
             bindings.add(request.status());
         }
+        if (applyDisplayEligibility && !request.includeIneligible()) {
+            sql.append(" and display_eligible\n");
+        }
     }
 
     private static void appendCapabilityFilter(StringBuilder sql, MarketCapabilityReadRequest request) {
         switch (request.capabilityFilter()) {
             case "all" -> {
             }
-            case "chart_ready" -> sql.append(" and chartable\n");
+            case "chart_ready" -> sql.append(" and display_eligible\n");
             case "quote_available" -> sql.append(" and has_quote\n");
             case "quote_only" -> sql.append(" and has_quote and not chartable\n");
             case "quote_stale" -> sql.append(" and quote_status = 'stale_quote'\n");
@@ -349,7 +397,13 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
             longValue(resultSet, "feature_count"),
             longValue(resultSet, "bbo_sample_count"),
             longValue(resultSet, "trade_sample_count"),
-            longValue(resultSet, "ticker_sample_count")
+            longValue(resultSet, "ticker_sample_count"),
+            longValue(resultSet, "history_bars_24h_count"),
+            longValue(resultSet, "trade_24h_count"),
+            longValue(resultSet, "quote_24h_count"),
+            longOrNull(resultSet, "last_event_ts_ms"),
+            longOrNull(resultSet, "liquidity_rank"),
+            resultSet.getBoolean("display_eligible")
         );
     }
 

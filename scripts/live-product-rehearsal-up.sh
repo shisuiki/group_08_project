@@ -393,7 +393,7 @@ elif [ -n "${KALSHI_MARKET_SERIES_TICKER:-}" ]; then
 else
     market_selection_mode="${KALSHI_MARKET_SELECTION_MODE:-open}"
 fi
-market_discovery_max="${KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-3}"
+market_discovery_max="${KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-20}"
 market_discovery_limit="${KALSHI_MARKET_DISCOVERY_LIMIT:-50}"
 
 compose_profile="${COMPOSE_PROFILE:-live-product-local-db}"

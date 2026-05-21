@@ -185,22 +185,27 @@ class UdfEndpointsTest {
         JsonNode body = getJson("/api/markets/capabilities?limit=10");
 
         assertEquals("ok", body.path("status").asText());
-        assertEquals(2, body.path("count").asInt());
-        assertEquals(2, body.path("total_count").asInt());
+        assertEquals(1, body.path("count").asInt());
+        assertEquals(1, body.path("total_count").asInt());
         JsonNode summary = body.path("summary");
-        assertEquals(2, summary.path("total_assets").asInt());
-        assertEquals(1, summary.path("chartable_count").asInt());
-        assertEquals(1, summary.path("quote_count").asInt());
-        assertEquals(2, summary.path("semantic_missing_count").asInt());
+        assertEquals(3, summary.path("total_assets").asInt());
+        assertEquals(1, summary.path("display_eligible_count").asInt());
+        assertEquals(2, summary.path("filtered_out_count").asInt());
+        assertEquals(2, summary.path("chartable_count").asInt());
+        assertEquals(2, summary.path("quote_count").asInt());
+        assertEquals(3, summary.path("semantic_missing_count").asInt());
         assertEquals(1, summary.path("metadata_only_count").asInt());
 
-        JsonNode market = findMarket(body.path("markets"), "MKT-1");
+        JsonNode market = findMarket(body.path("markets"), "MKT-ELIGIBLE");
         assertTrue(market.path("chartable").asBoolean());
         assertTrue(market.path("chartable_from_bbo").asBoolean());
         assertEquals("bbo", market.path("best_chart_source").asText());
         assertEquals("bbo_history_available", market.path("chart_reason").asText());
+        assertTrue(market.path("display_eligible").asBoolean());
+        assertTrue(market.path("bars_24h_count").asInt() >= 10);
 
-        JsonNode catalogOnly = findMarket(body.path("markets"), "MKT-META");
+        JsonNode rawCatalog = getJson("/api/markets/capabilities?include_ineligible=true&limit=10");
+        JsonNode catalogOnly = findMarket(rawCatalog.path("markets"), "MKT-META");
         assertFalse(catalogOnly.path("chartable").asBoolean());
         assertFalse(catalogOnly.path("has_quote").asBoolean());
         assertEquals("catalog_only", catalogOnly.path("chart_reason").asText());
@@ -209,7 +214,9 @@ class UdfEndpointsTest {
 
     @Test
     void marketCapabilitiesEndpointAppliesCapabilityFiltersAndOffset() throws Exception {
-        JsonNode metadataOnly = getJson("/api/markets/capabilities?capability=metadata_only&limit=1&offset=0");
+        JsonNode metadataOnly = getJson(
+            "/api/markets/capabilities?capability=metadata_only&include_ineligible=true&limit=1&offset=0"
+        );
 
         assertEquals(1, metadataOnly.path("count").asInt());
         assertEquals(1, metadataOnly.path("total_count").asInt());
@@ -219,7 +226,7 @@ class UdfEndpointsTest {
 
         JsonNode quoteAvailable = getJson("/api/markets/capabilities?capability=quote_available&limit=10");
         assertEquals(1, quoteAvailable.path("count").asInt());
-        assertEquals("MKT-1", quoteAvailable.path("markets").get(0).path("market_ticker").asText());
+        assertEquals("MKT-ELIGIBLE", quoteAvailable.path("markets").get(0).path("market_ticker").asText());
     }
 
     @Test
@@ -558,7 +565,7 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("layoutSemanticLeafTreemap"));
         assertTrue(js.body().contains("semanticRenderableLeaves"));
         assertTrue(js.body().contains("SEMANTIC_RENDER_LEAF_LIMIT"));
-        assertTrue(js.body().contains("Classified subset"));
+        assertTrue(js.body().contains("Eligible generated"));
         assertTrue(js.body().contains("semanticStatusFromCatalogStatus"));
         assertTrue(js.body().contains("nonChartableMessage"));
         assertTrue(js.body().contains("body.product_readiness"));
@@ -851,10 +858,10 @@ class UdfEndpointsTest {
         assertEquals(17L, body.path("feature_plant").path("events_out").asLong());
         assertTrue(body.path("store").path("sequence").asLong() > 0L);
         assertFalse(body.path("release").isMissingNode());
-        assertEquals(5_000L, body.path("data_freshness").path("latest_event_ts_ms").asLong());
-        assertEquals("MKT-1", body.path("data_freshness").path("symbol").asText());
+        assertTrue(body.path("data_freshness").path("latest_event_ts_ms").asLong() > 5_000L);
+        assertEquals("MKT-ELIGIBLE", body.path("data_freshness").path("symbol").asText());
         assertEquals("feature.bbo", body.path("data_freshness").path("feature_name").asText());
-        assertEquals("evt-5000", body.path("data_freshness").path("source_event_id").asText());
+        assertEquals("recent-evt-9", body.path("data_freshness").path("source_event_id").asText());
         assertEquals("live", body.path("data_freshness").path("source_kind").asText());
         assertFalse(body.path("data_freshness").path("synthetic").asBoolean());
         assertTrue(body.path("data_freshness").path("live_data_observed").asBoolean());
@@ -3126,6 +3133,22 @@ class UdfEndpointsTest {
                     "bid_price_micros", 450_000L + ts,
                     "ask_price_micros", 550_000L + ts,
                     "midpoint_micros", 500_000L + ts
+                )
+            ));
+        }
+        long start = System.currentTimeMillis() - 900_000L;
+        for (int index = 0; index < 10; index++) {
+            long ts = start + (index * 60_000L);
+            store.accept(new FeatureOutput(
+                FrontendFeatureStore.BBO_FEATURE,
+                FrontendFeatureStore.BBO_FEATURE,
+                "MKT-ELIGIBLE",
+                ts,
+                "recent-evt-" + index,
+                Map.of(
+                    "bid_price_micros", 450_000L + index,
+                    "ask_price_micros", 550_000L + index,
+                    "midpoint_micros", 500_000L + index
                 )
             ));
         }

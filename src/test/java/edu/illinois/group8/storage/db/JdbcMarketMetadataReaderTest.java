@@ -109,18 +109,22 @@ class JdbcMarketMetadataReaderTest {
         RecordingJdbc jdbc = new RecordingJdbc(List.of());
         JdbcMarketMetadataReader reader = new JdbcMarketMetadataReader(jdbc::openConnection);
 
-        reader.read(MarketMetadataReadRequest.searchWithoutGenerated("SERIES-1", "open", 5, " tax-v1 "));
+        reader.read(MarketMetadataReadRequest.searchWithoutGenerated("SERIES-1", "open", 5, " tax-v1 ")
+            .withEligibleOnly());
 
         String sql = jdbc.preparedSql.toLowerCase(Locale.ROOT);
         assertTrue(sql.contains("not exists"));
         assertTrue(sql.contains("from market_semantic_metadata smm"));
         assertTrue(sql.contains("smm.status = 'generated'"));
+        assertTrue(sql.contains("from market_feature_stats mfs"));
+        assertTrue(sql.contains("mfs.display_eligible"));
+        assertTrue(sql.contains("mfs.history_bars_24h_count"));
         assertEquals(List.of("SERIES-1", "open", "tax-v1", 5), jdbc.bindings);
     }
 
     @Test
     void requestNormalizesBlankFiltersAndRejectsInvalidLimit() {
-        MarketMetadataReadRequest request = new MarketMetadataReadRequest(" ", " SERIES-1 ", " ", 10, " ");
+        MarketMetadataReadRequest request = new MarketMetadataReadRequest(" ", " SERIES-1 ", " ", 10, " ", false);
 
         assertEquals(null, request.marketTicker());
         assertEquals("SERIES-1", request.seriesTicker());
@@ -128,7 +132,7 @@ class JdbcMarketMetadataReaderTest {
         assertEquals(10, request.maxRows());
         assertThrows(
             IllegalArgumentException.class,
-            () -> new MarketMetadataReadRequest(null, null, null, 0, null)
+            () -> new MarketMetadataReadRequest(null, null, null, 0, null, false)
         );
         assertThrows(
             IllegalArgumentException.class,

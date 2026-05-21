@@ -14,7 +14,36 @@ import java.util.Objects;
 public final class JdbcMarketFeatureStatsStore {
     static final int DEFAULT_REFRESH_LIMIT = 1_000;
     static final int MAX_REFRESH_LIMIT = 10_000;
+    static final long DISPLAY_HISTORY_WINDOW_MS = 86_400_000L;
+    static final long DISPLAY_HISTORY_BUCKET_MS = 60_000L;
+    static final long DISPLAY_ELIGIBLE_MIN_HISTORY_BARS = 10L;
     private static final String TABLE_NAME = "market_feature_stats";
+    private static final String BBO_CHART_PREDICATE = bboChartPredicate("fo");
+    private static final String TICKER_CHART_PREDICATE = tickerChartPredicate("fo");
+    private static final String TRADE_CHART_PREDICATE = tradeChartPredicate("fo");
+    private static final String BBO_BARS_24H_EXPRESSION = bars24hExpression(BBO_CHART_PREDICATE);
+    private static final String TICKER_BARS_24H_EXPRESSION = bars24hExpression(TICKER_CHART_PREDICATE);
+    private static final String TRADE_BARS_24H_EXPRESSION = bars24hExpression(TRADE_CHART_PREDICATE);
+    private static final String BBO_24H_COUNT_EXPRESSION = samples24hExpression("fo.feature_name = 'feature.bbo'");
+    private static final String TICKER_24H_COUNT_EXPRESSION =
+        samples24hExpression("fo.feature_name = 'feature.ticker_snapshot'");
+    private static final String TRADE_24H_COUNT_EXPRESSION =
+        samples24hExpression("fo.feature_name = 'feature.trade_tape'");
+    private static final String HISTORY_BARS_24H_EXPRESSION = """
+                case
+                    when %s > 0 then %s
+                    when %s > 0 then %s
+                    when %s > 0 then %s
+                    else 0
+                end
+        """.formatted(
+            BBO_BARS_24H_EXPRESSION,
+            BBO_BARS_24H_EXPRESSION,
+            TICKER_BARS_24H_EXPRESSION,
+            TICKER_BARS_24H_EXPRESSION,
+            TRADE_BARS_24H_EXPRESSION,
+            TRADE_BARS_24H_EXPRESSION
+        );
     private static final String STATS_SELECT_COLUMNS = """
                 fo.market_ticker,
                 count(*) as feature_count,
@@ -24,6 +53,15 @@ public final class JdbcMarketFeatureStatsStore {
                 count(*) filter (where %s) as bbo_chart_count,
                 count(*) filter (where %s) as ticker_chart_count,
                 count(*) filter (where %s) as trade_chart_count,
+                %s as bbo_bars_24h_count,
+                %s as ticker_bars_24h_count,
+                %s as trade_bars_24h_count,
+                %s as history_bars_24h_count,
+                %s as bbo_24h_count,
+                %s as ticker_24h_count,
+                %s as trade_24h_count,
+                (%s + %s) as quote_24h_count,
+                (%s) >= %d as display_eligible,
                 min(event_ts_ms) filter (where %s) as bbo_first_chart_ts_ms,
                 max(event_ts_ms) filter (where %s) as bbo_last_chart_ts_ms,
                 min(event_ts_ms) filter (where %s) as ticker_first_chart_ts_ms,
@@ -34,21 +72,32 @@ public final class JdbcMarketFeatureStatsStore {
                 max(event_ts_ms) filter (where %s or %s or %s) as last_chart_ts_ms,
                 max(event_ts_ms) as latest_feature_event_ts_ms
         """.formatted(
-            bboChartPredicate("fo"),
-            tickerChartPredicate("fo"),
-            tradeChartPredicate("fo"),
-            bboChartPredicate("fo"),
-            bboChartPredicate("fo"),
-            tickerChartPredicate("fo"),
-            tickerChartPredicate("fo"),
-            tradeChartPredicate("fo"),
-            tradeChartPredicate("fo"),
-            bboChartPredicate("fo"),
-            tickerChartPredicate("fo"),
-            tradeChartPredicate("fo"),
-            bboChartPredicate("fo"),
-            tickerChartPredicate("fo"),
-            tradeChartPredicate("fo")
+            BBO_CHART_PREDICATE,
+            TICKER_CHART_PREDICATE,
+            TRADE_CHART_PREDICATE,
+            BBO_BARS_24H_EXPRESSION,
+            TICKER_BARS_24H_EXPRESSION,
+            TRADE_BARS_24H_EXPRESSION,
+            HISTORY_BARS_24H_EXPRESSION,
+            BBO_24H_COUNT_EXPRESSION,
+            TICKER_24H_COUNT_EXPRESSION,
+            TRADE_24H_COUNT_EXPRESSION,
+            BBO_24H_COUNT_EXPRESSION,
+            TICKER_24H_COUNT_EXPRESSION,
+            HISTORY_BARS_24H_EXPRESSION,
+            DISPLAY_ELIGIBLE_MIN_HISTORY_BARS,
+            BBO_CHART_PREDICATE,
+            BBO_CHART_PREDICATE,
+            TICKER_CHART_PREDICATE,
+            TICKER_CHART_PREDICATE,
+            TRADE_CHART_PREDICATE,
+            TRADE_CHART_PREDICATE,
+            BBO_CHART_PREDICATE,
+            TICKER_CHART_PREDICATE,
+            TRADE_CHART_PREDICATE,
+            BBO_CHART_PREDICATE,
+            TICKER_CHART_PREDICATE,
+            TRADE_CHART_PREDICATE
         );
     static final String REFRESH_BATCH_SQL = """
         with candidate_markets as (
@@ -79,6 +128,15 @@ public final class JdbcMarketFeatureStatsStore {
             bbo_chart_count,
             ticker_chart_count,
             trade_chart_count,
+            bbo_bars_24h_count,
+            ticker_bars_24h_count,
+            trade_bars_24h_count,
+            history_bars_24h_count,
+            bbo_24h_count,
+            ticker_24h_count,
+            trade_24h_count,
+            quote_24h_count,
+            display_eligible,
             bbo_first_chart_ts_ms,
             bbo_last_chart_ts_ms,
             ticker_first_chart_ts_ms,
@@ -99,6 +157,15 @@ public final class JdbcMarketFeatureStatsStore {
             bbo_chart_count,
             ticker_chart_count,
             trade_chart_count,
+            bbo_bars_24h_count,
+            ticker_bars_24h_count,
+            trade_bars_24h_count,
+            history_bars_24h_count,
+            bbo_24h_count,
+            ticker_24h_count,
+            trade_24h_count,
+            quote_24h_count,
+            display_eligible,
             bbo_first_chart_ts_ms,
             bbo_last_chart_ts_ms,
             ticker_first_chart_ts_ms,
@@ -118,6 +185,15 @@ public final class JdbcMarketFeatureStatsStore {
             bbo_chart_count = excluded.bbo_chart_count,
             ticker_chart_count = excluded.ticker_chart_count,
             trade_chart_count = excluded.trade_chart_count,
+            bbo_bars_24h_count = excluded.bbo_bars_24h_count,
+            ticker_bars_24h_count = excluded.ticker_bars_24h_count,
+            trade_bars_24h_count = excluded.trade_bars_24h_count,
+            history_bars_24h_count = excluded.history_bars_24h_count,
+            bbo_24h_count = excluded.bbo_24h_count,
+            ticker_24h_count = excluded.ticker_24h_count,
+            trade_24h_count = excluded.trade_24h_count,
+            quote_24h_count = excluded.quote_24h_count,
+            display_eligible = excluded.display_eligible,
             bbo_first_chart_ts_ms = excluded.bbo_first_chart_ts_ms,
             bbo_last_chart_ts_ms = excluded.bbo_last_chart_ts_ms,
             ticker_first_chart_ts_ms = excluded.ticker_first_chart_ts_ms,
@@ -265,5 +341,22 @@ public final class JdbcMarketFeatureStatsStore {
             + " and " + alias + ".event_ts_ms is not null"
             + " and (jsonb_exists(" + alias + ".\"values\", 'yes_price_micros')"
             + " or jsonb_exists(" + alias + ".\"values\", 'no_price_micros'))";
+    }
+
+    private static String bars24hExpression(String predicate) {
+        return "count(distinct (fo.event_ts_ms / " + DISPLAY_HISTORY_BUCKET_MS + ")) filter (where "
+            + predicate
+            + " and fo.event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - "
+            + DISPLAY_HISTORY_WINDOW_MS + ")"
+            + " and fo.event_ts_ms <= (extract(epoch from now()) * 1000)::bigint)";
+    }
+
+    private static String samples24hExpression(String predicate) {
+        return "count(*) filter (where "
+            + predicate
+            + " and fo.event_ts_ms is not null"
+            + " and fo.event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - "
+            + DISPLAY_HISTORY_WINDOW_MS + ")"
+            + " and fo.event_ts_ms <= (extract(epoch from now()) * 1000)::bigint)";
     }
 }

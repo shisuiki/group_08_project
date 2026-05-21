@@ -42,6 +42,24 @@ class JdbcMarketFeatureStatsStoreTest {
     }
 
     @Test
+    void displayEligibilityMigrationAddsRankedBarColumns() throws Exception {
+        String sql = migrationSql("db/migration/V016__market_feature_stats_display_eligibility.sql")
+            .toLowerCase(Locale.ROOT);
+
+        assertTrue(sql.contains("bbo_bars_24h_count bigint not null default 0"));
+        assertTrue(sql.contains("ticker_bars_24h_count bigint not null default 0"));
+        assertTrue(sql.contains("trade_bars_24h_count bigint not null default 0"));
+        assertTrue(sql.contains("history_bars_24h_count bigint not null default 0"));
+        assertTrue(sql.contains("trade_24h_count bigint not null default 0"));
+        assertTrue(sql.contains("quote_24h_count bigint not null default 0"));
+        assertTrue(sql.contains("display_eligible boolean not null default false"));
+        assertTrue(sql.contains("market_feature_stats_display_rank_idx"));
+        assertTrue(sql.contains("update market_feature_stats mfs"));
+        assertTrue(sql.contains("from feature_outputs fo"));
+        assertTrue(sql.contains("display_eligible = rankable.history_bars_24h_count >= 10"));
+    }
+
+    @Test
     void refreshBatchUsesBoundedFeatureOutputsAggregateAndTimestampFenceFields() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc(List.of("M1", "M2"));
 
@@ -66,6 +84,10 @@ class JdbcMarketFeatureStatsStoreTest {
         assertTrue(sql.contains("jsonb_exists(fo.\"values\", 'yes_ask_micros')"));
         assertTrue(sql.contains("jsonb_exists(fo.\"values\", 'yes_price_micros')"));
         assertTrue(sql.contains("jsonb_exists(fo.\"values\", 'no_price_micros')"));
+        assertTrue(sql.contains("history_bars_24h_count"));
+        assertTrue(sql.contains("display_eligible"));
+        assertTrue(sql.contains("fo.event_ts_ms / 60000"));
+        assertTrue(sql.contains("- 86400000"));
         assertEquals("M0", jdbc.parameters.get(1));
         assertEquals("M0", jdbc.parameters.get(2));
         assertEquals(5, jdbc.parameters.get(3));
@@ -135,10 +157,14 @@ class JdbcMarketFeatureStatsStoreTest {
     }
 
     private static String migrationSql() throws Exception {
+        return migrationSql("db/migration/V015__market_feature_stats.sql");
+    }
+
+    private static String migrationSql(String resource) throws Exception {
         try (InputStream inputStream = JdbcMarketFeatureStatsStoreTest.class.getClassLoader()
-            .getResourceAsStream("db/migration/V015__market_feature_stats.sql")) {
+            .getResourceAsStream(resource)) {
             if (inputStream == null) {
-                throw new IllegalStateException("missing V015 migration");
+                throw new IllegalStateException("missing migration " + resource);
             }
             return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
         }

@@ -320,7 +320,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("STREAM_TAP_HOST_PORT=\"$streamtap_port\""));
         assertTrue(script.contains("KALSHI_KEY_HOST_PATH"));
         assertTrue(script.contains("require_readable_file KALSHI_KEY_HOST_PATH"));
-        assertTrue(script.contains("KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-3"));
+        assertTrue(script.contains("KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-20"));
         assertTrue(script.contains("KALSHI_MARKET_DISCOVERY_LIMIT:-50"));
         assertTrue(script.contains("market_selection_mode=\"${KALSHI_MARKET_SELECTION_MODE:-open}\""));
         assertTrue(script.contains("DB_WRITER_ENABLED=\"${DB_WRITER_ENABLED:-true}\""));
@@ -430,6 +430,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("observed_before_baseline=true"));
         assertTrue(script.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED"));
         assertTrue(script.contains("check_product_browser_ui"));
+        assertTrue(script.contains("check_top_eligible_history"));
+        assertTrue(script.contains("/api/markets/capabilities?limit=20"));
+        assertTrue(script.contains("/datafeed/history?symbol=${encoded_market}&resolution=1"));
+        assertTrue(script.contains("PASS product_universe_chartable"));
         assertTrue(probe.contains("insert into canonical_events"));
         assertTrue(probe.contains("on conflict do nothing"));
         assertTrue(probe.contains("featureplant_cursors"));
@@ -957,7 +961,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("applyRoleVisibility"));
         assertTrue(app.contains("dataFreshnessBadgeText"));
         assertTrue(app.contains("layoutSemanticLeafTreemap"));
-        assertTrue(app.contains("Classified subset"));
+        assertTrue(app.contains("Eligible generated"));
         assertTrue(app.contains("semanticRenderableLeaves"));
         assertTrue(app.contains("SEMANTIC_RENDER_LEAF_LIMIT"));
         assertTrue(app.contains("semantic-run-from-catalog"));
@@ -1120,7 +1124,7 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(workflow.contains("RUN_LIVE_PRODUCT_SMOKE: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_smoke) || 'false' }}"));
         assertTrue(workflow.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_live_product_browser_smoke) || vars.LIVE_PRODUCT_BROWSER_SMOKE_ENABLED || 'false' }}"));
         assertTrue(workflow.contains("REQUIRE_LIVE_PRODUCT_DATA: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.require_live_product_data) || 'false' }}"));
-        assertTrue(workflow.contains("LIVE_PRODUCT_SMOKE_MAX_MARKETS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_smoke_max_markets) || vars.LIVE_PRODUCT_SMOKE_MAX_MARKETS || '3' }}"));
+        assertTrue(workflow.contains("LIVE_PRODUCT_SMOKE_MAX_MARKETS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_smoke_max_markets) || vars.LIVE_PRODUCT_SMOKE_MAX_MARKETS || '20' }}"));
         assertTrue(workflow.contains("LIVE_PRODUCT_LOAD_STRESS_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.live_product_load_stress_rehearsal) || vars.LIVE_PRODUCT_LOAD_STRESS_REHEARSAL || 'false' }}"));
         assertTrue(workflow.contains("LIVE_PRODUCT_REHEARSAL_ARTIFACT_NAME: live-product-rehearsal-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"));
         assertTrue(workflow.contains("LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED: ${{ vars.LIVE_PRODUCT_SEMANTIC_SMOKE_ENABLED || 'true' }}"));
