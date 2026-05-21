@@ -10,6 +10,7 @@ import java.util.Objects;
 
 public final class JdbcReplayDemoStatusReader {
     public static final String DEFAULT_REPLAY_ID = "demo-db-primary-long-replay";
+    static final int QUERY_TIMEOUT_SECONDS = 2;
 
     static final String STATUS_SQL = """
         with replay_events as (
@@ -63,6 +64,7 @@ public final class JdbcReplayDemoStatusReader {
         String normalizedReplayId = normalizeReplayId(replayId);
         try (Connection connection = connectionFactory.openConnection();
              PreparedStatement statement = connection.prepareStatement(STATUS_SQL)) {
+            statement.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
             statement.setString(1, normalizedReplayId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {

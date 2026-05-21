@@ -7,6 +7,8 @@ import java.sql.SQLException;
 import java.util.Objects;
 
 public final class JdbcOperatorLatencyReader {
+    static final int QUERY_TIMEOUT_SECONDS = 2;
+
     static final String LATENCY_SQL = """
         with canonical as (
             select
@@ -80,6 +82,7 @@ public final class JdbcOperatorLatencyReader {
         String normalizedSourceEventId = normalize(sourceEventId);
         try (Connection connection = connectionFactory.openConnection();
              PreparedStatement statement = connection.prepareStatement(LATENCY_SQL)) {
+            statement.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
             statement.setString(1, normalizedSourceEventId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {

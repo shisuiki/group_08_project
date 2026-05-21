@@ -40,6 +40,7 @@ class JdbcOperatorLatencyReaderTest {
         assertTrue(sql.contains("from feature_outputs"));
         assertTrue(sql.contains("from latest_market_state"));
         assertEquals("evt-1", jdbc.parameters.get(1));
+        assertEquals(JdbcOperatorLatencyReader.QUERY_TIMEOUT_SECONDS, jdbc.queryTimeoutSeconds);
         assertEquals("ok", status.status());
         assertEquals("evt-1", status.sourceEventId());
         assertEquals("MKT", status.marketTicker());
@@ -108,6 +109,7 @@ class JdbcOperatorLatencyReaderTest {
         private final Map<Integer, Object> parameters = new HashMap<>();
         private int rowIndex = -1;
         private String preparedSql;
+        private int queryTimeoutSeconds;
         private boolean failExecuteQuery;
 
         private RecordingJdbc(List<Map<String, Object>> rows) {
@@ -145,6 +147,10 @@ class JdbcOperatorLatencyReaderTest {
             return switch (method.getName()) {
                 case "setString" -> {
                     parameters.put((Integer) args[0], args[1]);
+                    yield null;
+                }
+                case "setQueryTimeout" -> {
+                    queryTimeoutSeconds = (Integer) args[0];
                     yield null;
                 }
                 case "executeQuery" -> {

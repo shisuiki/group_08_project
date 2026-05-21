@@ -46,11 +46,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -76,6 +81,8 @@ public class FrontendAdapterServer {
     private static final long DISPLAY_ELIGIBLE_WINDOW_MS = 86_400_000L;
     private static final long DISPLAY_ELIGIBLE_MIN_BARS_24H = 10L;
     private static final int DB_HISTORY_MAX_ROWS = 10_000;
+    private static final long OPTIONAL_STATUS_TIMEOUT_MS = 250L;
+    private static final long OPTIONAL_STATUS_CACHE_TTL_MS = 2_000L;
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
         "metrics.html",
@@ -127,6 +134,13 @@ public class FrontendAdapterServer {
     private final LongAdder quoteStreamRejected = new LongAdder();
     private final AtomicLong quoteStreamActiveStreams = new AtomicLong();
     private final Semaphore quoteStreamSlots = new Semaphore(QUOTE_STREAM_MAX_STREAMS);
+    private final ExecutorService optionalStatusExecutor = Executors.newFixedThreadPool(
+        4,
+        daemonThreadFactory("frontend-adapter-optional-status")
+    );
+    private final AsyncStatusCache<OperatorPipelineStatus> operatorPipelineStatusCache = new AsyncStatusCache<>();
+    private final AsyncStatusCache<OperatorSemanticMetadataStatus> semanticMetadataStatusCache = new AsyncStatusCache<>();
+    private final AsyncStatusCache<ReplayDemoStatus> replayDemoStatusCache = new AsyncStatusCache<>();
     private final long startedAtMs = System.currentTimeMillis();
     private HttpServer httpServer;
     private ExecutorService httpExecutor;
@@ -631,6 +645,7 @@ public class FrontendAdapterServer {
             httpExecutor.shutdownNow();
             httpExecutor = null;
         }
+        optionalStatusExecutor.shutdownNow();
         semanticMetadataOperator.close();
         catalogSyncOperator.close();
         demoOrchestrator.close();
@@ -1288,9 +1303,9 @@ public class FrontendAdapterServer {
         fp.put("errors", stats.errors());
         health.put("feature_plant", fp);
         health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
-        health.put("operator_pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
-        health.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
-        health.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
+        health.put("operator_pipeline", operatorPipelineStatusBody(cachedOperatorPipelineStatus()));
+        health.put("semantic_metadata", semanticMetadataStatusBody(cachedSemanticMetadataStatus()));
+        health.put("replay_demo", replayDemoStatusBody(cachedReplayDemoStatus()));
         writeJson(exchange, 200, health);
     }
 
@@ -1314,22 +1329,25 @@ public class FrontendAdapterServer {
         }
         Map<String, String> params = parseQuery(exchange.getRequestURI());
         String sourceEventId = params.getOrDefault("source_event_id", "").trim();
+        boolean defaultSourceEvent = sourceEventId.isBlank();
+        FrontendFeatureStore.DataFreshness freshness = null;
         if (sourceEventId.isBlank()) {
-            sourceEventId = store.latestFreshness(System.currentTimeMillis()).sourceEventId();
+            freshness = store.latestFreshness(System.currentTimeMillis());
+            sourceEventId = freshness.sourceEventId();
         }
         OperatorLatencyStatus latency;
         if (sourceEventId == null || sourceEventId.isBlank()) {
             latency = OperatorLatencyStatus.missing("", "missing_source_event_id");
         } else {
-            try {
-                latency = operatorLatencyStatus.apply(sourceEventId);
-            } catch (IllegalArgumentException e) {
-                latency = OperatorLatencyStatus.missing(sourceEventId, e.getMessage());
-            } catch (RuntimeException e) {
-                latency = OperatorLatencyStatus.unavailable(sourceEventId, e.getMessage());
-            }
+            latency = readOperatorLatencyBounded(sourceEventId, defaultSourceEvent);
         }
         Map<String, Object> body = operatorLatencyStatusBody(latency);
+        if (defaultSourceEvent && freshness != null && !"ok".equals(latency.status())) {
+            body.put("fallback_source", "latest_state_freshness");
+            body.put("latest_state_age_ms", freshness.latestEventAgeMs());
+            body.put("latest_state_source_event_id", freshness.sourceEventId());
+            body.put("store_sequence", freshness.storeSequence());
+        }
         body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
         writeJson(exchange, 200, body);
     }
@@ -1366,13 +1384,13 @@ public class FrontendAdapterServer {
         body.put("release", releaseInfo.toBody());
         body.put("runtime", runtimeStatusBody());
         body.put("configuration", operatorControlPlane.configurationStatus());
-        body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
+        body.put("pipeline", operatorPipelineStatusBody(cachedOperatorPipelineStatus()));
         body.put("catalog_sync", catalogSyncOperator.statusBody());
         body.put("catalog_sync_run", catalogSyncOperator.statusBody());
-        body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
+        body.put("semantic_metadata", semanticMetadataStatusBody(cachedSemanticMetadataStatus()));
         body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
         body.put("demo_orchestrator", demoOrchestrator.statusBody());
-        body.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
+        body.put("replay_demo", replayDemoStatusBody(cachedReplayDemoStatus()));
         body.put("data_freshness", dataFreshnessBody(freshness));
         body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
         body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
@@ -1531,9 +1549,9 @@ public class FrontendAdapterServer {
         body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
         body.put("quote_updates", quoteUpdatesBody());
         body.put("quote_streams", quoteStreamsBody());
-        body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
-        body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
-        body.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
+        body.put("pipeline", operatorPipelineStatusBody(cachedOperatorPipelineStatus()));
+        body.put("semantic_metadata", semanticMetadataStatusBody(cachedSemanticMetadataStatus()));
+        body.put("replay_demo", replayDemoStatusBody(cachedReplayDemoStatus()));
         body.put("catalog_sync", catalogSyncOperator.statusBody());
         body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
         body.put("market_metadata", Map.of(
@@ -1738,6 +1756,67 @@ public class FrontendAdapterServer {
                 : status;
         } catch (RuntimeException e) {
             return ReplayDemoStatus.unavailable(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID, e.getMessage());
+        }
+    }
+
+    private OperatorPipelineStatus cachedOperatorPipelineStatus() {
+        return operatorPipelineStatusCache.get(
+            operatorPipelineStatus,
+            reason -> OperatorPipelineStatus.unavailable(config.featurePlantCursorName(), reason),
+            optionalStatusExecutor,
+            OPTIONAL_STATUS_TIMEOUT_MS,
+            OPTIONAL_STATUS_CACHE_TTL_MS
+        );
+    }
+
+    private OperatorSemanticMetadataStatus cachedSemanticMetadataStatus() {
+        return semanticMetadataStatusCache.get(
+            operatorSemanticMetadataStatus,
+            reason -> OperatorSemanticMetadataStatus.unavailable(
+                config.llmMetadataModel(),
+                config.llmMetadataFallbackModel(),
+                config.llmMetadataTaxonomyVersion(),
+                reason
+            ),
+            optionalStatusExecutor,
+            OPTIONAL_STATUS_TIMEOUT_MS,
+            OPTIONAL_STATUS_CACHE_TTL_MS
+        );
+    }
+
+    private ReplayDemoStatus cachedReplayDemoStatus() {
+        return replayDemoStatusCache.get(
+            this::currentReplayDemoStatus,
+            reason -> ReplayDemoStatus.unavailable(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID, reason),
+            optionalStatusExecutor,
+            OPTIONAL_STATUS_TIMEOUT_MS,
+            OPTIONAL_STATUS_CACHE_TTL_MS
+        );
+    }
+
+    private OperatorLatencyStatus readOperatorLatencyBounded(String sourceEventId, boolean defaultSourceEvent) {
+        CompletableFuture<OperatorLatencyStatus> future = CompletableFuture.supplyAsync(
+            () -> operatorLatencyStatus.apply(sourceEventId),
+            optionalStatusExecutor
+        );
+        try {
+            return future.get(OPTIONAL_STATUS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return defaultSourceEvent
+                ? OperatorLatencyStatus.missing(sourceEventId, "latency_reader_timeout")
+                : OperatorLatencyStatus.unavailable(sourceEventId, "latency_reader_timeout");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return OperatorLatencyStatus.unavailable(sourceEventId, "latency_reader_interrupted");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IllegalArgumentException) {
+                return OperatorLatencyStatus.missing(sourceEventId, cause.getMessage());
+            }
+            return OperatorLatencyStatus.unavailable(sourceEventId, errorMessage(cause));
+        } catch (RuntimeException e) {
+            return OperatorLatencyStatus.unavailable(sourceEventId, e.getMessage());
         }
     }
 
@@ -2215,6 +2294,14 @@ public class FrontendAdapterServer {
 
     private static String operatorVisibleError(String message) {
         return OperatorRedactor.redact(message);
+    }
+
+    private static String errorMessage(Throwable error) {
+        if (error == null) {
+            return "status_unavailable";
+        }
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
     }
 
     private static Map<String, Object> dataFreshnessBody(FrontendFeatureStore.DataFreshness freshness) {
@@ -2995,6 +3082,70 @@ public class FrontendAdapterServer {
 
     private static Supplier<ReplayDemoStatus> defaultReplayDemoStatusSupplier() {
         return () -> ReplayDemoStatus.disabled(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID);
+    }
+
+    private static final class AsyncStatusCache<T> {
+        private final AtomicReference<CachedStatus<T>> cached = new AtomicReference<>();
+        private final AtomicReference<CompletableFuture<T>> refresh = new AtomicReference<>();
+
+        private T get(
+            Supplier<T> supplier,
+            Function<String, T> fallback,
+            ExecutorService executor,
+            long timeoutMs,
+            long cacheTtlMs
+        ) {
+            long nowMs = System.currentTimeMillis();
+            CachedStatus<T> currentCached = cached.get();
+            if (currentCached != null && nowMs - currentCached.updatedAtMs() <= cacheTtlMs) {
+                return currentCached.value();
+            }
+            CompletableFuture<T> currentRefresh = scheduleRefreshIfNeeded(supplier, executor);
+            currentCached = cached.get();
+            if (currentCached != null) {
+                return currentCached.value();
+            }
+            try {
+                T value = currentRefresh.get(timeoutMs, TimeUnit.MILLISECONDS);
+                return value == null ? fallback.apply("status_unavailable") : value;
+            } catch (TimeoutException e) {
+                return fallback.apply("status_timeout");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return fallback.apply("status_interrupted");
+            } catch (ExecutionException e) {
+                return fallback.apply(errorMessage(e.getCause()));
+            } catch (RuntimeException e) {
+                return fallback.apply(errorMessage(e));
+            }
+        }
+
+        private CompletableFuture<T> scheduleRefreshIfNeeded(Supplier<T> supplier, ExecutorService executor) {
+            CompletableFuture<T> current = refresh.get();
+            if (current != null && !current.isDone()) {
+                return current;
+            }
+            CompletableFuture<T> next = new CompletableFuture<>();
+            if (!refresh.compareAndSet(current, next)) {
+                CompletableFuture<T> raced = refresh.get();
+                return raced == null ? next : raced;
+            }
+            CompletableFuture.supplyAsync(supplier, executor).whenComplete((value, error) -> {
+                if (error == null && value != null) {
+                    cached.set(new CachedStatus<>(value, System.currentTimeMillis()));
+                    next.complete(value);
+                } else {
+                    next.completeExceptionally(error == null
+                        ? new IllegalStateException("status supplier returned null")
+                        : error);
+                }
+                refresh.compareAndSet(next, null);
+            });
+            return next;
+        }
+    }
+
+    private record CachedStatus<T>(T value, long updatedAtMs) {
     }
 
     private static ThreadFactory daemonThreadFactory(String prefix) {

@@ -42,6 +42,7 @@ class JdbcReplayDemoStatusReaderTest {
         assertTrue(sql.contains("from feature_outputs"));
         assertTrue(sql.contains("from latest_market_state"));
         assertEquals(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID, jdbc.parameters.get(1));
+        assertEquals(JdbcReplayDemoStatusReader.QUERY_TIMEOUT_SECONDS, jdbc.queryTimeoutSeconds);
         assertEquals("empty", status.status());
         assertEquals(0L, status.marketCount());
         assertEquals(0L, status.canonicalEventCount());
@@ -116,6 +117,7 @@ class JdbcReplayDemoStatusReaderTest {
         private final Map<Integer, Object> parameters = new HashMap<>();
         private int rowIndex = -1;
         private String preparedSql;
+        private int queryTimeoutSeconds;
         private boolean failExecuteQuery;
 
         private RecordingJdbc(List<Map<String, Object>> rows) {
@@ -153,6 +155,10 @@ class JdbcReplayDemoStatusReaderTest {
             return switch (method.getName()) {
                 case "setString" -> {
                     parameters.put((Integer) args[0], args[1]);
+                    yield null;
+                }
+                case "setQueryTimeout" -> {
+                    queryTimeoutSeconds = (Integer) args[0];
                     yield null;
                 }
                 case "executeQuery" -> {

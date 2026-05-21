@@ -47,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1178,6 +1179,89 @@ class UdfEndpointsTest {
         assertEquals("missing", latency.path("status").asText());
         assertEquals("missing_source_event_id", latency.path("reason").asText());
         assertTrue(latency.path("canonical_commit_seq").isNull());
+    }
+
+    @Test
+    void healthAndOperatorStatusBoundSlowOptionalStatusSuppliers() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        Supplier<OperatorPipelineStatus> slowPipeline = () -> {
+            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(5));
+            return new OperatorPipelineStatus("ok", "cursor", 1L, 1L, 0L, 1L, 1L, null);
+        };
+        Supplier<OperatorSemanticMetadataStatus> slowSemantic = () -> {
+            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(5));
+            return OperatorSemanticMetadataStatus.disabled("m", "f", "tax");
+        };
+        Supplier<ReplayDemoStatus> slowReplay = () -> {
+            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(5));
+            return ReplayDemoStatus.disabled("demo");
+        };
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            slowPipeline,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            slowSemantic,
+            request -> List.of(),
+            slowReplay,
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        long startNs = System.nanoTime();
+        JsonNode health = getJson("/health");
+        JsonNode operator = getJson("/operator/status");
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+
+        assertTrue(elapsedMs < 2_500L, "optional status calls should be bounded, elapsedMs=" + elapsedMs);
+        assertEquals("unavailable", health.path("operator_pipeline").path("status").asText());
+        assertEquals("status_timeout", health.path("operator_pipeline").path("error").asText());
+        assertEquals("unavailable", health.path("semantic_metadata").path("status").asText());
+        assertEquals("status_timeout", health.path("semantic_metadata").path("error").asText());
+        assertEquals("unavailable", health.path("replay_demo").path("status").asText());
+        assertEquals("status_timeout", health.path("replay_demo").path("error").asText());
+        assertEquals("unavailable", operator.path("pipeline").path("status").asText());
+        assertEquals("unavailable", operator.path("semantic_metadata").path("status").asText());
+        assertEquals("unavailable", operator.path("replay_demo").path("status").asText());
+    }
+
+    @Test
+    void opsLatencyUsesLatestStateFallbackWhenDefaultLatencyReadTimesOut() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(feature("MKT-1", System.currentTimeMillis() - 50L, "evt-slow-latency", 500_000L));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> {
+                java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(5));
+                return new OperatorLatencyStatus("ok", sourceEventId, "MKT-1", 1L, 1L, 1L, 1L, 2L, null, null);
+            },
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        long startNs = System.nanoTime();
+        JsonNode latency = getJson("/ops/latency");
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+
+        assertTrue(elapsedMs < 1_000L, "latency endpoint should be bounded, elapsedMs=" + elapsedMs);
+        assertEquals("missing", latency.path("status").asText());
+        assertEquals("latency_reader_timeout", latency.path("reason").asText());
+        assertEquals("latest_state_freshness", latency.path("fallback_source").asText());
+        assertEquals("evt-slow-latency", latency.path("latest_state_source_event_id").asText());
+        assertTrue(latency.path("latest_state_age_ms").asLong() >= 0L);
+        assertEquals(1L, latency.path("store_sequence").asLong());
     }
 
     @Test

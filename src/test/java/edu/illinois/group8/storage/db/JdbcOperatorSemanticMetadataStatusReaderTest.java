@@ -40,6 +40,7 @@ class JdbcOperatorSemanticMetadataStatusReaderTest {
         assertTrue(sql.contains("where taxonomy_version = ?"));
         assertTrue(!sql.contains("raw_response"));
         assertEquals("tax-v1", jdbc.parameters.get(1));
+        assertEquals(JdbcOperatorSemanticMetadataStatusReader.QUERY_TIMEOUT_SECONDS, jdbc.queryTimeoutSeconds);
         assertEquals("ok", status.status());
         assertTrue(status.configured());
         assertEquals("model", status.model());
@@ -92,6 +93,7 @@ class JdbcOperatorSemanticMetadataStatusReaderTest {
         private final Map<Integer, Object> parameters = new HashMap<>();
         private int rowIndex = -1;
         private String preparedSql;
+        private int queryTimeoutSeconds;
         private boolean failExecuteQuery;
 
         private RecordingJdbc(List<Map<String, Object>> rows) {
@@ -129,6 +131,10 @@ class JdbcOperatorSemanticMetadataStatusReaderTest {
             return switch (method.getName()) {
                 case "setString" -> {
                     parameters.put((Integer) args[0], args[1]);
+                    yield null;
+                }
+                case "setQueryTimeout" -> {
+                    queryTimeoutSeconds = (Integer) args[0];
                     yield null;
                 }
                 case "executeQuery" -> {
