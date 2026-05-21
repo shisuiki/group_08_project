@@ -2,6 +2,7 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.cluster.ClientClusterOrchestrator;
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.recorder.RawIngestRecorder;
 import edu.illinois.group8.storage.db.RawDbIngestSink;
 import edu.illinois.group8.time.TimestampSource;
@@ -38,8 +39,12 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
     private long nonce = 1;
 
     private static ClientClusterOrchestrator initClusterConn() {
+        return initClusterConn(new BackendMetrics());
+    }
+
+    private static ClientClusterOrchestrator initClusterConn(BackendMetrics metrics) {
         BackendConfig config = BackendConfig.fromEnvironment();
-        return new ClientClusterOrchestrator(config.clusterAddresses(), config.hostIp());
+        return new ClientClusterOrchestrator(config.clusterAddresses(), config.hostIp(), metrics);
     }
 
     public KalshiWebSocketClient(KalshiWrapper wrapper) {
@@ -51,6 +56,14 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
         RawDbIngestSink.RawDbIngestConnection rawDbConnection
     ) {
         this(wrapper, initClusterConn(), true, rawDbConnection);
+    }
+
+    public KalshiWebSocketClient(
+        KalshiWrapper wrapper,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        BackendMetrics metrics
+    ) {
+        this(wrapper, initClusterConn(metrics), true, rawDbConnection, metrics);
     }
 
     public KalshiWebSocketClient(KalshiWrapper wrapper, ClientClusterOrchestrator cluster) {
@@ -70,13 +83,23 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
         RawDbIngestSink.RawDbIngestConnection rawDbConnection,
         RawIngestRecorder rawIngestRecorder
     ) {
+        return recordingCapture(wrapper, rawDbConnection, rawIngestRecorder, new BackendMetrics());
+    }
+
+    public static KalshiWebSocketClient recordingCapture(
+        KalshiWrapper wrapper,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        RawIngestRecorder rawIngestRecorder,
+        BackendMetrics metrics
+    ) {
         return new KalshiWebSocketClient(
             wrapper,
-            initClusterConn(),
+            initClusterConn(metrics),
             true,
             rawDbConnection,
             recordingConnectionId(rawIngestRecorder),
-            rawRecorderFor(rawIngestRecorder)
+            rawRecorderFor(rawIngestRecorder),
+            metrics
         );
     }
 
@@ -86,13 +109,24 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
         RawDbIngestSink.RawDbIngestConnection rawDbConnection,
         RawIngestRecorder rawIngestRecorder
     ) {
+        return recordingCapture(wrapper, cluster, rawDbConnection, rawIngestRecorder, new BackendMetrics());
+    }
+
+    public static KalshiWebSocketClient recordingCapture(
+        KalshiWrapper wrapper,
+        ClientClusterOrchestrator cluster,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        RawIngestRecorder rawIngestRecorder,
+        BackendMetrics metrics
+    ) {
         return new KalshiWebSocketClient(
             wrapper,
             cluster,
             false,
             rawDbConnection,
             recordingConnectionId(rawIngestRecorder),
-            rawRecorderFor(rawIngestRecorder)
+            rawRecorderFor(rawIngestRecorder),
+            metrics
         );
     }
 
@@ -108,7 +142,26 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
             closeClusterOnClose,
             rawDbConnection,
             liveConnectionIdFor(rawDbConnection),
-            KalshiInboundMessageHandler.RawRecorder.disabled()
+            KalshiInboundMessageHandler.RawRecorder.disabled(),
+            new BackendMetrics()
+        );
+    }
+
+    private KalshiWebSocketClient(
+        KalshiWrapper wrapper,
+        ClientClusterOrchestrator cluster,
+        boolean closeClusterOnClose,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        BackendMetrics metrics
+    ) {
+        this(
+            wrapper,
+            cluster,
+            closeClusterOnClose,
+            rawDbConnection,
+            liveConnectionIdFor(rawDbConnection),
+            KalshiInboundMessageHandler.RawRecorder.disabled(),
+            metrics
         );
     }
 
@@ -118,7 +171,8 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
         boolean closeClusterOnClose,
         RawDbIngestSink.RawDbIngestConnection rawDbConnection,
         String rawIngestConnectionId,
-        KalshiInboundMessageHandler.RawRecorder rawRecorder
+        KalshiInboundMessageHandler.RawRecorder rawRecorder,
+        BackendMetrics metrics
     ) {
         super(wrapper.getBaseUrl().replace("https://", "wss://") + PATH);
         this.wrapper = wrapper;
@@ -131,7 +185,9 @@ public class KalshiWebSocketClient extends WebSocketClient implements KalshiLive
             rawRecorder,
             rawDbRecorderFor(rawDbConnection),
             new KalshiAckCallbacks(),
-            rawIngestConnectionId
+            rawIngestConnectionId,
+            metrics,
+            timestampSource::nowNanos
         );
 
         try {

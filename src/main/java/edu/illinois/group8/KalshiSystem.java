@@ -83,13 +83,16 @@ public class KalshiSystem {
 
         KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
         try {
+            LiveWebSocketSessionFactory webSocketSessionFactory =
+                (sessionWrapper, rawDbConnection, recorder) ->
+                    newWebSocketSession(sessionWrapper, rawDbConnection, recorder, backendMetrics);
             LiveSessionAttemptFactory attemptFactory = () -> startLiveSessionAttempt(
                 config,
                 wrapper,
                 rawDbSink,
                 rawIngestRecorder,
                 orderBookRecoveryController,
-                KalshiSystem::newWebSocketSession
+                webSocketSessionFactory
             );
             if (config.websocketReconnectEnabled()) {
                 runLiveSessionSupervisor(config, attemptFactory, backendMetrics, Thread::sleep);
@@ -606,10 +609,19 @@ public class KalshiSystem {
         RawDbIngestSink.RawDbIngestConnection rawDbConnection,
         RawIngestRecorder rawIngestRecorder
     ) {
+        return newWebSocketSession(wrapper, rawDbConnection, rawIngestRecorder, new BackendMetrics());
+    }
+
+    private static KalshiLiveWebSocketSession newWebSocketSession(
+        KalshiWrapper wrapper,
+        RawDbIngestSink.RawDbIngestConnection rawDbConnection,
+        RawIngestRecorder rawIngestRecorder,
+        BackendMetrics metrics
+    ) {
         if (rawIngestRecorder == null) {
-            return new KalshiWebSocketClient(wrapper, rawDbConnection);
+            return new KalshiWebSocketClient(wrapper, rawDbConnection, metrics);
         }
-        return KalshiWebSocketClient.recordingCapture(wrapper, rawDbConnection, rawIngestRecorder);
+        return KalshiWebSocketClient.recordingCapture(wrapper, rawDbConnection, rawIngestRecorder, metrics);
     }
 
     @FunctionalInterface

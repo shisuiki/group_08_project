@@ -93,13 +93,18 @@
       </div>
       <div class="latency-lanes" aria-label="Hot-path latency breakdown">
         <div class="lane">
-          <span>WS receive to tickerplant publish</span>
+          <span>WS receive to cluster offer</span>
           <div class="bar-track"><div id="hot-ws-p99-bar" class="bar"></div></div>
           <strong id="hot-ws-p99-ms">--</strong>
         </div>
         <div class="lane">
+          <span>Cluster receive to tickerplant publish</span>
+          <div class="bar-track"><div id="hot-cluster-p99-bar" class="bar alt"></div></div>
+          <strong id="hot-cluster-p99-ms">--</strong>
+        </div>
+        <div class="lane">
           <span>Tickerplant receive to BBO complete</span>
-          <div class="bar-track"><div id="hot-feature-p99-bar" class="bar alt"></div></div>
+          <div class="bar-track"><div id="hot-feature-p99-bar" class="bar"></div></div>
           <strong id="hot-feature-p99-ms">--</strong>
         </div>
         <div class="lane">

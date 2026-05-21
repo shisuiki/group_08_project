@@ -26,7 +26,14 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
     static final String FEATUREPLANT_METRICS_URL_ENV = "FRONTEND_ADAPTER_FEATUREPLANT_METRICS_URL";
     static final String TIMEOUT_MS_ENV = "FRONTEND_ADAPTER_HOT_PATH_METRICS_TIMEOUT_MS";
 
+    private static final String WSCLIENT_RECEIVE_TO_CLUSTER_OFFER_METRIC =
+        "wsclient_hot_path_receive_to_cluster_offer_ns";
     private static final String WS_TO_TICKERPLANT_METRIC = "backend_hot_path_ws_to_tickerplant_publish_ns";
+    private static final String CLUSTER_RECEIVE_TO_TICKERPLANT_METRIC =
+        "backend_hot_path_cluster_receive_to_tickerplant_publish_ns";
+    private static final String CANONICAL_PARSE_METRIC = "backend_hot_path_canonical_parse_ns";
+    private static final String TICKERPLANT_PUBLISH_OFFER_METRIC =
+        "backend_hot_path_tickerplant_publish_offer_ns";
     private static final String FEATUREPLANT_CONSUMER_METRIC = "featureplant_hot_path_consumer_to_module_complete_ns";
     private static final String FEATURE_MODULE_METRIC = "feature_module_latency_ns";
     private static final int DEFAULT_TIMEOUT_MS = 750;
@@ -180,11 +187,43 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
     ) {
         List<HotPathLatencyStatus.Stage> stages = new ArrayList<>();
         stages.add(HotPathLatencyStatus.Stage.ok(
+            "wsclient_receive_to_cluster_offer",
+            "WS receive to cluster offer",
+            "wsclient",
+            WSCLIENT_RECEIVE_TO_CLUSTER_OFFER_METRIC,
+            "Measured from wsclient receive_ts_ns to bounded cluster ingress offer return.",
+            topSeries(parseDistributionSeries(backendPrometheus, WSCLIENT_RECEIVE_TO_CLUSTER_OFFER_METRIC), null)
+        ));
+        stages.add(HotPathLatencyStatus.Stage.ok(
+            "cluster_receive_to_tickerplant_publish",
+            "Cluster receive to tickerplant publish",
+            "backend",
+            CLUSTER_RECEIVE_TO_TICKERPLANT_METRIC,
+            "Measured inside the leader from cluster message receive to canonical publisher offer completion.",
+            topSeries(parseDistributionSeries(backendPrometheus, CLUSTER_RECEIVE_TO_TICKERPLANT_METRIC), null)
+        ));
+        stages.add(HotPathLatencyStatus.Stage.ok(
+            "canonical_parse",
+            "Canonical parse",
+            "backend",
+            CANONICAL_PARSE_METRIC,
+            "Measured around Kalshi raw payload to canonical event parsing.",
+            topSeries(parseDistributionSeries(backendPrometheus, CANONICAL_PARSE_METRIC), null)
+        ));
+        stages.add(HotPathLatencyStatus.Stage.ok(
+            "tickerplant_publish_offer",
+            "Tickerplant publish offer",
+            "backend",
+            TICKERPLANT_PUBLISH_OFFER_METRIC,
+            "Measured around canonical publisher serialization and Aeron offer boundary.",
+            topSeries(parseDistributionSeries(backendPrometheus, TICKERPLANT_PUBLISH_OFFER_METRIC), null)
+        ));
+        stages.add(HotPathLatencyStatus.Stage.ok(
             "ws_to_tickerplant_publish",
-            "WS receive to tickerplant publish",
+            "Legacy WS receive to tickerplant publish",
             "backend",
             WS_TO_TICKERPLANT_METRIC,
-            "Measured from wsclient receive_ts_ns to backend canonical publisher offer completion.",
+            "Continuity metric measured from wsclient receive_ts_ns to backend canonical publisher offer completion.",
             topSeries(parseDistributionSeries(backendPrometheus, WS_TO_TICKERPLANT_METRIC), null)
         ));
         stages.add(HotPathLatencyStatus.Stage.ok(
@@ -214,10 +253,20 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
             .filter(item -> moduleFilter == null || moduleFilter.equals(item.labels().get("module")))
             .filter(item -> item.count() > 0L)
             .sorted(Comparator
-                .comparingLong(HotPathLatencyStatus.Series::recentCount).reversed()
+                .comparingInt(PrometheusHotPathLatencyReader::preferredEventTypeRank).reversed()
+                .thenComparing(Comparator.comparingLong(HotPathLatencyStatus.Series::recentCount).reversed())
                 .thenComparing(item -> item.labels().getOrDefault("stream", "")))
             .limit(MAX_SERIES_PER_STAGE)
             .toList();
+    }
+
+    private static int preferredEventTypeRank(HotPathLatencyStatus.Series series) {
+        String eventType = series.labels().getOrDefault("event_type", series.labels().getOrDefault("message_type", ""));
+        return switch (eventType) {
+            case "orderbook_delta" -> 2;
+            case "market_trade", "ticker" -> 1;
+            default -> 0;
+        };
     }
 
     private static List<HotPathLatencyStatus.Series> parseDistributionSeries(String prometheus, String metricName) {

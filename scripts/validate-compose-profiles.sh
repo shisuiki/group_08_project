@@ -159,7 +159,7 @@ assert_db_primary_product_defaults_aligned() {
     for expected in \
         "FEATUREPLANT_METRICS_HOST_PORT: \${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}" \
         "FEATUREPLANT_AERON_METRICS_HOST_PORT: \${{ vars.FEATUREPLANT_AERON_METRICS_HOST_PORT || '8098' }}" \
-        "FRONTEND_ADAPTER_BACKEND_METRICS_URLS: \${{ vars.FRONTEND_ADAPTER_BACKEND_METRICS_URLS || 'http://node0:8091/metrics,http://node1:8091/metrics,http://node2:8091/metrics' }}" \
+        "FRONTEND_ADAPTER_BACKEND_METRICS_URLS: \${{ vars.FRONTEND_ADAPTER_BACKEND_METRICS_URLS || 'http://wsclient:8091/metrics,http://node0:8091/metrics,http://node1:8091/metrics,http://node2:8091/metrics' }}" \
         'FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT' \
         'FEATUREPLANT_AERON_METRICS_HOST_PORT=$FEATUREPLANT_AERON_METRICS_HOST_PORT'; do
         if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then

@@ -874,9 +874,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("assert_services_absent \"live-product\" --profile live-product"));
         assertTrue(script.contains("assert_services_absent \"live-product-local-db\" --profile live-product-local-db"));
         assertTrue(script.contains("assert_live_product_services_present"));
-        assertTrue(script.contains("node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower frontend-adapter-db-primary"));
+        assertTrue(script.contains("node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary"));
         assertTrue(script.contains("assert_live_product_local_db_services_present"));
-        assertTrue(script.contains("node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary"));
+        assertTrue(script.contains("node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary"));
         assertTrue(script.contains("assert_cluster_live_db_writer_stays_opt_in"));
         assertTrue(script.contains("'DB_WRITER_ENABLED: \"\"'"));
         assertTrue(script.contains("\"LOCAL_DB_PASSWORD: \\${{ secrets.LOCAL_DB_PASSWORD || secrets.DB_WRITER_DATABASE_PASSWORD || 'kalshi' }}\""));

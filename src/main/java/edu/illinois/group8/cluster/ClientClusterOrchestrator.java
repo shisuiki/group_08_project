@@ -2,6 +2,7 @@ package edu.illinois.group8.cluster;
 
 import edu.illinois.group8.metrics.BackendMetrics;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import org.agrona.ExpandableArrayBuffer;
@@ -28,7 +29,16 @@ public class ClientClusterOrchestrator {
     private final BackendMetrics metrics;
 
     public ClientClusterOrchestrator(List<String> hostnames, String ip) {
-        this(connectCluster(hostnames, ip), new BackoffIdleStrategy(), DEFAULT_MAX_OFFER_ATTEMPTS, new BackendMetrics());
+        this(hostnames, ip, new BackendMetrics());
+    }
+
+    public ClientClusterOrchestrator(List<String> hostnames, String ip, BackendMetrics metrics) {
+        this(
+            connectCluster(hostnames, ip),
+            new BackoffIdleStrategy(),
+            DEFAULT_MAX_OFFER_ATTEMPTS,
+            Objects.requireNonNull(metrics, "metrics")
+        );
     }
 
     ClientClusterOrchestrator(

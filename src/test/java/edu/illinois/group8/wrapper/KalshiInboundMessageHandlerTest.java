@@ -2,6 +2,7 @@ package edu.illinois.group8.wrapper;
 
 import edu.illinois.group8.canonical.CanonicalEvent;
 import edu.illinois.group8.ingress.KalshiIngressEnvelope;
+import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.AsyncDbWriter;
 import edu.illinois.group8.storage.db.CanonicalDbEvent;
 import edu.illinois.group8.storage.db.DbOfferResult;
@@ -44,6 +45,71 @@ class KalshiInboundMessageHandlerTest {
         assertEquals(RECEIVE_TS_NS, envelope.receiveTsNs());
         assertEquals(RECEIVE_WALL_TS.toString(), envelope.receiveWallTs());
         assertEquals(CONNECTION_ID, envelope.connectionId());
+    }
+
+    @Test
+    void acceptedClusterWriteRecordsReceiveToClusterOfferLatency() {
+        RecordingDeps deps = new RecordingDeps();
+        deps.nanoTime = RECEIVE_TS_NS + 42L;
+        KalshiInboundMessageHandler handler = deps.handler();
+
+        handler.handleInbound("{\"type\":\"orderbook_delta\",\"msg\":{\"market_ticker\":\"MARKET-1\"}}", RECEIVE_TS_NS, RECEIVE_WALL_TS);
+
+        assertEquals(1L, distributionValue(
+            deps.metrics,
+            KalshiInboundMessageHandler.RECEIVE_TO_CLUSTER_OFFER_METRIC,
+            "_count",
+            BackendMetrics.labels(
+                "service", "wsclient",
+                "source", "kalshi",
+                "message_type", "orderbook_delta",
+                "result", "accepted"
+            )
+        ));
+        assertEquals(42L, distributionValue(
+            deps.metrics,
+            KalshiInboundMessageHandler.RECEIVE_TO_CLUSTER_OFFER_METRIC,
+            "_sum",
+            BackendMetrics.labels(
+                "service", "wsclient",
+                "source", "kalshi",
+                "message_type", "orderbook_delta",
+                "result", "accepted"
+            )
+        ));
+    }
+
+    @Test
+    void droppedClusterWriteRecordsReceiveToClusterOfferLatency() {
+        RecordingDeps deps = new RecordingDeps();
+        deps.clusterAccepted = false;
+        deps.nanoTime = RECEIVE_TS_NS + 99L;
+        KalshiInboundMessageHandler handler = deps.handler();
+
+        handler.handleInbound("{bad", RECEIVE_TS_NS, RECEIVE_WALL_TS);
+
+        assertEquals(1L, distributionValue(
+            deps.metrics,
+            KalshiInboundMessageHandler.RECEIVE_TO_CLUSTER_OFFER_METRIC,
+            "_count",
+            BackendMetrics.labels(
+                "service", "wsclient",
+                "source", "kalshi",
+                "message_type", "unknown",
+                "result", "dropped"
+            )
+        ));
+        assertEquals(99L, distributionValue(
+            deps.metrics,
+            KalshiInboundMessageHandler.RECEIVE_TO_CLUSTER_OFFER_METRIC,
+            "_sum",
+            BackendMetrics.labels(
+                "service", "wsclient",
+                "source", "kalshi",
+                "message_type", "unknown",
+                "result", "dropped"
+            )
+        ));
     }
 
     @Test
@@ -253,12 +319,35 @@ class KalshiInboundMessageHandlerTest {
         return KalshiIngressEnvelope.parse(payload, -1L);
     }
 
+    private static long distributionValue(
+        BackendMetrics metrics,
+        String name,
+        String suffix,
+        java.util.Map<String, String> labels
+    ) {
+        String text = metrics.prometheusText();
+        String expectedPrefix = name + suffix + "{";
+        String expectedLabels = labels.entrySet().stream()
+            .sorted(java.util.Map.Entry.comparingByKey())
+            .map(entry -> entry.getKey() + "=\"" + entry.getValue() + "\"")
+            .collect(java.util.stream.Collectors.joining(","));
+        for (String line : text.split("\\R")) {
+            if (line.startsWith(expectedPrefix + expectedLabels + "} ")) {
+                return Long.parseLong(line.substring(line.lastIndexOf(' ') + 1));
+            }
+        }
+        throw new AssertionError("missing distribution sum for " + name + " labels " + labels + " in:\n" + text);
+    }
+
     private static final class RecordingDeps {
         private final List<String> order = new ArrayList<>();
         private final List<byte[]> clusterPayloads = new ArrayList<>();
         private final List<SubscribedCallback> subscribedCallbacks = new ArrayList<>();
         private final List<Long> okCallbacks = new ArrayList<>();
         private final List<ErrorCallback> errorCallbacks = new ArrayList<>();
+        private final BackendMetrics metrics = new BackendMetrics();
+        private boolean clusterAccepted = true;
+        private long nanoTime = RECEIVE_TS_NS;
         private boolean throwRaw;
         private boolean throwRawDb;
         private boolean shouldParseInboundAcks = true;
@@ -298,7 +387,7 @@ class KalshiInboundMessageHandlerTest {
                 payload -> {
                     order.add("cluster");
                     clusterPayloads.add(payload);
-                    return true;
+                    return clusterAccepted;
                 },
                 rawRecorder,
                 rawDbRecorder,
@@ -326,7 +415,9 @@ class KalshiInboundMessageHandlerTest {
                         okCallbacks.add(id);
                     }
                 },
-                connectionId
+                connectionId,
+                metrics,
+                () -> nanoTime
             );
         }
     }

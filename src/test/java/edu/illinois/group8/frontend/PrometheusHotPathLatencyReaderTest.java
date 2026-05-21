@@ -26,6 +26,33 @@ class PrometheusHotPathLatencyReaderTest {
     @Test
     void parsesHotPathDistributionsFromPrometheusText() {
         String backend = """
+            wsclient_hot_path_receive_to_cluster_offer_ns_count{message_type="orderbook_snapshot",result="accepted",service="wsclient",source="kalshi"} 99
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_count{message_type="orderbook_snapshot",result="accepted",service="wsclient",source="kalshi"} 99
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_p99{message_type="orderbook_snapshot",result="accepted",service="wsclient",source="kalshi"} 900000
+            wsclient_hot_path_receive_to_cluster_offer_ns_count{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 2
+            wsclient_hot_path_receive_to_cluster_offer_ns_sum{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 2000
+            wsclient_hot_path_receive_to_cluster_offer_ns_max{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 1200
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_count{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 2
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_p50{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 900
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_p95{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 1200
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_p99{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 1200
+            wsclient_hot_path_receive_to_cluster_offer_ns_recent_p999{message_type="orderbook_delta",result="accepted",service="wsclient",source="kalshi"} 1200
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 2
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_sum{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 6000
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_max{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 4000
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_recent_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 2
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_recent_p50{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 2000
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_recent_p95{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 4000
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_recent_p99{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 4000
+            backend_hot_path_cluster_receive_to_tickerplant_publish_ns_recent_p999{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 4000
+            backend_hot_path_canonical_parse_ns_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 1
+            backend_hot_path_canonical_parse_ns_sum{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 700
+            backend_hot_path_canonical_parse_ns_recent_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 1
+            backend_hot_path_canonical_parse_ns_recent_p99{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 700
+            backend_hot_path_tickerplant_publish_offer_ns_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 1
+            backend_hot_path_tickerplant_publish_offer_ns_sum{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 500
+            backend_hot_path_tickerplant_publish_offer_ns_recent_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 1
+            backend_hot_path_tickerplant_publish_offer_ns_recent_p99{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 500
             backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 2
             backend_hot_path_ws_to_tickerplant_publish_ns_sum{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 12000
             backend_hot_path_ws_to_tickerplant_publish_ns_max{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 8000
@@ -60,19 +87,25 @@ class PrometheusHotPathLatencyReaderTest {
         HotPathLatencyStatus status = PrometheusHotPathLatencyReader.fromPrometheusTexts(backend, featureplant);
 
         assertEquals("ok", status.status());
-        assertEquals(3, status.stages().size());
+        assertEquals(7, status.stages().size());
         assertTrue(status.note().contains("excludes"));
-        HotPathLatencyStatus.Stage backendStage = status.stages().get(0);
-        assertEquals("ws_to_tickerplant_publish", backendStage.id());
-        assertEquals("backend_hot_path_ws_to_tickerplant_publish_ns", backendStage.metric());
-        assertEquals(8_000L, backendStage.series().get(0).p95Ns());
-        assertEquals(8_000L, backendStage.series().get(0).p99Ns());
-        assertEquals(8_000L, backendStage.series().get(0).p999Ns());
-        HotPathLatencyStatus.Stage featureStage = status.stages().get(1);
-        assertEquals("featureplant_consumer_to_bbo_complete", featureStage.id());
+        HotPathLatencyStatus.Stage wsclientStage = stage(status, "wsclient_receive_to_cluster_offer");
+        assertEquals("wsclient_hot_path_receive_to_cluster_offer_ns", wsclientStage.metric());
+        assertEquals("orderbook_delta", wsclientStage.series().get(0).labels().get("message_type"));
+        assertEquals(1_200L, wsclientStage.series().get(0).p99Ns());
+        HotPathLatencyStatus.Stage clusterStage = stage(status, "cluster_receive_to_tickerplant_publish");
+        assertEquals("backend_hot_path_cluster_receive_to_tickerplant_publish_ns", clusterStage.metric());
+        assertEquals(4_000L, clusterStage.series().get(0).p99Ns());
+        assertEquals(700L, stage(status, "canonical_parse").series().get(0).p99Ns());
+        assertEquals(500L, stage(status, "tickerplant_publish_offer").series().get(0).p99Ns());
+        HotPathLatencyStatus.Stage legacyBackendStage = stage(status, "ws_to_tickerplant_publish");
+        assertEquals("backend_hot_path_ws_to_tickerplant_publish_ns", legacyBackendStage.metric());
+        assertEquals(8_000L, legacyBackendStage.series().get(0).p95Ns());
+        assertEquals(8_000L, legacyBackendStage.series().get(0).p99Ns());
+        assertEquals(8_000L, legacyBackendStage.series().get(0).p999Ns());
+        HotPathLatencyStatus.Stage featureStage = stage(status, "featureplant_consumer_to_bbo_complete");
         assertEquals(3_000L, featureStage.series().get(0).p99Ns());
-        HotPathLatencyStatus.Stage moduleStage = status.stages().get(2);
-        assertEquals("featureplant_bbo_module_processing", moduleStage.id());
+        HotPathLatencyStatus.Stage moduleStage = stage(status, "featureplant_bbo_module_processing");
         assertEquals(600L, moduleStage.series().get(0).p99Ns());
     }
 
@@ -102,7 +135,7 @@ class PrometheusHotPathLatencyReaderTest {
             """;
 
         HotPathLatencyStatus status = PrometheusHotPathLatencyReader.fromPrometheusTexts(first + "\n" + second, "");
-        HotPathLatencyStatus.Series series = status.stages().get(0).series().get(0);
+        HotPathLatencyStatus.Series series = stage(status, "ws_to_tickerplant_publish").series().get(0);
 
         assertEquals(5L, series.count());
         assertEquals(5L, series.recentCount());
@@ -140,7 +173,7 @@ class PrometheusHotPathLatencyReaderTest {
                 "250"
             )).get();
 
-            HotPathLatencyStatus.Series series = status.stages().get(0).series().get(0);
+            HotPathLatencyStatus.Series series = stage(status, "ws_to_tickerplant_publish").series().get(0);
             assertEquals(2L, series.count());
             assertEquals(20L, series.avgNs());
             assertEquals(30L, series.p99Ns());
@@ -163,6 +196,13 @@ class PrometheusHotPathLatencyReaderTest {
         );
 
         assertTrue(thrown.getMessage().contains(PrometheusHotPathLatencyReader.TIMEOUT_MS_ENV));
+    }
+
+    private static HotPathLatencyStatus.Stage stage(HotPathLatencyStatus status, String id) {
+        return status.stages().stream()
+            .filter(item -> id.equals(item.id()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("missing stage " + id));
     }
 
     private static HttpServer metricsServer(String body) throws IOException {

@@ -51,6 +51,9 @@ public class DataProcessor {
     private long parserLatencySampleCursor;
     private long messageAgeSampleCursor;
     private long wsToTickerplantPublishSampleCursor;
+    private long clusterReceiveToTickerplantPublishSampleCursor;
+    private long canonicalParseSampleCursor;
+    private long tickerplantPublishOfferSampleCursor;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this(communicationOrchestrator, CanonicalDbSink.disabled());
@@ -184,11 +187,13 @@ public class DataProcessor {
     }
 
     private void processIngress(KalshiIngressEnvelope ingress, long parseStartTsNs) {
+        long canonicalParseStartTsNs = System.nanoTime();
         CanonicalParseResult parseResult = parser.parseWebSocketMessage(
             ingress.rawPayload(),
             ingress.receiveTsNs(),
             ingress.replayId()
         );
+        long canonicalParseElapsedNs = Math.max(0L, System.nanoTime() - canonicalParseStartTsNs);
         backendParserMessages.increment();
         if (shouldSampleParserLatency()) {
             backendParserLatency.observe(Math.max(0L, System.nanoTime() - parseStartTsNs));
@@ -212,7 +217,12 @@ public class DataProcessor {
         boolean firstCanonicalEvent = true;
         for (CanonicalEvent event : parseResult.canonicalEvents()) {
             observeEventMetrics(event);
-            handleCanonicalEvent(event, suppressFirstOrderBookDerived && firstCanonicalEvent);
+            handleCanonicalEvent(
+                event,
+                suppressFirstOrderBookDerived && firstCanonicalEvent,
+                parseStartTsNs,
+                canonicalParseElapsedNs
+            );
             firstCanonicalEvent = false;
         }
     }
@@ -242,8 +252,14 @@ public class DataProcessor {
         orderBookStateManager.restorePaused(state.orderBookRecoveryCheckpoints());
     }
 
-    private void handleCanonicalEvent(CanonicalEvent event, boolean suppressOrderBookDerived) {
-        publish(event, "canonical");
+    private void handleCanonicalEvent(
+        CanonicalEvent event,
+        boolean suppressOrderBookDerived,
+        long clusterReceiveTsNs,
+        long canonicalParseElapsedNs
+    ) {
+        observeCanonicalParseLatency(event, canonicalParseElapsedNs);
+        publish(event, "canonical", clusterReceiveTsNs);
         canonicalEventCounter(event.eventType()).increment();
 
         if (orderBookDerivedEnabled && !suppressOrderBookDerived) {
@@ -260,12 +276,23 @@ public class DataProcessor {
     }
 
     private void publish(CanonicalEvent event, String path) {
+        publish(event, path, 0L);
+    }
+
+    private void publish(CanonicalEvent event, String path, long clusterReceiveTsNs) {
         CanonicalEvent publishedEvent = CanonicalEvents.withPublishTsNs(event, System.nanoTime());
+        long offerStartTsNs = System.nanoTime();
         PublicationResult result = publisher.publishSerialized(publishedEvent);
         long offerCompleteTsNs = System.nanoTime();
         if (result.success()) {
             publishSuccess.increment();
-            observeWsToTickerplantPublishLatency(publishedEvent, path, offerCompleteTsNs);
+            observeHotPathPublishLatencies(
+                publishedEvent,
+                path,
+                clusterReceiveTsNs,
+                offerStartTsNs,
+                offerCompleteTsNs
+            );
         } else {
             publishFailure.increment();
         }
@@ -275,15 +302,40 @@ public class DataProcessor {
         dbOfferCounter(DbOfferMetricKey.from(publishedEvent, path, dbOfferResult)).increment();
     }
 
-    private void observeWsToTickerplantPublishLatency(CanonicalEvent event, String path, long offerCompleteTsNs) {
-        if (!"canonical".equals(path) || event.metadata().ingestTsNs() <= 0L || !shouldSampleWsToTickerplantPublish()) {
+    private void observeHotPathPublishLatencies(
+        CanonicalEvent event,
+        String path,
+        long clusterReceiveTsNs,
+        long offerStartTsNs,
+        long offerCompleteTsNs
+    ) {
+        if (!"canonical".equals(path)) {
             return;
         }
         EventMetricHandles handles = eventMetricHandles.computeIfAbsent(
             EventMetricKey.from(event),
             this::eventMetricHandles
         );
-        handles.wsToTickerplantPublish.observe(Math.max(0L, offerCompleteTsNs - event.metadata().ingestTsNs()));
+        if (event.metadata().ingestTsNs() > 0L && shouldSampleWsToTickerplantPublish()) {
+            handles.wsToTickerplantPublish.observe(Math.max(0L, offerCompleteTsNs - event.metadata().ingestTsNs()));
+        }
+        if (clusterReceiveTsNs > 0L && shouldSampleClusterReceiveToTickerplantPublish()) {
+            handles.clusterReceiveToTickerplantPublish.observe(Math.max(0L, offerCompleteTsNs - clusterReceiveTsNs));
+        }
+        if (shouldSampleTickerplantPublishOffer()) {
+            handles.tickerplantPublishOffer.observe(Math.max(0L, offerCompleteTsNs - offerStartTsNs));
+        }
+    }
+
+    private void observeCanonicalParseLatency(CanonicalEvent event, long elapsedNs) {
+        if (!shouldSampleCanonicalParse()) {
+            return;
+        }
+        EventMetricHandles handles = eventMetricHandles.computeIfAbsent(
+            EventMetricKey.from(event),
+            this::eventMetricHandles
+        );
+        handles.canonicalParse.observe(Math.max(0L, elapsedNs));
     }
 
     private void observeEventMetrics(CanonicalEvent event) {
@@ -345,6 +397,9 @@ public class DataProcessor {
         return new EventMetricHandles(
             metrics.distribution("backend_ws_message_age_ms", labels),
             metrics.distribution("backend_hot_path_ws_to_tickerplant_publish_ns", labels),
+            metrics.distribution("backend_hot_path_cluster_receive_to_tickerplant_publish_ns", labels),
+            metrics.distribution("backend_hot_path_canonical_parse_ns", labels),
+            metrics.distribution("backend_hot_path_tickerplant_publish_offer_ns", labels),
             metrics.counter("backend_parser_errors_total", labels),
             metrics.counter("backend_unknown_message_type_total", labels),
             metrics.counter("backend_orderbook_snapshot_total", labels),
@@ -387,6 +442,18 @@ public class DataProcessor {
         return shouldSampleHotPathDistribution(wsToTickerplantPublishSampleCursor++);
     }
 
+    private boolean shouldSampleClusterReceiveToTickerplantPublish() {
+        return shouldSampleHotPathDistribution(clusterReceiveToTickerplantPublishSampleCursor++);
+    }
+
+    private boolean shouldSampleCanonicalParse() {
+        return shouldSampleHotPathDistribution(canonicalParseSampleCursor++);
+    }
+
+    private boolean shouldSampleTickerplantPublishOffer() {
+        return shouldSampleHotPathDistribution(tickerplantPublishOfferSampleCursor++);
+    }
+
     private static String normalizeLabelValue(String value) {
         return value == null || value.isBlank() ? "" : value;
     }
@@ -405,6 +472,9 @@ public class DataProcessor {
     private record EventMetricHandles(
         BackendMetrics.DistributionHandle messageAge,
         BackendMetrics.DistributionHandle wsToTickerplantPublish,
+        BackendMetrics.DistributionHandle clusterReceiveToTickerplantPublish,
+        BackendMetrics.DistributionHandle canonicalParse,
+        BackendMetrics.DistributionHandle tickerplantPublishOffer,
         BackendMetrics.Counter parserErrors,
         BackendMetrics.Counter unknownMessageType,
         BackendMetrics.Counter orderbookSnapshot,

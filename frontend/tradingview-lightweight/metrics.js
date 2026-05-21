@@ -250,17 +250,20 @@ function renderLatencyUnavailable(reason) {
 function renderHotPathLatency(hotPath) {
   const status = hotPath ? hotPath.status : 'unavailable';
   setPill('hot-path-status', status, statusClass(status));
-  const ws = hotPathStage(hotPath, 'ws_to_tickerplant_publish');
+  const ws = hotPathStage(hotPath, 'wsclient_receive_to_cluster_offer');
+  const cluster = hotPathStage(hotPath, 'cluster_receive_to_tickerplant_publish');
   const feature = hotPathStage(hotPath, 'featureplant_consumer_to_bbo_complete');
   const module = hotPathStage(hotPath, 'featureplant_bbo_module_processing');
   const wsBest = bestSeries(ws);
+  const clusterBest = bestSeries(cluster);
   const featureBest = bestSeries(feature);
   const moduleBest = bestSeries(module);
-  const best = wsBest || featureBest || moduleBest;
+  const best = clusterBest || wsBest || featureBest || moduleBest;
   const bestTail = hotPathTailNs(best);
   setText('hot-path-latency', bestTail != null ? formatNs(bestTail) : status);
   setText('hot-path-source', best ? 'recent p99.9' : (hotPath && hotPath.note) || 'missing hot-path samples');
   setHotPathDistribution('hot-ws-p99', wsBest);
+  setHotPathDistribution('hot-cluster-p99', clusterBest);
   setHotPathDistribution('hot-feature-p99', featureBest);
   setHotPathDistribution('hot-module-p99', moduleBest);
 }
@@ -270,6 +273,7 @@ function renderHotPathUnavailable(reason) {
   setText('hot-path-latency', '--');
   setText('hot-path-source', 'hot-path metrics unavailable');
   setHotPathBar('hot-ws-p99', null);
+  setHotPathBar('hot-cluster-p99', null);
   setHotPathBar('hot-feature-p99', null);
   setHotPathBar('hot-module-p99', null);
 }
@@ -284,7 +288,25 @@ function bestSeries(stage) {
   if (!series.length) {
     return null;
   }
-  return [...series].sort((left, right) => (asNumber(right.recent_count) || 0) - (asNumber(left.recent_count) || 0))[0];
+  return [...series].sort((left, right) => {
+    const preferred = hotPathEventRank(right) - hotPathEventRank(left);
+    if (preferred !== 0) {
+      return preferred;
+    }
+    return (asNumber(right.recent_count) || 0) - (asNumber(left.recent_count) || 0);
+  })[0];
+}
+
+function hotPathEventRank(series) {
+  const labels = series && series.labels ? series.labels : {};
+  const eventType = labels.event_type || labels.message_type || '';
+  if (eventType === 'orderbook_delta') {
+    return 2;
+  }
+  if (eventType === 'market_trade' || eventType === 'ticker') {
+    return 1;
+  }
+  return 0;
 }
 
 function hotPathTailNs(series) {
