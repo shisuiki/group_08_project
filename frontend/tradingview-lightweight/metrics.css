@@ -95,6 +95,12 @@ main {
   gap: 12px;
 }
 
+.status-strip > *,
+.metric-grid > *,
+.split > * {
+  min-width: 0;
+}
+
 .status-strip {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -281,12 +287,19 @@ main {
   display: flex;
   gap: 12px;
   justify-content: space-between;
+  min-width: 0;
   padding-top: 10px;
 }
 
 code,
 pre {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.endpoint-list a,
+.endpoint-list code,
+.endpoint-list span {
+  min-width: 0;
 }
 
 code {
@@ -300,6 +313,7 @@ pre {
   font-size: 12px;
   margin: 0;
   max-height: 360px;
+  max-width: 100%;
   overflow: auto;
   padding: 14px;
 }
