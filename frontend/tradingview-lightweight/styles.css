@@ -19,6 +19,9 @@ header {
     padding: 12px 16px;
     border-bottom: 1px solid #2d3338;
     background: #1e2225;
+    min-width: 0;
+    max-width: 100vw;
+    overflow-x: hidden;
 }
 
 header h1 {
@@ -34,6 +37,8 @@ header h1 {
     flex-wrap: wrap;
     gap: 8px 12px;
     align-items: center;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .controls label {
@@ -42,6 +47,8 @@ header h1 {
     font-size: 11px;
     color: #a8b0b7;
     gap: 2px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .controls input,
@@ -108,6 +115,9 @@ header h1 {
     align-items: center;
     gap: 6px;
     margin-top: 8px;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .signal-pill {
@@ -958,6 +968,7 @@ main[data-active-role="semantic"] .semantic-group-summary {
 main[data-active-role="semantic"] .semantic-coverage-summary {
     display: flex;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
 }
 
@@ -1227,6 +1238,17 @@ footer.ok { color: #2fbf71; }
         grid-template-columns: 1fr;
     }
 
+    .controls label {
+        flex: 1 1 min(100%, 140px);
+    }
+
+    .controls input,
+    .controls select,
+    .controls button {
+        min-width: 0;
+        width: 100%;
+    }
+
     .demo-signal-strip {
         align-items: stretch;
     }
@@ -1277,6 +1299,7 @@ footer.ok { color: #2fbf71; }
 
     main[data-active-role="semantic"] .semantic-coverage-summary .coverage-chip {
         flex: 1 1 100%;
+        min-width: 0;
     }
 
     .semantic-treemap {

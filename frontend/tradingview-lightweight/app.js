@@ -1322,7 +1322,7 @@
         const sourceGroups = Array.from(sourceGroupsByKey.values()).filter(group => group.count > 0);
         const groupBounds = semanticLayoutBounds(4 / 3);
         const groupRects = squarifiedTreemap(
-            sourceGroups.map(group => ({ item: group, value: group.value })),
+            sourceGroups.map(group => ({ item: group, value: semanticGroupLayoutValue(group) })),
             groupBounds,
         );
         for (const rawGroupRect of groupRects) {
@@ -1438,6 +1438,12 @@
             market_ticker: group.key || group.label || ''
         });
         return `hsl(${hue}, ${Math.round(30 + confidenceValue * 22)}%, ${Math.round(27 + confidenceValue * 13)}%)`;
+    }
+
+    function semanticGroupLayoutValue(group) {
+        const visibleCount = Math.max(1, Number(group.count || 0));
+        const visibleValue = Math.max(1, Number(group.value || 0));
+        return Math.sqrt(visibleCount) * Math.log1p(visibleValue);
     }
 
     function squarifiedTreemap(items, rect) {
