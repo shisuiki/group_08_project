@@ -181,6 +181,48 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void marketCapabilitiesEndpointSummarizesChartQuoteCatalogAndSemanticTruth() throws Exception {
+        JsonNode body = getJson("/api/markets/capabilities?limit=10");
+
+        assertEquals("ok", body.path("status").asText());
+        assertEquals(2, body.path("count").asInt());
+        assertEquals(2, body.path("total_count").asInt());
+        JsonNode summary = body.path("summary");
+        assertEquals(2, summary.path("total_assets").asInt());
+        assertEquals(1, summary.path("chartable_count").asInt());
+        assertEquals(1, summary.path("quote_count").asInt());
+        assertEquals(2, summary.path("semantic_missing_count").asInt());
+        assertEquals(1, summary.path("metadata_only_count").asInt());
+
+        JsonNode market = findMarket(body.path("markets"), "MKT-1");
+        assertTrue(market.path("chartable").asBoolean());
+        assertTrue(market.path("chartable_from_bbo").asBoolean());
+        assertEquals("bbo", market.path("best_chart_source").asText());
+        assertEquals("bbo_history_available", market.path("chart_reason").asText());
+
+        JsonNode catalogOnly = findMarket(body.path("markets"), "MKT-META");
+        assertFalse(catalogOnly.path("chartable").asBoolean());
+        assertFalse(catalogOnly.path("has_quote").asBoolean());
+        assertEquals("catalog_only", catalogOnly.path("chart_reason").asText());
+        assertEquals("missing", catalogOnly.path("semantic_status").asText());
+    }
+
+    @Test
+    void marketCapabilitiesEndpointAppliesCapabilityFiltersAndOffset() throws Exception {
+        JsonNode metadataOnly = getJson("/api/markets/capabilities?capability=metadata_only&limit=1&offset=0");
+
+        assertEquals(1, metadataOnly.path("count").asInt());
+        assertEquals(1, metadataOnly.path("total_count").asInt());
+        assertEquals(0, metadataOnly.path("offset").asInt());
+        assertFalse(metadataOnly.path("has_more").asBoolean());
+        assertEquals("MKT-META", metadataOnly.path("markets").get(0).path("market_ticker").asText());
+
+        JsonNode quoteAvailable = getJson("/api/markets/capabilities?capability=quote_available&limit=10");
+        assertEquals(1, quoteAvailable.path("count").asInt());
+        assertEquals("MKT-1", quoteAvailable.path("markets").get(0).path("market_ticker").asText());
+    }
+
+    @Test
     void marketCatalogHidesSmokeByDefaultAndAllowsExplicitOverride() throws Exception {
         server.stop();
         FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
@@ -284,6 +326,50 @@ class UdfEndpointsTest {
         assertEquals(t.size(), body.path("v").size());
         assertTrue(t.size() >= 1);
         assertTrue(body.path("o").get(0).isNumber());
+        assertEquals("bbo", body.path("source").asText());
+    }
+
+    @Test
+    void datafeedHistoryFallsBackToTickerSnapshotBars() throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(new FeatureOutput(
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            "MKT-TICKER",
+            1_000L,
+            "ticker-1",
+            Map.of("price_micros", 420_000L)
+        ));
+        store.accept(new FeatureOutput(
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            "MKT-TICKER",
+            2_000L,
+            "ticker-2",
+            Map.of("yes_bid_micros", 430_000L, "yes_ask_micros", 450_000L)
+        ));
+        server = new FrontendAdapterServer(
+            FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0")),
+            store,
+            FrontendMarketMetadataCatalog.loaded("test", List.of(
+                metadata("MKT-TICKER", "EVENT-TICKER", "SERIES-TICKER", "indexed")
+            )),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode symbols = getJson("/datafeed/symbols?symbol=MKT-TICKER");
+        assertTrue(symbols.path("has_intraday").asBoolean());
+        assertTrue(symbols.path("has_seconds").asBoolean());
+
+        JsonNode body = getJson("/datafeed/history?symbol=MKT-TICKER&resolution=1S&from=0&to=10");
+        assertEquals("ok", body.path("s").asText());
+        assertEquals("ticker_snapshot", body.path("source").asText());
+        assertEquals(2, body.path("t").size());
+        assertEquals(0.42, body.path("c").get(0).asDouble(), 1e-9);
+        assertEquals(0.44, body.path("c").get(1).asDouble(), 1e-9);
     }
 
     @Test
@@ -317,16 +403,20 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"health-data-age\""));
         assertTrue(root.body().contains("id=\"quote-update-health\""));
         assertTrue(root.body().contains("id=\"market-search\""));
+        assertTrue(root.body().contains("id=\"market-capability-filter\""));
         assertTrue(root.body().contains("id=\"market-status-filter\""));
         assertTrue(root.body().contains("id=\"market-search-apply\""));
+        assertTrue(root.body().contains("id=\"market-page-state\""));
+        assertTrue(root.body().contains("id=\"chart-state\""));
         assertTrue(root.body().contains("id=\"market-state\""));
         assertTrue(root.body().contains("id=\"product-market-panel\""));
         assertTrue(root.body().contains("id=\"research-features-panel\""));
         assertTrue(root.body().contains("id=\"runtime-operator-panel\""));
         assertTrue(root.body().contains("id=\"latency-freshness-panel\""));
         assertTrue(root.body().contains("id=\"operator-plan-panel\""));
-        assertTrue(root.body().contains("id=\"viewer-tab\""));
-        assertTrue(root.body().contains("id=\"trader-tab\""));
+        assertTrue(root.body().contains("id=\"overview-tab\""));
+        assertTrue(root.body().contains("id=\"markets-tab\""));
+        assertTrue(root.body().contains("id=\"chart-tab\""));
         assertTrue(root.body().contains("id=\"research-tab\""));
         assertTrue(root.body().contains("id=\"semantic-tab\""));
         assertTrue(root.body().contains("id=\"operator-tab\""));
@@ -337,6 +427,7 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"research-feature-window\""));
         assertTrue(root.body().contains("id=\"research-export-csv\""));
         assertTrue(root.body().contains("id=\"semantic-map-panel\""));
+        assertTrue(root.body().contains("id=\"semantic-coverage-summary\""));
         assertTrue(root.body().contains("id=\"semantic-group-by\""));
         assertTrue(root.body().contains("id=\"semantic-render-mode\""));
         assertTrue(root.body().contains("id=\"semantic-drillup\""));
@@ -403,6 +494,9 @@ class UdfEndpointsTest {
         assertTrue(chart.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
         assertTrue(js.body().contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(js.body().contains("/api/markets/capabilities?"));
+        assertTrue(js.body().contains("market-capability-filter"));
+        assertTrue(js.body().contains("market-page-state"));
         assertTrue(js.body().contains("'/markets?' + params.join('&')"));
         assertTrue(js.body().contains("market-search"));
         assertTrue(js.body().contains("market-status-filter"));
@@ -455,7 +549,9 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("layoutSemanticLeafTreemap"));
         assertTrue(js.body().contains("semanticRenderableLeaves"));
         assertTrue(js.body().contains("SEMANTIC_RENDER_LEAF_LIMIT"));
+        assertTrue(js.body().contains("Classified subset"));
         assertTrue(js.body().contains("semanticStatusFromCatalogStatus"));
+        assertTrue(js.body().contains("nonChartableMessage"));
         assertTrue(js.body().contains("body.product_readiness"));
         assertTrue(js.body().contains("generateOperatorPlan"));
         assertTrue(js.body().contains("buildCatalogSyncRequest"));
@@ -475,6 +571,8 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("nextSequence < quoteSequence"));
         assertTrue(js.body().contains("window.location.origin"));
         assertTrue(css.body().contains("chart-container"));
+        assertTrue(css.body().contains("chart-state"));
+        assertTrue(css.body().contains("market-pagination"));
         assertTrue(css.body().contains("semantic-treemap"));
         assertTrue(css.body().contains("role-hidden"));
         assertTrue(css.body().contains("demo-orchestrator-grid"));
@@ -2842,6 +2940,15 @@ class UdfEndpointsTest {
             }
         }
         return false;
+    }
+
+    private static JsonNode findMarket(JsonNode markets, String marketTicker) {
+        for (JsonNode market : markets) {
+            if (marketTicker.equals(market.path("market_ticker").asText())) {
+                return market;
+            }
+        }
+        throw new AssertionError("missing market " + marketTicker);
     }
 
     private static boolean containsSymbol(JsonNode symbols, String symbol) {

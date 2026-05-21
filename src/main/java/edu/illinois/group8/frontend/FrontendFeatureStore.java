@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class FrontendFeatureStore {
     public static final String BBO_FEATURE = "feature.bbo";
+    public static final String TICKER_SNAPSHOT_FEATURE = "feature.ticker_snapshot";
+    public static final String TRADE_TAPE_FEATURE = "feature.trade_tape";
 
     private final int maxFeaturesPerMarket;
     private final int maxSymbolsIndexed;
@@ -208,16 +210,36 @@ public class FrontendFeatureStore {
     }
 
     public List<Bar> bars(String marketTicker, long fromMs, long toMs, BarResolution resolution) {
+        return barSeries(marketTicker, fromMs, toMs, resolution).bars();
+    }
+
+    public BarSeries barSeries(String marketTicker, long fromMs, long toMs, BarResolution resolution) {
         if (resolution == null) {
             throw new IllegalArgumentException("resolution is required");
         }
         long bucketSize = resolution.bucketSizeMs();
-        List<FeatureOutput> bbo = snapshot(marketTicker, BBO_FEATURE);
-        if (bbo.isEmpty()) {
-            return List.of();
+        for (String featureName : List.of(BBO_FEATURE, TICKER_SNAPSHOT_FEATURE, TRADE_TAPE_FEATURE)) {
+            List<FeatureOutput> outputs = snapshot(marketTicker, featureName);
+            if (outputs.isEmpty()) {
+                continue;
+            }
+            List<Bar> bars = barsFromOutputs(outputs, featureName, fromMs, toMs, bucketSize);
+            if (!bars.isEmpty()) {
+                return new BarSeries(bestChartSource(featureName), bars);
+            }
         }
+        return new BarSeries(null, List.of());
+    }
+
+    private List<Bar> barsFromOutputs(
+        List<FeatureOutput> outputs,
+        String featureName,
+        long fromMs,
+        long toMs,
+        long bucketSize
+    ) {
         Map<Long, BarAccumulator> buckets = new LinkedHashMap<>();
-        for (FeatureOutput out : bbo) {
+        for (FeatureOutput out : outputs) {
             Long ts = out.eventTsMs();
             if (ts == null) {
                 continue;
@@ -225,11 +247,11 @@ public class FrontendFeatureStore {
             if (ts < fromMs || ts > toMs) {
                 continue;
             }
-            Object midpoint = out.values().get("midpoint_micros");
-            if (!(midpoint instanceof Number midpointNumber)) {
+            Long priceMicros = priceMicros(out, featureName);
+            if (priceMicros == null) {
                 continue;
             }
-            double price = midpointNumber.longValue() / 1_000_000.0;
+            double price = priceMicros / 1_000_000.0;
             long bucket = Math.floorDiv(ts, bucketSize) * bucketSize;
             BarAccumulator acc = buckets.computeIfAbsent(bucket, key -> new BarAccumulator(key, bucketSize));
             acc.observe(price);
@@ -242,6 +264,53 @@ public class FrontendFeatureStore {
         }
         bars.sort(Comparator.comparingLong(Bar::openTimeMs));
         return bars;
+    }
+
+    private static Long priceMicros(FeatureOutput out, String featureName) {
+        Map<String, Object> values = out.values();
+        return switch (featureName) {
+            case BBO_FEATURE -> numericMicros(values.get("midpoint_micros"));
+            case TICKER_SNAPSHOT_FEATURE -> {
+                Long last = numericMicros(values.get("price_micros"));
+                if (last != null) {
+                    yield last;
+                }
+                Long bid = numericMicros(values.get("yes_bid_micros"));
+                Long ask = numericMicros(values.get("yes_ask_micros"));
+                if (bid != null && ask != null) {
+                    yield (bid + ask) / 2L;
+                }
+                yield bid != null ? bid : ask;
+            }
+            case TRADE_TAPE_FEATURE -> {
+                Long yes = numericMicros(values.get("yes_price_micros"));
+                if (yes != null) {
+                    yield yes;
+                }
+                Long no = numericMicros(values.get("no_price_micros"));
+                yield no == null ? null : 1_000_000L - no;
+            }
+            default -> null;
+        };
+    }
+
+    private static Long numericMicros(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private static String bestChartSource(String featureName) {
+        return switch (featureName) {
+            case BBO_FEATURE -> "bbo";
+            case TICKER_SNAPSHOT_FEATURE -> "ticker_snapshot";
+            case TRADE_TAPE_FEATURE -> "trade_tape";
+            default -> featureName;
+        };
+    }
+
+    public record BarSeries(String source, List<Bar> bars) {
+        public BarSeries {
+            bars = List.copyOf(bars == null ? List.of() : bars);
+        }
     }
 
     private static final class BarAccumulator {

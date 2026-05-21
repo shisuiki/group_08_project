@@ -143,8 +143,10 @@ STATE_EXPR = r"""
   return {
     title: document.body?.innerText.includes('Kalshi Product Dashboard') || false,
     marketSearch: !!document.getElementById('market-search'),
+    marketCapabilityFilter: !!document.getElementById('market-capability-filter'),
     marketStatusFilter: !!document.getElementById('market-status-filter'),
     marketSearchApply: !!document.getElementById('market-search-apply'),
+    marketPageState: text('market-page-state'),
     marketState: text('market-state'),
     marketRows: rows.length,
     selectedRows: document.querySelectorAll('#market-list .selected').length,
@@ -153,6 +155,7 @@ STATE_EXPR = r"""
     chartCanvas: canvases.some((canvas) =>
       canvas.width > 0 && canvas.height > 0 && canvas.rectWidth > 0 && canvas.rectHeight > 0),
     quoteStripText: document.getElementById('quote-strip')?.innerText || '',
+    chartState: text('chart-state'),
     featureRows: document.querySelectorAll('.feature-row').length,
     featureEmpty: document.body?.innerText.toLowerCase().includes('no feature outputs') || false,
     adapterHealth: text('adapter-health'),
@@ -166,8 +169,10 @@ STATE_EXPR = r"""
     historyBars: historyMatch ? Number(historyMatch[1]) : 0,
     quoteValuesRendered,
     productMarketPanel: !!document.getElementById('product-market-panel'),
-    viewerTab: !!document.getElementById('viewer-tab'),
-    traderTab: !!document.getElementById('trader-tab'),
+    overviewTab: !!document.getElementById('overview-tab'),
+    marketsTab: !!document.getElementById('markets-tab'),
+    chartTab: !!document.getElementById('chart-tab'),
+    semanticTab: !!document.getElementById('semantic-tab'),
     researchTab: !!document.getElementById('research-tab'),
     operatorTab: !!document.getElementById('operator-tab'),
     traderMonitorPanel: !!document.getElementById('trader-monitor-panel'),
@@ -222,17 +227,16 @@ INTERACTION_EXPR = r"""
     search.value = token;
     search.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  const rowText = (firstRow?.textContent || '').toLowerCase();
-  const status = document.getElementById('market-status-filter');
-  if (status && rowText.includes('open')) {
-    status.value = 'open';
-    status.dispatchEvent(new Event('change', { bubbles: true }));
+  const capability = document.getElementById('market-capability-filter');
+  if (capability) {
+    capability.value = 'chart_ready';
+    capability.dispatchEvent(new Event('change', { bubbles: true }));
   }
   const apply = document.getElementById('market-search-apply');
   if (apply) {
     apply.click();
   }
-  return { token, status: status?.value || '', clicked: !!firstRow };
+  return { token, capability: capability?.value || '', clicked: !!firstRow };
 })()
 """
 
@@ -256,8 +260,10 @@ def wait_for_state(cdp, timeout_seconds):
         ready = (
             last.get("title")
             and last.get("marketSearch")
+            and last.get("marketCapabilityFilter")
             and last.get("marketStatusFilter")
             and last.get("marketSearchApply")
+            and last.get("marketPageState") != ""
             and (last.get("marketRows", 0) > 0 or last.get("marketEmpty"))
             and last.get("chartCanvas")
             and not last.get("loading")
@@ -266,8 +272,10 @@ def wait_for_state(cdp, timeout_seconds):
             and last.get("healthDataAge") not in ("", "-")
             and last.get("quoteUpdateHealth") not in ("", "-")
             and last.get("productMarketPanel")
-            and last.get("viewerTab")
-            and last.get("traderTab")
+            and last.get("overviewTab")
+            and last.get("marketsTab")
+            and last.get("chartTab")
+            and last.get("semanticTab")
             and last.get("researchTab")
             and last.get("operatorTab")
             and last.get("traderMonitorPanel")

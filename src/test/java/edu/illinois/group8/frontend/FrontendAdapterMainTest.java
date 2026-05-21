@@ -417,10 +417,13 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/quotes?symbols="));
         assertTrue(app.contains("nextSequence < quoteSequence"));
         assertTrue(app.contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(app.contains("/api/markets/capabilities?"));
         assertTrue(app.contains("'/markets?' + params.join('&')"));
         assertTrue(app.contains("market-search"));
+        assertTrue(app.contains("market-capability-filter"));
         assertTrue(app.contains("market-status-filter"));
         assertTrue(app.contains("market-search-apply"));
+        assertTrue(app.contains("market-page-state"));
         assertTrue(app.contains("market-state"));
         assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(app.contains("/features?"));
@@ -438,6 +441,7 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
         assertTrue(app.contains("layoutSemanticLeafTreemap"));
         assertTrue(app.contains("semanticRenderableLeaves"));
+        assertTrue(app.contains("Classified subset"));
         assertTrue(app.contains("buildDemoRunRequest"));
         assertTrue(app.contains("applyRoleVisibility"));
         assertTrue(app.contains("dataFreshnessBadgeText"));

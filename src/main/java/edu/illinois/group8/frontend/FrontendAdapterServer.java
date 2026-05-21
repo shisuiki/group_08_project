@@ -9,7 +9,12 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.JdbcMarketAssetCatalogReader;
+import edu.illinois.group8.storage.db.JdbcMarketCapabilityReader;
 import edu.illinois.group8.storage.db.JdbcReplayDemoStatusReader;
+import edu.illinois.group8.storage.db.MarketCapability;
+import edu.illinois.group8.storage.db.MarketCapabilityPage;
+import edu.illinois.group8.storage.db.MarketCapabilityReadRequest;
+import edu.illinois.group8.storage.db.MarketCapabilitySummary;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
@@ -474,6 +479,7 @@ public class FrontendAdapterServer {
         bind("/quotes", this::handleQuotes);
         bind("/features", this::handleFeatures);
         bind("/markets", this::handleMarkets);
+        bind("/api/markets/capabilities", this::handleMarketCapabilities);
         bind("/api/demo/replay/status", this::handleReplayDemoStatus);
         bind("/api/semantic-metadata/markets", this::handleSemanticMetadataMarkets);
         bind("/api/semantic-metadata/treemap", this::handleSemanticMetadataTreemap);
@@ -604,12 +610,17 @@ public class FrontendAdapterServer {
         body.put("timezone", "Etc/UTC");
         body.put("minmov", 1);
         body.put("pricescale", 1_000_000);
-        body.put("has_intraday", true);
-        body.put("has_seconds", true);
+        boolean hasBars = hasChartBars(symbol);
+        body.put("has_intraday", hasBars);
+        body.put("has_seconds", hasBars);
         body.put("supported_resolutions", BarResolution.SUPPORTED);
         body.put("volume_precision", 0);
         metadata.ifPresent(row -> addMetadataFields(body, row));
         writeJson(exchange, 200, body);
+    }
+
+    private boolean hasChartBars(String symbol) {
+        return !store.barSeries(symbol, 0L, Long.MAX_VALUE, BarResolution.M1).bars().isEmpty();
     }
 
     private void handleDatafeedSearch(HttpExchange exchange) throws IOException {
@@ -676,7 +687,8 @@ public class FrontendAdapterServer {
             writeError(exchange, 400, e.getMessage());
             return;
         }
-        List<Bar> bars = store.bars(symbol, fromMs, toMs, resolution);
+        FrontendFeatureStore.BarSeries series = store.barSeries(symbol, fromMs, toMs, resolution);
+        List<Bar> bars = series.bars();
         if (bars.isEmpty()) {
             writeJson(exchange, 200, Map.of("s", "no_data"));
             return;
@@ -703,6 +715,7 @@ public class FrontendAdapterServer {
         body.put("l", l);
         body.put("c", c);
         body.put("v", v);
+        body.put("source", series.source());
         writeJson(exchange, 200, body);
     }
 
@@ -942,6 +955,57 @@ public class FrontendAdapterServer {
         body.put("total_count", metadataCatalog.count(query, status, includeSmoke));
         body.put("catalog_source", metadataCatalog.source());
         body.put("markets", markets);
+        writeJson(exchange, 200, body);
+    }
+
+    private void handleMarketCapabilities(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        MarketCapabilityReadRequest request;
+        try {
+            request = marketCapabilityReadRequest(parseQuery(exchange.getRequestURI()));
+        } catch (IllegalArgumentException e) {
+            writeError(exchange, 400, e.getMessage());
+            return;
+        }
+
+        String responseStatus = "ok";
+        String source = config.dbUrl().isBlank() ? "memory" : "db";
+        String error = null;
+        MarketCapabilityPage page;
+        if (config.dbUrl().isBlank()) {
+            page = inMemoryMarketCapabilities(request);
+        } else {
+            try {
+                page = JdbcMarketCapabilityReader
+                    .fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword())
+                    .readPage(request);
+            } catch (RuntimeException e) {
+                responseStatus = "fallback";
+                source = "memory";
+                error = e.getMessage();
+                page = inMemoryMarketCapabilities(request);
+            }
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", responseStatus);
+        body.put("source", source);
+        body.put("catalog_source", source);
+        body.put("limit", page.limit());
+        body.put("offset", page.offset());
+        body.put("count", page.markets().size());
+        body.put("total_count", page.totalCount());
+        body.put("has_more", page.offset() + page.markets().size() < page.totalCount());
+        body.put("summary", marketCapabilitySummaryBody(page.summary()));
+        body.put("markets", page.markets().stream()
+            .map(FrontendAdapterServer::marketCapabilityBody)
+            .toList());
+        if (error != null) {
+            body.put("error", operatorVisibleError(error));
+        }
         writeJson(exchange, 200, body);
     }
 
@@ -1948,6 +2012,424 @@ public class FrontendAdapterServer {
         body.put("catalog_source", isFeatureOnlyCatalogEntry(metadata) ? "feature_outputs" : "market_metadata");
         body.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
         return body;
+    }
+
+    private static Map<String, Object> marketCapabilityBody(MarketCapability capability) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("market_ticker", capability.marketTicker());
+        body.put("event_ticker", capability.eventTicker());
+        body.put("series_ticker", capability.seriesTicker());
+        body.put("status", capability.status());
+        body.put("catalog_source", capability.catalogSource());
+        body.put("has_latest_state", capability.hasLatestState());
+        body.put("has_quote", capability.hasQuote());
+        body.put("has_live_quote", "live_quote".equals(capability.quoteStatus()));
+        body.put("quote_event_ts_ms", capability.quoteEventTsMs());
+        body.put("quote_age_ms", capability.quoteAgeMs());
+        body.put("quote_status", capability.quoteStatus());
+        body.put("has_bbo_history", capability.hasBboHistory());
+        body.put("chartable_from_bbo", capability.chartableFromBbo());
+        body.put("chartable_from_ticker_snapshot", capability.chartableFromTickerSnapshot());
+        body.put("chartable_from_trade_tape", capability.chartableFromTradeTape());
+        body.put("best_chart_source", capability.bestChartSource());
+        body.put("chartable_1h", capability.chartable1h());
+        body.put("chartable_24h", capability.chartable24h());
+        body.put("chartable", capability.chartable());
+        body.put("chart_status", capability.chartStatus());
+        body.put("chart_reason", capability.chartReason());
+        body.put("semantic_status", capability.semanticStatus());
+        body.put("semantic_sector", capability.semanticSector());
+        body.put("semantic_subsector", capability.semanticSubsector());
+        body.put("semantic_event_type", capability.semanticEventType());
+        body.put("feature_count", capability.featureCount());
+        body.put("bbo_sample_count", capability.bboSampleCount());
+        body.put("trade_sample_count", capability.tradeSampleCount());
+        body.put("ticker_sample_count", capability.tickerSampleCount());
+        body.put("feature_counts", Map.of(
+            "bbo", capability.bboSampleCount(),
+            "trade", capability.tradeSampleCount(),
+            "ticker", capability.tickerSampleCount(),
+            "total", capability.featureCount()
+        ));
+        body.put("source_kind", sourceKind(capability.marketTicker()));
+        body.put("synthetic", FrontendSyntheticData.isSynthetic(String.valueOf(body.get("source_kind"))));
+        return body;
+    }
+
+    private static Map<String, Object> marketCapabilitySummaryBody(MarketCapabilitySummary summary) {
+        MarketCapabilitySummary view = summary == null ? MarketCapabilitySummary.empty() : summary;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("total_assets", view.totalAssets());
+        body.put("chartable_count", view.chartableCount());
+        body.put("quote_count", view.quoteCount());
+        body.put("stale_quote_count", view.staleQuoteCount());
+        body.put("semantic_generated_count", view.semanticGeneratedCount());
+        body.put("semantic_review_required_count", view.semanticReviewRequiredCount());
+        body.put("semantic_failed_count", view.semanticFailedCount());
+        body.put("semantic_rate_limited_count", view.semanticRateLimitedCount());
+        body.put("semantic_missing_count", view.semanticMissingCount());
+        body.put("metadata_only_count", view.metadataOnlyCount());
+        return body;
+    }
+
+    private MarketCapabilityReadRequest marketCapabilityReadRequest(Map<String, String> params) {
+        int limit = parseLimit(
+            params.get("limit"),
+            MarketCapabilityReadRequest.DEFAULT_LIMIT,
+            MarketCapabilityReadRequest.MAX_LIMIT
+        );
+        int offset = parseOffset(params.get("offset"));
+        String taxonomyVersion = firstNonBlank(
+            params.get("taxonomy_version"),
+            config.llmMetadataTaxonomyVersion(),
+            MarketCapabilityReadRequest.DEFAULT_TAXONOMY_VERSION
+        );
+        return new MarketCapabilityReadRequest(
+            firstNonBlankOrNull(params.get("q"), params.get("search"), params.get("query")),
+            firstNonBlankOrNull(params.get("market_status"), params.get("status")),
+            firstNonBlankOrNull(params.get("capability"), params.get("filter")),
+            limit,
+            offset,
+            taxonomyVersion,
+            includeSmokeMarkets(params)
+        );
+    }
+
+    private MarketCapabilityPage inMemoryMarketCapabilities(MarketCapabilityReadRequest request) {
+        List<MarketCapability> all = inMemoryCapabilityRows(request);
+        MarketCapabilitySummary summary = summarizeCapabilities(all);
+        List<MarketCapability> filtered = all.stream()
+            .filter(capability -> matchesCapabilityFilter(capability, request.capabilityFilter()))
+            .sorted(FrontendAdapterServer::compareCapabilities)
+            .toList();
+        int fromIndex = Math.min(filtered.size(), request.offset());
+        int toIndex = Math.min(filtered.size(), fromIndex + request.limit());
+        return new MarketCapabilityPage(
+            summary,
+            filtered.subList(fromIndex, toIndex),
+            filtered.size(),
+            request.limit(),
+            request.offset()
+        );
+    }
+
+    private List<MarketCapability> inMemoryCapabilityRows(MarketCapabilityReadRequest request) {
+        Map<String, MarketMetadata> metadataByTicker = new LinkedHashMap<>();
+        int metadataLimit = Math.max(1, metadataCatalog.size());
+        for (MarketMetadata metadata : metadataCatalog.search(null, null, metadataLimit, request.includeSmoke())) {
+            if (matchesBaseCapabilitySearch(metadata, request)) {
+                metadataByTicker.put(metadata.marketTicker(), metadata);
+            }
+        }
+        Map<String, SemanticMarketMetadataRow> semanticByTicker = semanticRowsByTicker(request);
+        Map<String, MarketCapability> capabilities = new LinkedHashMap<>();
+        for (MarketMetadata metadata : metadataByTicker.values()) {
+            capabilities.put(metadata.marketTicker(), capabilityFromMemory(metadata, semanticByTicker.get(metadata.marketTicker())));
+        }
+        for (String symbol : store.symbols()) {
+            if (!request.includeSmoke() && FrontendSyntheticData.isSmokeMarketTicker(symbol)) {
+                continue;
+            }
+            if (capabilities.containsKey(symbol)) {
+                continue;
+            }
+            MarketMetadata syntheticMetadata = new MarketMetadata(
+                symbol,
+                null,
+                null,
+                "indexed",
+                null,
+                null,
+                null,
+                "{}",
+                "{}"
+            );
+            if (matchesBaseCapabilitySearch(syntheticMetadata, request)) {
+                capabilities.put(symbol, capabilityFromMemory(syntheticMetadata, semanticByTicker.get(symbol)));
+            }
+        }
+        return List.copyOf(capabilities.values());
+    }
+
+    private MarketCapability capabilityFromMemory(MarketMetadata metadata, SemanticMarketMetadataRow semantic) {
+        String marketTicker = metadata.marketTicker();
+        List<FeatureOutput> allFeatures = store.snapshot(marketTicker, null);
+        List<FeatureOutput> bboFeatures = allFeatures.stream()
+            .filter(output -> FrontendFeatureStore.BBO_FEATURE.equals(output.featureName()))
+            .toList();
+        List<FeatureOutput> tickerFeatures = allFeatures.stream()
+            .filter(output -> FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE.equals(output.featureName()))
+            .toList();
+        List<FeatureOutput> tradeFeatures = allFeatures.stream()
+            .filter(output -> FrontendFeatureStore.TRADE_TAPE_FEATURE.equals(output.featureName()))
+            .toList();
+        long nowMs = System.currentTimeMillis();
+        boolean chartableFromBbo = bboFeatures.stream().anyMatch(FrontendAdapterServer::chartableOutput);
+        boolean chartableFromTicker = tickerFeatures.stream().anyMatch(FrontendAdapterServer::chartableOutput);
+        boolean chartableFromTrade = tradeFeatures.stream().anyMatch(FrontendAdapterServer::chartableOutput);
+        long chartable1h = allFeatures.stream()
+            .filter(FrontendAdapterServer::chartableOutput)
+            .filter(output -> inWindow(output, nowMs, 3_600_000L))
+            .count();
+        long chartable24h = allFeatures.stream()
+            .filter(FrontendAdapterServer::chartableOutput)
+            .filter(output -> inWindow(output, nowMs, 86_400_000L))
+            .count();
+        long tradeCount = tradeFeatures.size();
+        long tickerCount = tickerFeatures.size();
+        Optional<FeatureOutput> latest = store.latest(marketTicker, FrontendFeatureStore.BBO_FEATURE);
+        Long eventTsMs = latest.map(FeatureOutput::eventTsMs).orElse(null);
+        Object midpoint = latest.map(output -> output.values().get("midpoint_micros")).orElse(null);
+        boolean hasQuote = eventTsMs != null && midpoint != null;
+        Long quoteAgeMs = eventTsMs == null ? null : Math.max(0L, nowMs - eventTsMs);
+        String quoteStatus = quoteStatus(hasQuote, quoteAgeMs);
+        boolean chartable = chartableFromBbo || chartableFromTicker || chartableFromTrade;
+        String bestChartSource = bestChartSource(chartableFromBbo, chartableFromTicker, chartableFromTrade);
+        String chartStatus = chartable1h > 0L ? "chartable_1h"
+            : chartable24h > 0L ? "chartable_24h"
+            : chartable ? "chartable_history"
+            : hasQuote ? "quote_only"
+            : "not_chartable";
+        String chartReason = chartableFromBbo ? "bbo_history_available"
+            : chartableFromTicker ? "ticker_snapshot_history_available"
+            : chartableFromTrade ? "trade_tape_history_available"
+            : hasQuote ? "quote_without_chart_history"
+            : isFeatureOnlyCatalogEntry(metadata) ? "missing_quote_and_history" : "catalog_only";
+        return new MarketCapability(
+            marketTicker,
+            metadata.eventTicker(),
+            metadata.seriesTicker(),
+            metadata.status(),
+            isFeatureOnlyCatalogEntry(metadata) ? "feature_outputs" : "market_metadata",
+            latest.isPresent(),
+            hasQuote,
+            eventTsMs,
+            quoteAgeMs,
+            quoteStatus,
+            chartableFromBbo,
+            chartableFromBbo,
+            chartableFromTicker,
+            chartableFromTrade,
+            bestChartSource,
+            chartable1h > 0L,
+            chartable24h > 0L,
+            chartable,
+            chartStatus,
+            chartReason,
+            semantic == null ? "missing" : semantic.semanticStatus(),
+            semantic == null ? null : semantic.sector(),
+            semantic == null ? null : semantic.subsector(),
+            semantic == null ? null : semantic.eventType(),
+            allFeatures.size(),
+            bboFeatures.size(),
+            tradeCount,
+            tickerCount
+        );
+    }
+
+    private Map<String, SemanticMarketMetadataRow> semanticRowsByTicker(MarketCapabilityReadRequest request) {
+        try {
+            List<SemanticMarketMetadataRow> rows = semanticMarketMetadataReader.read(
+                new SemanticMarketMetadataReadRequest(
+                    request.taxonomyVersion(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    request.query(),
+                    500
+                )
+            );
+            Map<String, SemanticMarketMetadataRow> byTicker = new LinkedHashMap<>();
+            for (SemanticMarketMetadataRow row : rows) {
+                byTicker.put(row.marketTicker(), row);
+            }
+            return byTicker;
+        } catch (RuntimeException e) {
+            return Map.of();
+        }
+    }
+
+    private static MarketCapabilitySummary summarizeCapabilities(List<MarketCapability> capabilities) {
+        long total = capabilities.size();
+        long chartable = 0L;
+        long quote = 0L;
+        long staleQuote = 0L;
+        long semanticGenerated = 0L;
+        long semanticReviewRequired = 0L;
+        long semanticFailed = 0L;
+        long semanticRateLimited = 0L;
+        long semanticMissing = 0L;
+        long metadataOnly = 0L;
+        for (MarketCapability capability : capabilities) {
+            if (capability.chartable()) {
+                chartable++;
+            }
+            if (capability.hasQuote()) {
+                quote++;
+            }
+            if ("stale_quote".equals(capability.quoteStatus())) {
+                staleQuote++;
+            }
+            if ("generated".equals(capability.semanticStatus())) {
+                semanticGenerated++;
+            }
+            if ("review_required".equals(capability.semanticStatus())) {
+                semanticReviewRequired++;
+            }
+            if ("failed".equals(capability.semanticStatus())) {
+                semanticFailed++;
+            }
+            if ("rate_limited".equals(capability.semanticStatus())) {
+                semanticRateLimited++;
+            }
+            if ("missing".equals(capability.semanticStatus())) {
+                semanticMissing++;
+            }
+            if (capability.metadataOnly()) {
+                metadataOnly++;
+            }
+        }
+        return new MarketCapabilitySummary(
+            total,
+            chartable,
+            quote,
+            staleQuote,
+            semanticGenerated,
+            semanticReviewRequired,
+            semanticFailed,
+            semanticRateLimited,
+            semanticMissing,
+            metadataOnly
+        );
+    }
+
+    private static boolean matchesBaseCapabilitySearch(MarketMetadata metadata, MarketCapabilityReadRequest request) {
+        if (request.status() != null && !request.status().equalsIgnoreCase(nullToEmpty(metadata.status()))) {
+            return false;
+        }
+        String query = request.query();
+        return query == null || matchesQuery(metadata, query.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean matchesQuery(MarketMetadata metadata, String query) {
+        return containsIgnoreCase(metadata.marketTicker(), query)
+            || containsIgnoreCase(metadata.eventTicker(), query)
+            || containsIgnoreCase(metadata.seriesTicker(), query)
+            || containsIgnoreCase(metadata.status(), query);
+    }
+
+    private static boolean containsIgnoreCase(String value, String query) {
+        return value != null && value.toLowerCase(Locale.ROOT).contains(query);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static boolean matchesCapabilityFilter(MarketCapability capability, String filter) {
+        return switch (filter) {
+            case "all" -> true;
+            case "chart_ready" -> capability.chartable();
+            case "quote_available" -> capability.hasQuote();
+            case "quote_only" -> capability.hasQuote() && !capability.chartable();
+            case "quote_stale" -> "stale_quote".equals(capability.quoteStatus());
+            case "metadata_only" -> capability.metadataOnly();
+            case "semantic_tagged" -> capability.semanticTagged();
+            case "unclassified" -> "missing".equals(capability.semanticStatus());
+            default -> false;
+        };
+    }
+
+    private static int compareCapabilities(MarketCapability left, MarketCapability right) {
+        int leftRank = capabilityRank(left);
+        int rightRank = capabilityRank(right);
+        if (leftRank != rightRank) {
+            return Integer.compare(leftRank, rightRank);
+        }
+        long leftTs = left.quoteEventTsMs() == null ? Long.MIN_VALUE : left.quoteEventTsMs();
+        long rightTs = right.quoteEventTsMs() == null ? Long.MIN_VALUE : right.quoteEventTsMs();
+        int ts = Long.compare(rightTs, leftTs);
+        return ts != 0 ? ts : left.marketTicker().compareTo(right.marketTicker());
+    }
+
+    private static int capabilityRank(MarketCapability capability) {
+        if (capability.chartable1h()) {
+            return 0;
+        }
+        if (capability.chartable24h()) {
+            return 1;
+        }
+        if (capability.hasQuote()) {
+            return 2;
+        }
+        if (capability.chartable()) {
+            return 3;
+        }
+        return 4;
+    }
+
+    private static boolean chartableOutput(FeatureOutput output) {
+        Long eventTsMs = output.eventTsMs();
+        if (eventTsMs == null) {
+            return false;
+        }
+        Map<String, Object> values = output.values();
+        return switch (output.featureName()) {
+            case FrontendFeatureStore.BBO_FEATURE -> values.get("midpoint_micros") instanceof Number;
+            case FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE -> values.get("price_micros") instanceof Number
+                || (values.get("yes_bid_micros") instanceof Number && values.get("yes_ask_micros") instanceof Number);
+            case FrontendFeatureStore.TRADE_TAPE_FEATURE -> values.get("yes_price_micros") instanceof Number
+                || values.get("no_price_micros") instanceof Number;
+            default -> false;
+        };
+    }
+
+    private static String bestChartSource(boolean bbo, boolean tickerSnapshot, boolean tradeTape) {
+        if (bbo) {
+            return "bbo";
+        }
+        if (tickerSnapshot) {
+            return "ticker_snapshot";
+        }
+        return tradeTape ? "trade_tape" : null;
+    }
+
+    private static boolean inWindow(FeatureOutput output, long nowMs, long windowMs) {
+        Long eventTsMs = output.eventTsMs();
+        return eventTsMs != null && eventTsMs >= nowMs - windowMs && eventTsMs <= nowMs;
+    }
+
+    private static String quoteStatus(boolean hasQuote, Long quoteAgeMs) {
+        if (!hasQuote || quoteAgeMs == null) {
+            return "missing_quote";
+        }
+        return quoteAgeMs <= DATA_FRESHNESS_STALE_AFTER_MS ? "live_quote" : "stale_quote";
+    }
+
+    private static String sourceKind(String marketTicker) {
+        if (FrontendSyntheticData.isSmokeMarketTicker(marketTicker)) {
+            return FrontendSyntheticData.SOURCE_KIND_SMOKE;
+        }
+        return marketTicker != null && marketTicker.startsWith("DEMO-DBPRIMARY-")
+            ? FrontendSyntheticData.SOURCE_KIND_DEMO
+            : FrontendSyntheticData.SOURCE_KIND_LIVE;
+    }
+
+    private static int parseOffset(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return 0;
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("offset must be an integer");
+        }
+        if (parsed < 0) {
+            throw new IllegalArgumentException("offset must be non-negative");
+        }
+        return parsed;
     }
 
     private static boolean isFeatureOnlyCatalogEntry(MarketMetadata metadata) {

@@ -107,21 +107,21 @@ main {
     min-height: 540px;
 }
 
-main[data-active-role]:not([data-active-role="viewer"]) {
+main[data-active-role]:not([data-active-role="chart"]) {
     grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
 }
 
-main[data-active-role]:not([data-active-role="viewer"]) #chart-panel {
+main[data-active-role]:not([data-active-role="chart"]) #chart-panel {
     display: none;
 }
 
-main[data-active-role]:not([data-active-role="viewer"]) #live-panel {
+main[data-active-role]:not([data-active-role="chart"]) #live-panel {
     grid-column: 2;
     min-width: 0;
     border-left: 1px solid #30373c;
 }
 
-main[data-active-role]:not([data-active-role="viewer"]) #live-panel > .panel {
+main[data-active-role]:not([data-active-role="chart"]) #live-panel > .panel {
     padding: 16px 18px;
 }
 
@@ -215,6 +215,66 @@ main[data-active-role]:not([data-active-role="viewer"]) #live-panel > .panel {
     overflow-wrap: anywhere;
 }
 
+.capability-summary,
+.semantic-coverage-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-bottom: 8px;
+}
+
+.capability-chip,
+.coverage-chip {
+    min-width: 0;
+    background: #151719;
+    border: 1px solid #30373c;
+    border-radius: 4px;
+    padding: 6px 7px;
+}
+
+.capability-chip strong,
+.coverage-chip strong,
+.capability-chip span,
+.coverage-chip span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.capability-chip strong,
+.coverage-chip strong {
+    color: #f4f7f9;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.capability-chip span,
+.coverage-chip span {
+    color: #a8b0b7;
+    font-size: 10px;
+}
+
+.market-pagination {
+    align-items: center;
+    color: #a8b0b7;
+    display: flex;
+    font-size: 11px;
+    gap: 8px;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.market-pagination button {
+    min-width: 58px;
+}
+
+.market-pagination button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
 .market-list button {
     width: 100%;
     border: 1px solid transparent;
@@ -257,6 +317,30 @@ main[data-active-role]:not([data-active-role="viewer"]) #live-panel > .panel {
 #chart-container {
     position: relative;
     min-height: 320px;
+}
+
+.chart-state {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    z-index: 2;
+    max-width: min(520px, calc(100% - 24px));
+    border: 1px solid #30373c;
+    border-radius: 4px;
+    background: rgba(21, 23, 25, 0.9);
+    color: #dfe5e8;
+    padding: 7px 9px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+}
+
+.chart-state.fresh {
+    border-color: #2fbf71;
+}
+
+.chart-state.stale {
+    border-color: #b58b2b;
 }
 
 #quote-strip {
@@ -636,6 +720,10 @@ main[data-active-role="semantic"] .semantic-search-field {
 
 main[data-active-role="semantic"] .semantic-group-summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+main[data-active-role="semantic"] .semantic-coverage-summary {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 main[data-active-role="semantic"] .semantic-treemap {

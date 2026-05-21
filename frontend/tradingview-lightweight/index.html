@@ -40,36 +40,56 @@
             <button id="load-history" type="button">Load Chart</button>
         </div>
         <nav id="view-tabs" class="view-tabs" aria-label="dashboard roles" role="tablist">
-            <button id="viewer-tab" type="button" data-role="viewer" data-target="market-panel" role="tab" aria-selected="true">Viewer</button>
-            <button id="trader-tab" type="button" data-role="trader" data-target="trader-monitor-panel" role="tab" aria-selected="false">Trader</button>
-            <button id="research-tab" type="button" data-role="research" data-target="research-features-panel" role="tab" aria-selected="false">Research</button>
+            <button id="overview-tab" type="button" data-role="overview" data-target="product-mode-panel" role="tab" aria-selected="false">Overview</button>
+            <button id="markets-tab" type="button" data-role="markets" data-target="market-panel" role="tab" aria-selected="true">Markets</button>
+            <button id="chart-tab" type="button" data-role="chart" data-target="chart-panel" role="tab" aria-selected="false">Chart</button>
             <button id="semantic-tab" type="button" data-role="semantic" data-target="semantic-map-panel" role="tab" aria-selected="false">Semantic</button>
-            <button id="operator-tab" type="button" data-role="operator" data-target="runtime-operator-panel" role="tab" aria-selected="false">Operator</button>
+            <button id="research-tab" type="button" data-role="research" data-target="research-features-panel" role="tab" aria-selected="false">Research</button>
+            <button id="operator-tab" type="button" data-role="operator" data-target="runtime-operator-panel" role="tab" aria-selected="false">Operations</button>
         </nav>
     </header>
 
-    <main id="dashboard-shell" data-active-role="viewer">
+    <main id="dashboard-shell" data-active-role="markets">
         <section id="market-panel" class="panel" aria-label="market catalog">
             <div class="panel-heading">
-                <h2>Market Catalog</h2>
+                <h2>Markets</h2>
                 <span id="market-count">0</span>
             </div>
             <div class="market-filters">
                 <input id="market-search" type="search" placeholder="Search markets" autocomplete="off" />
+                <select id="market-capability-filter" aria-label="Market capability">
+                    <option value="all">All assets</option>
+                    <option value="chart_ready">Chart ready</option>
+                    <option value="quote_available">Quote available</option>
+                    <option value="quote_stale">Quote stale</option>
+                    <option value="metadata_only">Metadata/catalog only</option>
+                    <option value="semantic_tagged">Semantic tagged</option>
+                    <option value="unclassified">Unclassified</option>
+                </select>
                 <select id="market-status-filter" aria-label="Market status">
-                    <option value="">Any status</option>
+                    <option value="">Raw status: any</option>
+                    <option value="indexed">Indexed</option>
+                    <option value="active">Active</option>
                     <option value="open">Open</option>
                     <option value="closed">Closed</option>
                     <option value="settled">Settled</option>
                 </select>
                 <button id="market-search-apply" type="button">Search</button>
             </div>
+            <div id="market-capability-summary" class="capability-summary" aria-label="market capability summary"></div>
+            <div class="market-pagination" aria-label="market page controls">
+                <button id="market-prev-page" type="button">Prev</button>
+                <span id="market-page-state">Showing 0</span>
+                <button id="market-next-page" type="button">Next</button>
+            </div>
             <div id="market-state" class="market-state">Loading markets...</div>
             <div id="market-list" class="market-list"></div>
         </section>
 
         <section id="chart-panel" aria-label="chart and quote">
-            <div id="chart-container" aria-label="candlestick chart"></div>
+            <div id="chart-container" aria-label="candlestick chart">
+                <div id="chart-state" class="chart-state">Select a chart-ready market</div>
+            </div>
             <div id="quote-strip">
                 <div>
                     <span class="label">Bid</span>
@@ -91,7 +111,7 @@
         </section>
 
         <aside id="live-panel">
-            <section class="panel" data-role-panel="viewer">
+            <section class="panel" data-role-panel="chart">
                 <div class="panel-heading">
                     <h2>Current Quote</h2>
                     <span id="live-symbol" class="ticker-text">-</span>
@@ -104,7 +124,7 @@
                 </dl>
             </section>
 
-            <section id="trader-monitor-panel" class="panel" data-role-panel="trader">
+            <section id="trader-monitor-panel" class="panel" data-role-panel="chart">
                 <div class="panel-heading">
                     <h2>Quote Monitor</h2>
                     <span id="trader-quote-mode">-</span>
@@ -120,7 +140,7 @@
                 </dl>
             </section>
 
-            <section id="product-market-panel" class="panel" data-role-panel="viewer">
+            <section id="product-market-panel" class="panel" data-role-panel="overview,markets,chart">
                 <div class="panel-heading">
                     <h2>Product Readiness</h2>
                     <span id="product-readiness-state">-</span>
@@ -133,7 +153,7 @@
                 </dl>
             </section>
 
-            <section id="product-mode-panel" class="panel" data-role-panel="viewer">
+            <section id="product-mode-panel" class="panel" data-role-panel="overview">
                 <div class="panel-heading">
                     <h2>Product Mode</h2>
                     <span id="product-mode-state">-</span>
@@ -156,7 +176,7 @@
                 </dl>
             </section>
 
-            <section class="panel" data-role-panel="viewer">
+            <section class="panel" data-role-panel="markets,chart">
                 <div class="panel-heading">
                     <h2>Selected Market</h2>
                     <span id="market-status">-</span>
@@ -205,7 +225,7 @@
 
             <section id="semantic-map-panel" class="panel" data-role-panel="semantic">
                 <div class="panel-heading">
-                    <h2>Semantic Map</h2>
+                    <h2>Semantic Coverage</h2>
                     <span id="semantic-map-count">0</span>
                 </div>
                 <div class="semantic-controls">
@@ -252,6 +272,7 @@
                     <button id="semantic-drillup" type="button">Back</button>
                 </div>
                 <div id="semantic-map-state" class="semantic-map-state">Loading semantic metadata...</div>
+                <div id="semantic-coverage-summary" class="semantic-coverage-summary"></div>
                 <div id="semantic-group-summary" class="semantic-group-summary"></div>
                 <div id="semantic-treemap" class="semantic-treemap" aria-label="semantic metadata treemap"></div>
                 <dl id="semantic-market-detail" class="semantic-market-detail">
@@ -270,7 +291,7 @@
                 </dl>
             </section>
 
-            <section class="panel" data-role-panel="viewer">
+            <section class="panel" data-role-panel="overview">
                 <div class="panel-heading">
                     <h2>Runtime Health</h2>
                     <span id="adapter-health">-</span>
@@ -288,7 +309,7 @@
 
             <section id="runtime-operator-panel" class="panel" data-role-panel="operator">
                 <div class="panel-heading">
-                    <h2>Runtime/Operator</h2>
+                    <h2>Operations</h2>
                     <span id="runtime-source-mode">-</span>
                 </div>
                 <dl>

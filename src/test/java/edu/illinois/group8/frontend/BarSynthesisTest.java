@@ -78,6 +78,34 @@ class BarSynthesisTest {
         assertTrue(store.bars("MKT-MISSING", 0L, 1_000L, BarResolution.M1).isEmpty());
     }
 
+    @Test
+    void fallsBackToTickerSnapshotBarsWhenBboIsAbsent() {
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(ticker("MKT-1", 1_000L, 420_000L, null, null));
+        store.accept(ticker("MKT-1", 1_500L, null, 430_000L, 450_000L));
+
+        FrontendFeatureStore.BarSeries series = store.barSeries("MKT-1", 0L, 2_000L, BarResolution.S1);
+
+        assertEquals("ticker_snapshot", series.source());
+        assertEquals(1, series.bars().size());
+        assertEquals(0.42, series.bars().get(0).open(), 1e-9);
+        assertEquals(0.44, series.bars().get(0).close(), 1e-9);
+    }
+
+    @Test
+    void fallsBackToTradeTapeBarsWhenTickerSnapshotIsAbsent() {
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        store.accept(trade("MKT-1", 1_000L, 630_000L, null));
+        store.accept(trade("MKT-1", 2_000L, null, 300_000L));
+
+        FrontendFeatureStore.BarSeries series = store.barSeries("MKT-1", 0L, 3_000L, BarResolution.S1);
+
+        assertEquals("trade_tape", series.source());
+        assertEquals(2, series.bars().size());
+        assertEquals(0.63, series.bars().get(0).close(), 1e-9);
+        assertEquals(0.70, series.bars().get(1).close(), 1e-9);
+    }
+
     private static FeatureOutput bbo(String market, long ts, long midpoint) {
         return new FeatureOutput(
             FrontendFeatureStore.BBO_FEATURE,
@@ -90,6 +118,45 @@ class BarSynthesisTest {
                 "ask_price_micros", midpoint + 50_000L,
                 "midpoint_micros", midpoint
             )
+        );
+    }
+
+    private static FeatureOutput ticker(String market, long ts, Long price, Long bid, Long ask) {
+        java.util.LinkedHashMap<String, Object> values = new java.util.LinkedHashMap<>();
+        if (price != null) {
+            values.put("price_micros", price);
+        }
+        if (bid != null) {
+            values.put("yes_bid_micros", bid);
+        }
+        if (ask != null) {
+            values.put("yes_ask_micros", ask);
+        }
+        return new FeatureOutput(
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            market,
+            ts,
+            "ticker-" + ts,
+            values
+        );
+    }
+
+    private static FeatureOutput trade(String market, long ts, Long yesPrice, Long noPrice) {
+        java.util.LinkedHashMap<String, Object> values = new java.util.LinkedHashMap<>();
+        if (yesPrice != null) {
+            values.put("yes_price_micros", yesPrice);
+        }
+        if (noPrice != null) {
+            values.put("no_price_micros", noPrice);
+        }
+        return new FeatureOutput(
+            FrontendFeatureStore.TRADE_TAPE_FEATURE,
+            FrontendFeatureStore.TRADE_TAPE_FEATURE,
+            market,
+            ts,
+            "trade-" + ts,
+            values
         );
     }
 }

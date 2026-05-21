@@ -34,10 +34,16 @@
         footer: document.querySelector('footer'),
         marketCount: document.getElementById('market-count'),
         marketSearch: document.getElementById('market-search'),
+        marketCapabilityFilter: document.getElementById('market-capability-filter'),
         marketStatusFilter: document.getElementById('market-status-filter'),
         marketSearchApply: document.getElementById('market-search-apply'),
+        marketCapabilitySummary: document.getElementById('market-capability-summary'),
+        marketPrevPage: document.getElementById('market-prev-page'),
+        marketNextPage: document.getElementById('market-next-page'),
+        marketPageState: document.getElementById('market-page-state'),
         marketState: document.getElementById('market-state'),
         marketList: document.getElementById('market-list'),
+        chartState: document.getElementById('chart-state'),
         marketStatus: document.getElementById('market-status'),
         marketEvent: document.getElementById('market-event'),
         marketSeries: document.getElementById('market-series'),
@@ -87,6 +93,7 @@
         semanticRefresh: document.getElementById('semantic-refresh'),
         semanticDrillup: document.getElementById('semantic-drillup'),
         semanticMapState: document.getElementById('semantic-map-state'),
+        semanticCoverageSummary: document.getElementById('semantic-coverage-summary'),
         semanticGroupSummary: document.getElementById('semantic-group-summary'),
         semanticTreemap: document.getElementById('semantic-treemap'),
         semanticDetailMarket: document.getElementById('semantic-detail-market'),
@@ -285,6 +292,8 @@
     let quoteUpdateErrors = 0;
     let marketEntries = [];
     let marketCatalogTotal = 0;
+    let marketCatalogOffset = 0;
+    let marketCapabilitySummary = null;
     let marketSearchTimer = null;
     let semanticSearchTimer = null;
     let semanticMapGeneration = 0;
@@ -403,7 +412,33 @@
     async function loadMarketEntries() {
         const query = dom.marketSearch ? dom.marketSearch.value.trim() : '';
         const status = dom.marketStatusFilter ? dom.marketStatusFilter.value.trim() : '';
-        const filtered = query !== '' || status !== '';
+        const capability = dom.marketCapabilityFilter ? dom.marketCapabilityFilter.value.trim() : 'all';
+        const filtered = query !== '' || status !== '' || (capability && capability !== 'all');
+        const capabilityParams = [`limit=${MARKET_CATALOG_LIMIT}`, `offset=${marketCatalogOffset}`];
+        if (query) {
+            capabilityParams.push(`query=${encodeURIComponent(query)}`);
+        }
+        if (status) {
+            capabilityParams.push(`status=${encodeURIComponent(status)}`);
+        }
+        if (capability && capability !== 'all') {
+            capabilityParams.push(`capability=${encodeURIComponent(capability)}`);
+        }
+        try {
+            const body = await fetchJson('/api/markets/capabilities?' + capabilityParams.join('&'));
+            if (body && Array.isArray(body.markets)) {
+                const entries = body.markets.map(mapCapabilityMarketRow).filter(row => row.symbol);
+                marketCatalogTotal = Number(body.total_count || body.summary?.total_assets || entries.length) || entries.length;
+                marketCatalogOffset = Math.max(0, Number(body.offset || marketCatalogOffset) || 0);
+                marketCapabilitySummary = body.summary || null;
+                renderCapabilitySummary(marketCapabilitySummary);
+                return sortMarketEntries(entries);
+            }
+        } catch (err) {
+            console.warn('Falling back after /api/markets/capabilities failed', err);
+        }
+        marketCapabilitySummary = null;
+        renderCapabilitySummary(null);
         const params = [`limit=${MARKET_CATALOG_LIMIT}`];
         if (query) {
             params.push(`query=${encodeURIComponent(query)}`);
@@ -448,6 +483,51 @@
             closeTime: row.close_time || null,
             quoteEventTsMs: null,
             hasQuote: false,
+            chartable: false,
+            bestChartSource: null,
+            sourceKind: row.source_kind || '-',
+            catalogSource: row.catalog_source || 'catalog',
+            synthetic: row.synthetic === true
+        };
+    }
+
+    function mapCapabilityMarketRow(row) {
+        const quoteEventTsMs = row.quote_event_ts_ms == null ? null : Number(row.quote_event_ts_ms);
+        const hasQuote = row.has_quote === true || row.has_live_quote === true;
+        const chartable = row.chartable === true
+            || row.chartable_from_bbo === true
+            || row.chartable_from_ticker_snapshot === true
+            || row.chartable_from_trade_tape === true;
+        return {
+            symbol: row.market_ticker,
+            eventTicker: row.event_ticker || '-',
+            seriesTicker: row.series_ticker || '-',
+            status: row.status || '-',
+            openTime: row.open_time || null,
+            closeTime: row.close_time || null,
+            quoteEventTsMs: Number.isFinite(quoteEventTsMs) ? quoteEventTsMs : null,
+            quoteAgeMs: row.quote_age_ms == null ? null : Number(row.quote_age_ms),
+            quoteStatus: row.quote_status || 'missing_quote',
+            hasQuote,
+            hasLatestState: row.has_latest_state === true,
+            hasBboHistory: row.has_bbo_history === true,
+            chartableFromBbo: row.chartable_from_bbo === true,
+            chartableFromTickerSnapshot: row.chartable_from_ticker_snapshot === true,
+            chartableFromTradeTape: row.chartable_from_trade_tape === true,
+            bestChartSource: row.best_chart_source || null,
+            chartable,
+            chartable1h: row.chartable_1h === true,
+            chartable24h: row.chartable_24h === true,
+            chartStatus: row.chart_status || (chartable ? 'chartable_history' : hasQuote ? 'quote_only' : 'not_chartable'),
+            chartReason: row.chart_reason || '',
+            semanticStatus: row.semantic_status || 'missing',
+            semanticSector: row.semantic_sector || '',
+            semanticSubsector: row.semantic_subsector || '',
+            semanticEventType: row.semantic_event_type || '',
+            featureCount: Number(row.feature_count || 0),
+            bboSampleCount: Number(row.bbo_sample_count || 0),
+            tradeSampleCount: Number(row.trade_sample_count || 0),
+            tickerSampleCount: Number(row.ticker_sample_count || 0),
             sourceKind: row.source_kind || '-',
             catalogSource: row.catalog_source || 'catalog',
             synthetic: row.synthetic === true
@@ -466,6 +546,8 @@
             closeTime: null,
             quoteEventTsMs: hasQuote ? eventTsMs : null,
             hasQuote,
+            chartable: false,
+            bestChartSource: null,
             sourceKind: row.source_kind || '-',
             catalogSource: 'latest_state',
             synthetic: row.synthetic === true
@@ -549,6 +631,12 @@
 
     function sortMarketEntries(entries) {
         return entries.slice().sort((left, right) => {
+            if (left.chartable !== right.chartable) {
+                return left.chartable ? -1 : 1;
+            }
+            if (left.chartable24h !== right.chartable24h) {
+                return left.chartable24h ? -1 : 1;
+            }
             if (left.hasQuote !== right.hasQuote) {
                 return left.hasQuote ? -1 : 1;
             }
@@ -562,28 +650,46 @@
 
     function populateSymbolDropdown(entries, preferredSymbol) {
         dom.symbolSelect.innerHTML = '';
-        if (entries.length === 0) {
+        const selectable = entries.filter(entry => entry.chartable || entry.hasQuote);
+        const dropdownEntries = selectable.length > 0 ? selectable : entries;
+        if (dropdownEntries.length === 0) {
             const opt = document.createElement('option');
             opt.value = '';
             opt.textContent = '(no markets)';
             dom.symbolSelect.appendChild(opt);
             return;
         }
-        for (const entry of entries) {
+        for (const entry of dropdownEntries) {
             const opt = document.createElement('option');
             opt.value = entry.symbol;
-            opt.textContent = entry.symbol;
+            opt.textContent = `${entry.symbol} (${marketCapabilityLabel(entry)})`;
             dom.symbolSelect.appendChild(opt);
         }
-        if (preferredSymbol && entries.some(entry => entry.symbol === preferredSymbol)) {
+        if (preferredSymbol && dropdownEntries.some(entry => entry.symbol === preferredSymbol)) {
             dom.symbolSelect.value = preferredSymbol;
+        } else {
+            dom.symbolSelect.value = dropdownEntries[0].symbol;
         }
     }
 
     function renderMarketCatalog(entries) {
-        dom.marketCount.textContent = marketCatalogTotal > entries.length
-            ? `${entries.length}/${marketCatalogTotal}`
+        const pageStart = entries.length === 0 ? 0 : marketCatalogOffset + 1;
+        const pageEnd = marketCatalogOffset + entries.length;
+        const total = Math.max(marketCatalogTotal, pageEnd);
+        dom.marketCount.textContent = total > entries.length
+            ? `${pageStart}-${pageEnd}/${total}`
             : String(entries.length);
+        if (dom.marketPageState) {
+            dom.marketPageState.textContent = entries.length === 0
+                ? `Showing 0 of ${formatCompactNumber(total)}`
+                : `Showing ${formatCompactNumber(pageStart)}-${formatCompactNumber(pageEnd)} of ${formatCompactNumber(total)}`;
+        }
+        if (dom.marketPrevPage) {
+            dom.marketPrevPage.disabled = marketCatalogOffset <= 0;
+        }
+        if (dom.marketNextPage) {
+            dom.marketNextPage.disabled = pageEnd >= total || entries.length === 0;
+        }
         dom.marketList.innerHTML = '';
         if (entries.length === 0) {
             dom.marketState.textContent = hasMarketFilter()
@@ -598,18 +704,22 @@
             filters.push(`query "${query}"`);
         }
         if (status) {
-            filters.push(`status ${status}`);
+            filters.push(`raw status ${status}`);
+        }
+        const capability = dom.marketCapabilityFilter ? dom.marketCapabilityFilter.value.trim() : 'all';
+        if (capability && capability !== 'all') {
+            filters.push(`capability ${marketFilterLabel(capability)}`);
         }
         dom.marketState.textContent = filters.length
-            ? `${entries.length} market(s) for ${filters.join(' / ')}`
+            ? `Showing ${pageStart}-${pageEnd} of ${total} asset(s) for ${filters.join(' / ')}`
             : marketCatalogTotal > entries.length
-                ? `${entries.length} of ${marketCatalogTotal} asset(s)`
+                ? `Showing ${pageStart}-${pageEnd} of ${total} asset(s)`
                 : `${entries.length} asset(s)`;
         for (const entry of entries) {
             const button = document.createElement('button');
             button.type = 'button';
             button.dataset.symbol = entry.symbol;
-            button.title = `${entry.symbol} / ${entry.status || '-'}`;
+            button.title = `${entry.symbol} / ${marketCapabilityText(entry)}`;
             button.setAttribute('aria-label', button.title);
             button.innerHTML = `<strong class="ticker-text">${escapeHtml(entry.symbol)}</strong>` +
                 `<span>${escapeHtml(marketCatalogStatusText(entry))}</span>`;
@@ -621,13 +731,118 @@
         }
     }
 
+    function marketFilterLabel(value) {
+        const option = dom.marketCapabilityFilter
+            ? Array.from(dom.marketCapabilityFilter.options).find(item => item.value === value)
+            : null;
+        return option ? option.textContent : value;
+    }
+
     function marketCatalogStatusText(entry) {
-        const status = entry.status || '-';
-        if (!entry.hasQuote) {
-            return entry.catalogSource ? `${status} / ${entry.catalogSource}` : status;
+        return `${entry.status || '-'} / ${marketCapabilityLabel(entry)}`;
+    }
+
+    function marketCapabilityLabel(entry) {
+        if (entry.chartable1h) {
+            return `${chartSourceLabel(entry.bestChartSource)} 1h`;
         }
-        const age = entry.quoteEventTsMs == null ? '' : ` / ${formatAge(Date.now() - entry.quoteEventTsMs)}`;
-        return `${status} / live quote${age}`;
+        if (entry.chartable24h) {
+            return `${chartSourceLabel(entry.bestChartSource)} 24h`;
+        }
+        if (entry.chartable) {
+            return `${chartSourceLabel(entry.bestChartSource)} history`;
+        }
+        if (entry.hasQuote) {
+            return entry.quoteStatus === 'stale_quote' ? 'stale quote' : 'quote only';
+        }
+        if (entry.semanticStatus && entry.semanticStatus !== 'missing') {
+            return `semantic ${entry.semanticStatus}`;
+        }
+        if (entry.catalogSource === 'market_metadata') {
+            return 'metadata only';
+        }
+        return entry.catalogSource || 'catalog only';
+    }
+
+    function chartSourceLabel(source) {
+        switch (source) {
+            case 'bbo':
+                return 'BBO';
+            case 'ticker_snapshot':
+                return 'ticker snapshot';
+            case 'trade_tape':
+                return 'trade tape';
+            default:
+                return 'chart';
+        }
+    }
+
+    function marketCapabilityText(entry) {
+        const parts = [marketCapabilityLabel(entry)];
+        if (entry.quoteEventTsMs != null) {
+            parts.push(`quote ${formatAge(Date.now() - entry.quoteEventTsMs)}`);
+        }
+        if (entry.bestChartSource) {
+            parts.push(`chart source ${chartSourceLabel(entry.bestChartSource)}`);
+        }
+        if (entry.semanticStatus) {
+            parts.push(`semantic ${entry.semanticStatus}`);
+        }
+        return parts.join(' / ');
+    }
+
+    function renderCapabilitySummary(summary) {
+        if (!dom.marketCapabilitySummary) {
+            return;
+        }
+        if (!summary) {
+            dom.marketCapabilitySummary.innerHTML = '';
+            renderSemanticCoverageSummary(null);
+            return;
+        }
+        const total = Number(summary.total_assets || 0);
+        const items = [
+            ['Total assets', total],
+            ['Chartable', summary.chartable_count],
+            ['With quote', summary.quote_count],
+            ['Stale quote', summary.stale_quote_count],
+            ['Metadata only', summary.metadata_only_count]
+        ];
+        dom.marketCapabilitySummary.innerHTML = items.map(([label, value]) =>
+            `<div class="capability-chip"><strong>${escapeHtml(formatCompactNumber(value || 0))}</strong>` +
+            `<span>${escapeHtml(label)}</span></div>`
+        ).join('');
+        renderSemanticCoverageSummary(summary);
+    }
+
+    function renderSemanticCoverageSummary(summary) {
+        if (!dom.semanticCoverageSummary) {
+            return;
+        }
+        if (!summary) {
+            dom.semanticCoverageSummary.innerHTML =
+                '<div class="coverage-chip"><strong>-</strong><span>coverage unavailable</span></div>';
+            return;
+        }
+        const generated = Number(summary.semantic_generated_count || 0);
+        const missing = Number(summary.semantic_missing_count || 0);
+        const total = Number(summary.total_assets || 0);
+        const review = Number(summary.semantic_review_required_count || 0);
+        const failed = Number(summary.semantic_failed_count || 0);
+        const rateLimited = Number(summary.semantic_rate_limited_count || 0);
+        const items = [
+            ['Catalog assets', total],
+            ['Generated', generated],
+            ['Review', review],
+            ['Failed', failed],
+            ['Rate limited', rateLimited],
+            ['Missing', missing],
+            ['Classified subset', generated]
+        ];
+        dom.semanticCoverageSummary.innerHTML = items.map(([label, value]) =>
+            `<div class="coverage-chip"><strong>${escapeHtml(formatCompactNumber(value || 0))}</strong>` +
+            `<span>${escapeHtml(label)}</span></div>`
+        ).join('');
     }
 
     function renderMarketCatalogError(message) {
@@ -639,7 +854,8 @@
     function hasMarketFilter() {
         const query = dom.marketSearch ? dom.marketSearch.value.trim() : '';
         const status = dom.marketStatusFilter ? dom.marketStatusFilter.value.trim() : '';
-        return query !== '' || status !== '';
+        const capability = dom.marketCapabilityFilter ? dom.marketCapabilityFilter.value.trim() : 'all';
+        return query !== '' || status !== '' || (capability !== '' && capability !== 'all');
     }
 
     function scheduleMarketSearch() {
@@ -648,7 +864,7 @@
         }
         marketSearchTimer = setTimeout(() => {
             marketSearchTimer = null;
-            loadSymbols();
+            resetMarketPageAndLoad();
         }, MARKET_SEARCH_DEBOUNCE_MS);
     }
 
@@ -664,6 +880,7 @@
                 return;
             }
             renderMarketDetails({
+                ...(cached || {}),
                 symbol,
                 eventTicker: data.event_ticker || cached?.eventTicker || '-',
                 seriesTicker: data.series_ticker || cached?.seriesTicker || '-',
@@ -677,7 +894,7 @@
     }
 
     function renderMarketDetails(entry) {
-        dom.marketStatus.textContent = entry.status || '-';
+        dom.marketStatus.textContent = `${entry.status || '-'} / ${marketCapabilityLabel(entry)}`;
         dom.marketEvent.textContent = entry.eventTicker || '-';
         dom.marketSeries.textContent = entry.seriesTicker || '-';
         dom.marketOpen.textContent = formatIso(entry.openTime);
@@ -847,6 +1064,10 @@
             return;
         }
         const groupBy = body.group_by || dom.semanticGroupBy.value || 'sector';
+        const coverageSuffix = marketCapabilitySummary
+            ? ` / classified ${formatCompactNumber(marketCapabilitySummary.semantic_generated_count || 0)}` +
+                ` of ${formatCompactNumber(marketCapabilitySummary.total_assets || 0)} catalog asset(s)`
+            : '';
         renderSemanticGroupSummary(groups);
         const activeGroup = semanticActiveGroupKey
             ? groups.find(group => String(group.key || 'unknown') === semanticActiveGroupKey)
@@ -858,7 +1079,8 @@
         const mode = dom.semanticRenderMode.value || 'groups';
         if (!semanticActiveGroupKey && mode === 'groups') {
             dom.semanticMapState.textContent =
-                `${groups.length} group(s) / ${leaves.length} market(s) grouped by ${groupBy}`;
+                `${groups.length} group(s) / ${leaves.length} rendered semantic market(s) grouped by ${groupBy}` +
+                coverageSuffix;
             renderSemanticGroupTiles(groups);
             const firstGroup = groups.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0))[0];
             renderSemanticDetailFromGroup(firstGroup);
@@ -873,7 +1095,8 @@
         dom.semanticMapState.textContent =
             `${displayLeaves.length} rendered / ${leaves.length} market(s)` +
             `${hiddenCount > 0 ? ` / ${hiddenCount} in Other` : ''}` +
-            `${activeGroup ? ` / ${activeGroup.label || activeGroup.key}` : ` / grouped by ${groupBy}`}`;
+            `${activeGroup ? ` / ${activeGroup.label || activeGroup.key}` : ` / grouped by ${groupBy}`}` +
+            coverageSuffix;
         const fragment = document.createDocumentFragment();
         for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
             const tile = document.createElement('button');
@@ -1351,10 +1574,20 @@
             setStatus('Select a symbol and resolution first', 'error');
             return;
         }
+        const capability = selectedMarketEntry(symbol);
+        if (capability && !capability.chartable) {
+            candleSeries.setData([]);
+            volumeSeries.setData([]);
+            const message = nonChartableMessage(capability);
+            renderChartState(message, capability.hasQuote ? 'stale' : 'stale');
+            setStatus(message, capability.hasQuote ? '' : 'error');
+            return;
+        }
         const toSec = Math.floor(Date.now() / 1000);
         const fromSec = toSec - lookbackSeconds;
         const base = adapterBase();
         setStatus(`Loading history ${symbol} @ ${resolution}...`);
+        renderChartState(`Loading ${symbol} bars...`, '');
         try {
             const data = await fetchJsonFromBase(
                 base,
@@ -1368,9 +1601,20 @@
                 return;
             }
             if (data.s !== 'ok') {
+                if (capability && capability.chartable24h && lookbackSeconds < 86400) {
+                    dom.lookbackSelect.value = '86400';
+                    setStatus(`No 1h bars for ${symbol}; retrying 24h window`, '');
+                    loadHistory();
+                    return;
+                }
                 candleSeries.setData([]);
                 volumeSeries.setData([]);
-                setStatus(`No chart bars for ${symbol} in window`, 'error');
+                const source = capability?.bestChartSource ? chartSourceLabel(capability.bestChartSource) : 'chart';
+                const message = capability && capability.chartable
+                    ? `No ${source} bars for ${symbol} in selected window`
+                    : `No chart bars for ${symbol} in selected window`;
+                renderChartState(message, 'stale');
+                setStatus(message, 'error');
                 return;
             }
             const candles = [];
@@ -1395,7 +1639,10 @@
             candleSeries.setData(candles);
             volumeSeries.setData(volumes);
             chart.timeScale().fitContent();
-            setStatus(`Rendered ${candles.length} bar(s) for ${symbol}`, 'ok');
+            const source = data.source || capability?.bestChartSource || 'chart';
+            const rendered = `Rendered ${candles.length} ${chartSourceLabel(source)} bar(s) for ${symbol}`;
+            renderChartState(rendered, 'fresh');
+            setStatus(rendered, 'ok');
         } catch (err) {
             if (symbol !== dom.symbolSelect.value ||
                 resolution !== dom.resolutionSelect.value ||
@@ -1403,6 +1650,35 @@
                 return;
             }
             setStatus(`Failed to load history: ${err.message}`, 'error');
+            renderChartState(`History unavailable: ${err.message}`, 'stale');
+        }
+    }
+
+    function selectedMarketEntry(symbol) {
+        return marketEntries.find(entry => entry.symbol === symbol) || null;
+    }
+
+    function nonChartableMessage(entry) {
+        if (!entry) {
+            return 'Select a chart-ready or quote-ready market';
+        }
+        if (entry.hasQuote) {
+            return `${entry.symbol}: Quote only; no BBO, ticker snapshot, or trade tape bars indexed`;
+        }
+        if (entry.catalogSource === 'market_metadata') {
+            return `${entry.symbol}: Catalog only; no quote or chart history indexed`;
+        }
+        return `${entry.symbol}: No chart history in the selected dataset`;
+    }
+
+    function renderChartState(message, tone) {
+        if (!dom.chartState) {
+            return;
+        }
+        dom.chartState.textContent = message || '';
+        dom.chartState.className = 'chart-state';
+        if (tone === 'fresh' || tone === 'stale') {
+            dom.chartState.classList.add(tone);
         }
     }
 
@@ -2752,13 +3028,27 @@
         }
     }
 
+    function resetMarketPageAndLoad() {
+        marketCatalogOffset = 0;
+        loadSymbols();
+    }
+
+    function changeMarketPage(delta) {
+        marketCatalogOffset = Math.max(0, marketCatalogOffset + delta);
+        loadSymbols();
+    }
+
     dom.refreshSymbols.addEventListener('click', () => {
+        marketCatalogOffset = 0;
         loadConfig();
         loadSymbols();
     });
     dom.marketSearch.addEventListener('input', scheduleMarketSearch);
-    dom.marketStatusFilter.addEventListener('change', loadSymbols);
-    dom.marketSearchApply.addEventListener('click', loadSymbols);
+    dom.marketCapabilityFilter.addEventListener('change', resetMarketPageAndLoad);
+    dom.marketStatusFilter.addEventListener('change', resetMarketPageAndLoad);
+    dom.marketSearchApply.addEventListener('click', resetMarketPageAndLoad);
+    dom.marketPrevPage.addEventListener('click', () => changeMarketPage(-MARKET_CATALOG_LIMIT));
+    dom.marketNextPage.addEventListener('click', () => changeMarketPage(MARKET_CATALOG_LIMIT));
     dom.loadHistory.addEventListener('click', loadHistory);
     dom.symbolSelect.addEventListener('change', onSelectedSymbolChanged);
     dom.researchFeatureSelect.addEventListener('change', () => loadRecentFeatures(dom.symbolSelect.value));
@@ -2799,6 +3089,7 @@
     dom.adapterUrl.addEventListener('change', () => {
         quotesLoopGeneration += 1;
         stopQuotesLoop();
+        marketCatalogOffset = 0;
         loadConfig();
         loadSymbols();
         loadHealth();
@@ -2811,7 +3102,7 @@
     });
 
     updateDemoRunConfirmState();
-    applyRoleVisibility('viewer');
+    applyRoleVisibility('markets');
     setInterval(() => {
         loadHealth();
         loadOpsTelemetry();
