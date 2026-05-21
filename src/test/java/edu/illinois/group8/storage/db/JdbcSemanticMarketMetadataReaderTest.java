@@ -50,12 +50,21 @@ class JdbcSemanticMarketMetadataReaderTest {
         assertTrue(sql.contains("left join market_metadata mm"));
         assertTrue(sql.contains("left join latest_market_state lms"));
         assertTrue(sql.contains("left join market_feature_stats mfs"));
+        assertTrue(sql.contains("left join lateral"));
+        assertTrue(sql.contains("from feature_outputs fo"));
+        assertTrue(sql.contains("feature.bbo"));
+        assertTrue(sql.contains("fo.event_ts_ms >= lms.last_event_ts_ms - 86400000"));
+        assertTrue(sql.contains("fo.event_ts_ms <= lms.last_event_ts_ms"));
+        assertTrue(sql.contains("order by fo.event_ts_ms asc"));
+        assertTrue(sql.contains("regexp_replace(smm.market_ticker"));
+        assertTrue(sql.contains("aggregate_open_interest"));
+        assertTrue(sql.contains("price_change_24h_micros"));
         assertTrue(sql.contains("coalesce(mfs.display_eligible, false)"));
-        assertTrue(sql.contains("mfs.history_bars_24h_count desc"));
-        assertTrue(sql.contains("smm.tags::text as tags"));
+        assertTrue(sql.contains("tags::text as tags"));
         assertTrue(sql.contains("lms.last_canonical_commit_seq"));
+        assertTrue(sql.contains("nullif(lms.open_interest, 0)"));
         assertTrue(sql.contains("open_interest_fp"));
-        assertTrue(sql.contains("lms.last_canonical_commit_seq desc nulls last"));
+        assertTrue(sql.contains("last_canonical_commit_seq desc nulls last"));
         assertTrue(sql.contains("limit ?"));
         assertFalse(sql.contains("raw_response"));
         assertEquals(List.of("tax-v1", SemanticMarketMetadataReadRequest.DEFAULT_MAX_ROWS), jdbc.bindings);
@@ -101,6 +110,8 @@ class JdbcSemanticMarketMetadataReaderTest {
     void mapsRowsAndParsesTagsAndLatestQuote() {
         RecordingJdbc jdbc = new RecordingJdbc(List.of(row(
             "market_ticker", "MKT-1",
+            "base_market_key", "MKT",
+            "side_tag", "1",
             "event_ticker", "EVENT-1",
             "series_ticker", "SERIES-1",
             "market_status", "open",
@@ -130,6 +141,10 @@ class JdbcSemanticMarketMetadataReaderTest {
             "best_ask_micros", 460_000L,
             "midpoint_micros", 450_000L,
             "open_interest", 123L,
+            "aggregate_open_interest", 223L,
+            "current_midpoint_micros", 450_000L,
+            "midpoint_24h_ago_micros", 430_000L,
+            "price_change_24h_micros", 20_000L,
             "latest_state_updated_at", Instant.parse("2026-05-20T00:00:03Z"),
             "latest_state_age_ms", 10L
         )));
@@ -142,6 +157,8 @@ class JdbcSemanticMarketMetadataReaderTest {
         assertEquals(1, rows.size());
         SemanticMarketMetadataRow row = rows.get(0);
         assertEquals("MKT-1", row.marketTicker());
+        assertEquals("MKT", row.baseMarketKey());
+        assertEquals("1", row.sideTag());
         assertEquals("EVENT-1", row.eventTicker());
         assertEquals("SERIES-1", row.seriesTicker());
         assertEquals("open", row.marketStatus());
@@ -151,6 +168,9 @@ class JdbcSemanticMarketMetadataReaderTest {
         assertEquals(new BigDecimal("0.83"), row.confidence());
         assertEquals(42L, row.lastCanonicalCommitSeq());
         assertEquals(450_000L, row.midpointMicros());
+        assertEquals(223L, row.aggregateOpenInterest());
+        assertEquals(430_000L, row.midpoint24hAgoMicros());
+        assertEquals(20_000L, row.priceChange24hMicros());
         assertEquals(Instant.parse("2026-05-20T00:00:03Z"), row.latestStateUpdatedAt());
     }
 

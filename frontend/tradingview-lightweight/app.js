@@ -1295,19 +1295,16 @@
         }
         const mode = dom.semanticRenderMode.value || 'groups';
         if (!semanticActiveGroupKey && mode === 'groups') {
+            const clusters = semanticRenderableBaseMarkets(groups, SEMANTIC_RENDER_LEAF_LIMIT);
             const renderableLeaves = semanticLeaves(groups).filter(leaf => leaf && leaf.market_ticker);
-            const displayLeaves = semanticRenderableLeaves(groups, SEMANTIC_RENDER_LEAF_LIMIT);
-            const hiddenCount = Math.max(0, renderableLeaves.length - displayLeaves.length);
+            const displayedSideCount = clusters.reduce((sum, cluster) => sum + cluster.leaves.length, 0);
+            const hiddenCount = Math.max(0, renderableLeaves.length - displayedSideCount);
             dom.semanticMapState.textContent =
-                `${displayLeaves.length} top market tile(s) across ${groups.length} segment(s)` +
+                `${clusters.length} base-market cluster(s) / ${displayedSideCount} side tile(s)` +
                 `${hiddenCount > 0 ? ` / ${hiddenCount} hidden` : ''}` +
-                ` / weighted by open interest / color by recent quote activity` +
+                ` / weighted by aggregate open interest / color by 24h midpoint move` +
                 coverageSuffix;
-            const fragment = document.createDocumentFragment();
-            for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
-                fragment.appendChild(createSemanticMarketTile(rect));
-            }
-            dom.semanticTreemap.appendChild(fragment);
+            renderSemanticBaseMarketClusters(clusters);
             renderSemanticDetail(null);
             return;
         }
@@ -1316,18 +1313,28 @@
             ? Math.min(500, SEMANTIC_RENDER_LEAF_LIMIT)
             : SEMANTIC_RENDER_LEAF_LIMIT;
         const renderableLeaves = semanticLeaves(selectedGroups).filter(leaf => leaf && leaf.market_ticker);
-        const displayLeaves = semanticRenderableLeaves(selectedGroups, limit);
-        const hiddenCount = Math.max(0, renderableLeaves.length - displayLeaves.length);
+        const displayClusters = mode === 'all' ? null : semanticRenderableBaseMarkets(selectedGroups, limit);
+        const displayLeaves = mode === 'all' ? semanticRenderableLeaves(selectedGroups, limit) : [];
+        const displayedSideCount = displayClusters
+            ? displayClusters.reduce((sum, cluster) => sum + cluster.leaves.length, 0)
+            : displayLeaves.length;
+        const hiddenCount = Math.max(0, renderableLeaves.length - displayedSideCount);
         dom.semanticMapState.textContent =
-            `${displayLeaves.length} visible / ${leaves.length} market(s) / color by recent quote activity` +
+            `${displayClusters ? displayClusters.length : displayLeaves.length} visible` +
+            `${displayClusters ? ` base cluster(s) / ${displayedSideCount} side(s)` : ` / ${leaves.length} market(s)`}` +
+            ` / color by 24h midpoint move` +
             `${hiddenCount > 0 ? ` / ${hiddenCount} hidden` : ''}` +
             `${activeGroup ? ` / ${activeGroup.label || activeGroup.key}` : ` / grouped by ${groupBy}`}` +
             coverageSuffix;
-        const fragment = document.createDocumentFragment();
-        for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
-            fragment.appendChild(createSemanticMarketTile(rect));
+        if (displayClusters) {
+            renderSemanticBaseMarketClusters(displayClusters);
+        } else {
+            const fragment = document.createDocumentFragment();
+            for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
+                fragment.appendChild(createSemanticMarketTile(rect));
+            }
+            dom.semanticTreemap.appendChild(fragment);
         }
-        dom.semanticTreemap.appendChild(fragment);
         const first = displayLeaves[0];
         if (first) {
             renderSemanticDetail(null);
@@ -1358,35 +1365,73 @@
         }
     }
 
-    function renderSemanticGroupTiles(groups) {
-        const groupsByKey = new Map();
-        for (const group of groups) {
-            const key = String(group.key || 'unknown');
-            groupsByKey.set(key, group);
-        }
-        const sourceGroupsByKey = new Map();
-        for (const leaf of semanticRenderableLeaves(groups, SEMANTIC_RENDER_LEAF_LIMIT)) {
-            const key = String(leaf.group_key || 'unknown');
-            const sourceGroup = groupsByKey.get(key) || {};
-            if (!sourceGroupsByKey.has(key)) {
-                sourceGroupsByKey.set(key, {
+    function semanticRenderableBaseMarkets(groups, limit) {
+        const clustersByKey = new Map();
+        for (const leaf of semanticLeaves(groups).filter(item => item && item.market_ticker)) {
+            const key = semanticBaseMarketKey(leaf);
+            if (!clustersByKey.has(key)) {
+                clustersByKey.set(key, {
                     key,
-                    label: sourceGroup.label || sourceGroup.key || key,
+                    label: key,
                     count: 0,
-                    total_count: Number(sourceGroup.count || 0),
                     value: 0,
-                    generated_count: Number(sourceGroup.generated_count || 0),
-                    review_required_count: Number(sourceGroup.review_required_count || 0),
-                    average_confidence: sourceGroup.average_confidence,
+                    latestEventTsMs: 0,
                     leaves: []
                 });
             }
-            const targetGroup = sourceGroupsByKey.get(key);
-            targetGroup.leaves.push(leaf);
-            targetGroup.count += 1;
-            targetGroup.value += Math.max(1, Number(leaf.value || 0));
+            const cluster = clustersByKey.get(key);
+            const side = Object.assign({}, leaf, {
+                base_market_key: key,
+                side_tag: semanticSideTag(leaf),
+                value: Math.max(1, Number(leaf.open_interest ?? leaf.quote?.open_interest ?? leaf.value ?? 0))
+            });
+            cluster.leaves.push(side);
+            cluster.count += 1;
+            cluster.value = Math.max(
+                cluster.value,
+                Math.max(1, Number(
+                    leaf.aggregate_open_interest
+                        ?? leaf.quote?.aggregate_open_interest
+                        ?? leaf.base_open_interest
+                        ?? leaf.quote?.base_open_interest
+                        ?? 0
+                ))
+            );
+            cluster.latestEventTsMs = Math.max(
+                cluster.latestEventTsMs,
+                Number(leaf.quote?.last_event_ts_ms ?? leaf.last_event_ts_ms ?? 0) || 0
+            );
         }
-        const sourceGroups = Array.from(sourceGroupsByKey.values()).filter(group => group.count > 0);
+        const clusters = Array.from(clustersByKey.values())
+            .map(cluster => {
+                const sideSum = cluster.leaves.reduce((sum, leaf) => sum + Math.max(1, Number(leaf.value || 0)), 0);
+                cluster.value = Math.max(cluster.value, sideSum);
+                cluster.leaves.sort((left, right) => {
+                    const valueDelta = Number(right.value || 0) - Number(left.value || 0);
+                    if (valueDelta !== 0) {
+                        return valueDelta;
+                    }
+                    return String(left.side_tag || left.market_ticker || '')
+                        .localeCompare(String(right.side_tag || right.market_ticker || ''));
+                });
+                return cluster;
+            })
+            .filter(cluster => cluster.count > 0)
+            .sort((left, right) => {
+                const valueDelta = Number(right.value || 0) - Number(left.value || 0);
+                if (valueDelta !== 0) {
+                    return valueDelta;
+                }
+                const recencyDelta = Number(right.latestEventTsMs || 0) - Number(left.latestEventTsMs || 0);
+                if (recencyDelta !== 0) {
+                    return recencyDelta;
+                }
+                return String(left.key).localeCompare(String(right.key));
+            });
+        return clusters.slice(0, Math.max(1, Number(limit || SEMANTIC_RENDER_LEAF_LIMIT)));
+    }
+
+    function renderSemanticBaseMarketClusters(sourceGroups) {
         const groupBounds = semanticLayoutBounds(4 / 3);
         const groupRects = squarifiedTreemap(
             sourceGroups.map(group => ({ item: group, value: semanticGroupLayoutValue(group) })),
@@ -1396,22 +1441,26 @@
             const groupRect = semanticPercentRect(rawGroupRect, groupBounds);
             const group = groupRect.item;
             const region = document.createElement('section');
-            region.className = 'semantic-group-region';
-            region.setAttribute('aria-label', `${group.label}; ${group.count} visible market tile(s)`);
+            region.className = 'semantic-group-region semantic-base-cluster';
+            region.setAttribute('aria-label', `${group.label}; ${group.count} side tile(s)`);
             region.style.left = `${groupRect.x}%`;
             region.style.top = `${groupRect.y}%`;
             region.style.width = `${groupRect.width}%`;
             region.style.height = `${groupRect.height}%`;
-            region.style.background = semanticGroupTileColor(group);
+            region.style.background = semanticBaseClusterColor(group);
             const label = document.createElement('button');
             label.type = 'button';
             label.className = 'semantic-group-label';
-            label.title = `${group.label}\n${group.count} visible market(s)`;
-            label.setAttribute('aria-label', `Drill into ${group.label}; ${group.count} visible market(s)`);
+            label.title = `${group.label}\n${group.count} side(s)\naggregate OI ${formatCompactNumber(group.value || 0)}`;
+            label.setAttribute('aria-label', `${group.label}; ${group.count} side(s)`);
             label.innerHTML =
                 `<strong>${escapeHtml(group.label)}</strong>` +
-                `<span>${group.count}</span>`;
-            label.addEventListener('click', () => selectSemanticGroup(group.key));
+                `<span>${group.count} / ${formatCompactNumber(group.value || 0)}</span>`;
+            label.addEventListener('mouseenter', event => showSemanticDetailFromBaseCluster(group, event));
+            label.addEventListener('mousemove', event => positionSemanticDetail(event));
+            label.addEventListener('mouseleave', hideSemanticDetail);
+            label.addEventListener('focus', event => showSemanticDetailFromBaseCluster(group, semanticElementAnchor(event.currentTarget)));
+            label.addEventListener('blur', hideSemanticDetail);
             region.appendChild(label);
             const leafLayer = document.createElement('div');
             leafLayer.className = 'semantic-group-leaves';
@@ -1493,18 +1542,6 @@
             width: rect.width / bounds.width * 100,
             height: rect.height / bounds.height * 100
         };
-    }
-
-    function semanticGroupTileColor(group) {
-        const confidence = Math.max(0, Math.min(1, Number(group.average_confidence)));
-        const confidenceValue = Number.isFinite(confidence) ? confidence : 0.5;
-        const hue = semanticStableHue({
-            sector: group.group_by === 'sector' ? group.key : '',
-            subsector: group.group_by === 'subsector' ? group.key : '',
-            event_type: group.group_by === 'event_type' ? group.key : '',
-            market_ticker: group.key || group.label || ''
-        });
-        return `hsl(${hue}, ${Math.round(30 + confidenceValue * 22)}%, ${Math.round(27 + confidenceValue * 13)}%)`;
     }
 
     function semanticGroupLayoutValue(group) {
@@ -1666,7 +1703,7 @@
             market: leaf.market_ticker,
             title: leaf.title || leaf.label,
             status: leaf.market_status || leaf.semantic_status,
-            group: leaf.group_key || '-',
+            group: `${semanticBaseMarketKey(leaf)} / ${semanticSideTag(leaf) || '-'}`,
             sector: leaf.sector,
             subsector: leaf.subsector,
             eventType: leaf.event_type,
@@ -1675,6 +1712,32 @@
             openInterest: formatSemanticOpenInterest(leaf, leaf.quote),
             freshness: semanticFreshnessText(leaf.quote),
             quote: semanticQuoteText(leaf.quote, leaf)
+        });
+    }
+
+    function renderSemanticDetailFromBaseCluster(group) {
+        if (!group) {
+            renderSemanticDetail(null);
+            return;
+        }
+        const sides = (Array.isArray(group.leaves) ? group.leaves : [])
+            .map(leaf => semanticSideTag(leaf) || leaf.market_ticker)
+            .filter(Boolean)
+            .slice(0, 8)
+            .join(', ');
+        renderSemanticDetail({
+            market: group.key || '-',
+            title: `${Number(group.count || 0)} side(s)`,
+            status: 'base market cluster',
+            group: group.key || '-',
+            sector: '-',
+            subsector: '-',
+            eventType: '-',
+            tags: sides || '-',
+            confidence: '-',
+            openInterest: formatCompactNumber(group.value || 0),
+            freshness: `${Number(group.count || 0)} eligible side(s)`,
+            quote: semanticClusterChangeText(group)
         });
     }
 
@@ -1709,7 +1772,7 @@
             market: row.market_ticker,
             title: row.title,
             status: `${row.status || '-'} / ${metadata.status || '-'}`,
-            group: groupKey || metadata.sector || metadata.event_type || '-',
+            group: `${row.base_market_key || groupKey || '-'} / ${row.side_tag || '-'}`,
             sector: metadata.sector,
             subsector: metadata.subsector,
             eventType: metadata.event_type,
@@ -1750,6 +1813,11 @@
 
     function showSemanticDetailFromGroup(group, anchor) {
         renderSemanticDetailFromGroup(group);
+        positionSemanticDetail(anchor);
+    }
+
+    function showSemanticDetailFromBaseCluster(group, anchor) {
+        renderSemanticDetailFromBaseCluster(group);
         positionSemanticDetail(anchor);
     }
 
@@ -1840,16 +1908,17 @@
                 `<small>${Number(leaf.hidden_count || 0)} hidden market(s)</small>`;
         }
         const ticker = escapeHtml(leaf.market_ticker || '-');
+        const side = escapeHtml(semanticSideTag(leaf) || leaf.market_ticker || '-');
+        const change = escapeHtml(semanticPriceChangeText(leaf));
         if (sizeClass === 'semantic-tile-tiny') {
-            return `<strong>${ticker}</strong>`;
+            return `<strong>${side}</strong>`;
         }
-        const confidence = escapeHtml(confidenceText(leaf.metadata_confidence));
         if (sizeClass === 'semantic-tile-small') {
-            return `<strong>${ticker}</strong><small>${confidence}</small>`;
+            return `<strong>${side}</strong><small>${change}</small>`;
         }
         return `<strong>${ticker}</strong>` +
-            `<span>${escapeHtml(leaf.label || leaf.market_ticker || '-')}</span>` +
-            `<small>${escapeHtml(groupKey)} / ${confidence}</small>` +
+            `<span>${escapeHtml(semanticBaseMarketKey(leaf))}</span>` +
+            `<small>${change} / ${escapeHtml(groupKey)}</small>` +
             `<em>${escapeHtml(semanticQuoteText(leaf.quote, leaf))}</em>`;
     }
 
@@ -1863,62 +1932,88 @@
         }
         return [
             leaf.market_ticker || '-',
+            `base ${semanticBaseMarketKey(leaf)} / side ${semanticSideTag(leaf) || '-'}`,
             leaf.label || '-',
-            `${groupKey || 'unknown'} / ${confidenceText(leaf.metadata_confidence)}`,
+            `${groupKey || 'unknown'} / ${semanticPriceChangeText(leaf)}`,
             semanticQuoteText(leaf.quote, leaf)
         ].join('\n');
     }
 
     function semanticTileColor(leaf) {
-        const status = String(leaf.semantic_status || '').toLowerCase();
         if (leaf.is_other) {
             return 'hsl(210, 20%, 30%)';
         }
-        const activity = semanticRecentActivityScore(leaf);
-        const baseHue = semanticStableHue(leaf);
-        const lightness = Math.round(23 + activity * 22);
-        const saturation = Math.round(20 + activity * 48);
-        const stale = leaf.quote && leaf.quote.freshness_status && leaf.quote.freshness_status !== 'available';
-        if (status === 'failed') {
-            return `hsl(4, 42%, ${Math.max(30, lightness)}%)`;
+        const changeMicros = Number(semanticPriceChange24hMicros(leaf));
+        if (!Number.isFinite(changeMicros) || changeMicros === 0) {
+            return 'hsl(215, 13%, 32%)';
         }
-        if (status === 'review_required') {
-            return `hsl(38, 53%, ${Math.max(32, lightness)}%)`;
-        }
-        if (status === 'rate_limited') {
-            return `hsl(82, 22%, ${Math.max(31, lightness)}%)`;
-        }
-        if (stale) {
-            return `hsl(${baseHue}, ${Math.max(18, saturation - 18)}%, ${Math.max(25, lightness - 5)}%)`;
-        }
-        return `hsl(${baseHue}, ${saturation}%, ${lightness}%)`;
+        const intensity = Math.min(1, Math.abs(changeMicros) / 100_000);
+        const saturation = Math.round(34 + intensity * 38);
+        const lightness = Math.round(29 + intensity * 14);
+        return changeMicros > 0
+            ? `hsl(143, ${saturation}%, ${lightness}%)`
+            : `hsl(0, ${saturation}%, ${lightness}%)`;
     }
 
-    function semanticRecentActivityScore(leaf) {
-        const quote = leaf.quote || {};
-        const ageMs = Number(quote.latest_state_age_ms);
-        const openInterest = Number(leaf.open_interest ?? quote.open_interest ?? leaf.value);
-        const oiScore = Number.isFinite(openInterest) && openInterest > 0
-            ? Math.min(1, Math.log10(openInterest + 1) / 5)
-            : 0.12;
-        const ageScore = Number.isFinite(ageMs)
-            ? Math.max(0, Math.min(1, 1 - Math.log10(Math.max(1, ageMs)) / 6))
-            : 0.18;
-        return Math.max(0.08, Math.min(1, oiScore * 0.55 + ageScore * 0.45));
+    function semanticBaseClusterColor(group) {
+        const leaves = Array.isArray(group?.leaves) ? group.leaves : [];
+        let weightedChange = 0;
+        let weightSum = 0;
+        for (const leaf of leaves) {
+            const change = Number(semanticPriceChange24hMicros(leaf));
+            if (!Number.isFinite(change)) {
+                continue;
+            }
+            const weight = Math.max(1, Number(leaf.value || leaf.open_interest || 0));
+            weightedChange += change * weight;
+            weightSum += weight;
+        }
+        if (weightSum <= 0) {
+            return 'hsl(215, 14%, 24%)';
+        }
+        return semanticTileColor({ price_change_24h_micros: Math.round(weightedChange / weightSum) });
     }
 
-    function semanticStableHue(leaf) {
-        const value = [
-            leaf.sector,
-            leaf.subsector,
-            leaf.event_type,
-            leaf.market_ticker || leaf.label || ''
-        ].filter(Boolean).join('|');
-        let hash = 0;
-        for (let index = 0; index < value.length; index++) {
-            hash = (hash * 31 + value.charCodeAt(index)) % 997;
+    function semanticBaseMarketKey(leaf) {
+        const explicit = leaf?.base_market_key || leaf?.base_market_ticker
+            || leaf?.quote?.base_market_key || leaf?.quote?.base_market_ticker;
+        if (explicit) {
+            return String(explicit);
         }
-        return 118 + (hash % 92);
+        const ticker = String(leaf?.market_ticker || '');
+        const index = ticker.lastIndexOf('-');
+        return index > 0 ? ticker.slice(0, index) : ticker;
+    }
+
+    function semanticSideTag(leaf) {
+        const explicit = leaf?.side_tag || leaf?.quote?.side_tag;
+        if (explicit) {
+            return String(explicit);
+        }
+        const ticker = String(leaf?.market_ticker || '');
+        const index = ticker.lastIndexOf('-');
+        return index >= 0 && index < ticker.length - 1 ? ticker.slice(index + 1) : '';
+    }
+
+    function semanticPriceChange24hMicros(source) {
+        return source?.price_change_24h_micros
+            ?? source?.priceChange24hMicros
+            ?? source?.midpoint_change_micros
+            ?? source?.midpointChangeMicros
+            ?? source?.quote?.price_change_24h_micros
+            ?? source?.quote?.priceChange24hMicros
+            ?? source?.quote?.midpoint_change_micros
+            ?? source?.quote?.midpointChangeMicros
+            ?? null;
+    }
+
+    function semanticPriceChangeText(source) {
+        const change = Number(semanticPriceChange24hMicros(source));
+        if (!Number.isFinite(change)) {
+            return '24h -';
+        }
+        const sign = change > 0 ? '+' : '';
+        return `24h ${sign}${formatMicros(change)}`;
     }
 
     function confidenceText(value) {
@@ -1935,8 +2030,27 @@
         }
         const mid = formatMicros(semanticMidpointMicros(quote));
         const openInterest = formatSemanticOpenInterest(source, quote);
+        const change = semanticPriceChangeText(source || quote);
         const age = quote.latest_state_age_ms == null ? '-' : formatAge(Number(quote.latest_state_age_ms));
-        return `mid ${mid} / oi ${openInterest} / ${age}`;
+        return `mid ${mid} / ${change} / oi ${openInterest} / ${age}`;
+    }
+
+    function semanticClusterChangeText(group) {
+        let weightedChange = 0;
+        let weightSum = 0;
+        for (const leaf of Array.isArray(group?.leaves) ? group.leaves : []) {
+            const change = Number(semanticPriceChange24hMicros(leaf));
+            if (!Number.isFinite(change)) {
+                continue;
+            }
+            const weight = Math.max(1, Number(leaf.value || leaf.open_interest || 0));
+            weightedChange += change * weight;
+            weightSum += weight;
+        }
+        if (weightSum <= 0) {
+            return '24h -';
+        }
+        return semanticPriceChangeText({ price_change_24h_micros: Math.round(weightedChange / weightSum) });
     }
 
     function semanticMidpointMicros(quote) {

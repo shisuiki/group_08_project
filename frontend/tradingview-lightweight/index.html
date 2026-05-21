@@ -265,7 +265,7 @@
                         View
                         <select id="semantic-render-mode" aria-label="Semantic map view mode">
                             <option value="groups">Groups</option>
-                            <option value="top_markets" selected>Top markets</option>
+                            <option value="top_markets" selected>Top clusters</option>
                             <option value="all">All leaves</option>
                         </select>
                     </label>
@@ -296,11 +296,10 @@
                 </div>
                 <div id="semantic-map-state" class="semantic-map-state">Semantic metadata idle</div>
                 <div id="semantic-color-legend" class="semantic-color-legend" aria-label="semantic color legend">
-                    <span>Quiet</span>
+                    <span>Down 24h</span>
                     <i class="semantic-legend-ramp" aria-hidden="true"></i>
-                    <span>Active</span>
-                    <span class="semantic-legend-chip review">Review</span>
-                    <span class="semantic-legend-chip failed">Failed</span>
+                    <span>Up 24h</span>
+                    <span class="semantic-legend-chip neutral">No 24h</span>
                 </div>
                 <div id="semantic-coverage-summary" class="semantic-coverage-summary"></div>
                 <div id="semantic-group-summary" class="semantic-group-summary"></div>

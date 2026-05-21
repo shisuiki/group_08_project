@@ -6,6 +6,8 @@ import java.util.List;
 
 public record SemanticMarketMetadataRow(
     String marketTicker,
+    String baseMarketKey,
+    String sideTag,
     String eventTicker,
     String seriesTicker,
     String marketStatus,
@@ -35,11 +37,17 @@ public record SemanticMarketMetadataRow(
     Long bestAskMicros,
     Long midpointMicros,
     Long openInterest,
+    Long aggregateOpenInterest,
+    Long currentMidpointMicros,
+    Long midpoint24hAgoMicros,
+    Long priceChange24hMicros,
     Instant latestStateUpdatedAt,
     Long latestStateAgeMs
 ) {
     public SemanticMarketMetadataRow {
         marketTicker = nonBlank(marketTicker, "marketTicker");
+        baseMarketKey = nonBlank(baseMarketKey == null ? defaultBaseMarketKey(marketTicker) : baseMarketKey, "baseMarketKey");
+        sideTag = normalize(sideTag == null ? defaultSideTag(marketTicker) : sideTag);
         taxonomyVersion = nonBlank(taxonomyVersion, "taxonomyVersion");
         semanticStatus = nonBlank(semanticStatus, "semanticStatus");
         tags = tags == null ? List.of() : List.copyOf(tags);
@@ -50,5 +58,23 @@ public record SemanticMarketMetadataRow(
             throw new IllegalArgumentException(name + " must be non-blank");
         }
         return value.trim();
+    }
+
+    private static String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static String defaultBaseMarketKey(String marketTicker) {
+        int index = marketTicker.lastIndexOf('-');
+        return index <= 0 ? marketTicker : marketTicker.substring(0, index);
+    }
+
+    private static String defaultSideTag(String marketTicker) {
+        int index = marketTicker.lastIndexOf('-');
+        return index < 0 || index == marketTicker.length() - 1 ? null : marketTicker.substring(index + 1);
     }
 }

@@ -1344,12 +1344,20 @@ class UdfEndpointsTest {
         assertEquals(500, body.path("limit").asInt());
         assertEquals(1, body.path("count").asInt());
         assertEquals("MKT-SEM", body.path("markets").get(0).path("market_ticker").asText());
+        assertEquals("MKT", body.path("markets").get(0).path("base_market_key").asText());
+        assertEquals("MKT", body.path("markets").get(0).path("base_market_ticker").asText());
+        assertEquals("SEM", body.path("markets").get(0).path("side_tag").asText());
         assertEquals("Will it rain?", body.path("markets").get(0).path("title").asText());
         JsonNode metadata = body.path("markets").get(0).path("semantic_metadata");
         assertEquals("weather", metadata.path("sector").asText());
         assertEquals("forecast", metadata.path("event_type").asText());
         assertEquals("forecast", metadata.path("tags").get(0).asText());
         assertEquals(450_000L, body.path("markets").get(0).path("quote").path("midpoint_micros").asLong());
+        assertEquals(123L, body.path("markets").get(0).path("quote").path("base_open_interest").asLong());
+        assertEquals(430_000L, body.path("markets").get(0).path("quote").path("midpoint_24h_ago_micros").asLong());
+        assertEquals(20_000L, body.path("markets").get(0).path("quote").path("price_change_24h_micros").asLong());
+        assertEquals(430_000L, body.path("markets").get(0).path("quote").path("midpoint_reference_micros").asLong());
+        assertEquals(20_000L, body.path("markets").get(0).path("quote").path("midpoint_change_micros").asLong());
         assertFalse(response.body().contains("raw_response"));
 
         SemanticMarketMetadataReadRequest request = reader.requests.get(0);
@@ -1377,6 +1385,13 @@ class UdfEndpointsTest {
         assertEquals(123L, weather.path("value").asLong());
         assertEquals(1, weather.path("count").asInt());
         assertEquals("MKT-SEM", weather.path("leaves").get(0).path("market_ticker").asText());
+        assertEquals("MKT", weather.path("leaves").get(0).path("base_market_key").asText());
+        assertEquals("MKT", weather.path("leaves").get(0).path("base_market_ticker").asText());
+        assertEquals("SEM", weather.path("leaves").get(0).path("side_tag").asText());
+        assertEquals(123L, weather.path("leaves").get(0).path("aggregate_open_interest").asLong());
+        assertEquals(123L, weather.path("leaves").get(0).path("base_open_interest").asLong());
+        assertEquals(20_000L, weather.path("leaves").get(0).path("price_change_24h_micros").asLong());
+        assertEquals(20_000L, weather.path("leaves").get(0).path("midpoint_change_micros").asLong());
         assertEquals(123L, weather.path("leaves").get(0).path("quote").path("open_interest").asLong());
         assertEquals("forecast", weather.path("leaves").get(0).path("tags").get(0).asText());
     }
@@ -3470,6 +3485,8 @@ class UdfEndpointsTest {
         boolean weather = "weather".equals(sector);
         return new SemanticMarketMetadataRow(
             marketTicker,
+            null,
+            null,
             weather ? "EVENT-WEATHER" : "EVENT-" + sector.toUpperCase(Locale.ROOT),
             weather ? "SERIES-WEATHER" : "SERIES-" + sector.toUpperCase(Locale.ROOT),
             "open",
@@ -3499,6 +3516,10 @@ class UdfEndpointsTest {
             460_000L,
             450_000L,
             openInterest,
+            openInterest,
+            450_000L,
+            430_000L,
+            20_000L,
             Instant.parse("2026-05-20T00:00:02Z"),
             5L
         );

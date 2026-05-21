@@ -2180,6 +2180,9 @@ public class FrontendAdapterServer {
     private static Map<String, Object> semanticMarketBody(SemanticMarketMetadataRow row) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("market_ticker", row.marketTicker());
+        body.put("base_market_key", row.baseMarketKey());
+        body.put("base_market_ticker", row.baseMarketKey());
+        body.put("side_tag", row.sideTag());
         body.put("event_ticker", row.eventTicker());
         body.put("series_ticker", row.seriesTicker());
         body.put("status", row.marketStatus());
@@ -2221,11 +2224,28 @@ public class FrontendAdapterServer {
         body.put("best_ask_micros", row.bestAskMicros());
         body.put("midpoint_micros", row.midpointMicros());
         body.put("open_interest", row.openInterest());
+        body.put("aggregate_open_interest", row.aggregateOpenInterest());
+        body.put("base_open_interest", row.aggregateOpenInterest());
+        body.put("current_midpoint_micros", row.currentMidpointMicros());
+        body.put("midpoint_24h_ago_micros", row.midpoint24hAgoMicros());
+        body.put("price_change_24h_micros", row.priceChange24hMicros());
+        body.put("midpoint_reference_micros", row.midpoint24hAgoMicros());
+        body.put("midpoint_change_micros", row.priceChange24hMicros());
+        body.put("midpoint_change_pct", midpointChangePct(row));
         body.put("latest_state_updated_at",
             row.latestStateUpdatedAt() == null ? null : row.latestStateUpdatedAt().toString());
         body.put("latest_state_age_ms", row.latestStateAgeMs());
         body.put("freshness_status", row.latestStateUpdatedAt() == null ? "missing_latest_state" : "available");
         return body;
+    }
+
+    private static Double midpointChangePct(SemanticMarketMetadataRow row) {
+        Long reference = row.midpoint24hAgoMicros();
+        Long change = row.priceChange24hMicros();
+        if (reference == null || reference == 0 || change == null) {
+            return null;
+        }
+        return change.doubleValue() / reference.doubleValue();
     }
 
     private static String semanticTreemapGroupBy(String raw) {
@@ -2356,6 +2376,9 @@ public class FrontendAdapterServer {
             Map<String, Object> leaf = new LinkedHashMap<>();
             leaf.put("label", firstNonBlank(row.marketTitle(), row.marketTicker()));
             leaf.put("market_ticker", row.marketTicker());
+            leaf.put("base_market_key", row.baseMarketKey());
+            leaf.put("base_market_ticker", row.baseMarketKey());
+            leaf.put("side_tag", row.sideTag());
             leaf.put("title", row.marketTitle());
             leaf.put("market_status", row.marketStatus());
             leaf.put("value", leafValue);
@@ -2367,6 +2390,14 @@ public class FrontendAdapterServer {
             leaf.put("event_type", row.eventType());
             leaf.put("tags", row.tags());
             leaf.put("open_interest", row.openInterest());
+            leaf.put("aggregate_open_interest", row.aggregateOpenInterest());
+            leaf.put("base_open_interest", row.aggregateOpenInterest());
+            leaf.put("current_midpoint_micros", row.currentMidpointMicros());
+            leaf.put("midpoint_24h_ago_micros", row.midpoint24hAgoMicros());
+            leaf.put("price_change_24h_micros", row.priceChange24hMicros());
+            leaf.put("midpoint_reference_micros", row.midpoint24hAgoMicros());
+            leaf.put("midpoint_change_micros", row.priceChange24hMicros());
+            leaf.put("midpoint_change_pct", midpointChangePct(row));
             leaf.put("quote", semanticQuoteBody(row));
             leaves.add(leaf);
         }

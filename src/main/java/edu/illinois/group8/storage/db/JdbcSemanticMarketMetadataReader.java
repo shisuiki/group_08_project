@@ -18,6 +18,7 @@ import java.util.Objects;
 
 public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMetadataReader {
     private static final String TABLE_NAME = "market_semantic_metadata";
+    private static final long DAY_MS = 86_400_000L;
     private static final String MARKET_TITLE_EXPRESSION = """
         coalesce(
             mm.market_payload ->> 'title',
@@ -27,8 +28,9 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
         )
         """;
     private static final String SELECT_COLUMNS = """
+        with filtered as (
         select
-            smm.market_ticker,
+            smm.*,
             mm.event_ticker,
             mm.series_ticker,
             mm.status as market_status,
@@ -38,27 +40,6 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
                 mm.market_payload ->> 'subtitle',
                 mm.market_payload ->> 'event_title'
             ) as market_title,
-            smm.taxonomy_version,
-            smm.model,
-            smm.prompt_version,
-            smm.status as semantic_status,
-            smm.sector,
-            smm.subsector,
-            smm.event_type,
-            smm.region,
-            smm.time_horizon,
-            smm.liquidity_bucket,
-            smm.risk_bucket,
-            smm.tags::text as tags,
-            smm.confidence,
-            smm.rationale,
-            smm.generated_at,
-            smm.updated_at,
-            case when smm.generated_at is null
-                then null
-                else greatest(0, (extract(epoch from (now() - smm.generated_at)) * 1000)::bigint)
-            end as generated_age_ms,
-            greatest(0, (extract(epoch from (now() - smm.updated_at)) * 1000)::bigint) as updated_age_ms,
             lms.last_event_ts_ms,
             lms.last_canonical_event_id,
             lms.last_canonical_commit_seq,
@@ -66,7 +47,7 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             lms.best_ask_micros,
             lms.midpoint_micros,
             coalesce(
-                lms.open_interest,
+                nullif(lms.open_interest, 0),
                 case
                     when (mm.market_payload ->> 'open_interest_fp') ~ '^[0-9]+(\\.[0-9]+)?$'
                         then round((mm.market_payload ->> 'open_interest_fp')::numeric)::bigint
@@ -77,7 +58,13 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             case when lms.updated_at is null
                 then null
                 else greatest(0, (extract(epoch from (now() - lms.updated_at)) * 1000)::bigint)
-            end as latest_state_age_ms
+            end as latest_state_age_ms,
+            regexp_replace(smm.market_ticker, '-[^-]+$', '') as base_market_key,
+            case
+                when position('-' in smm.market_ticker) > 0 then regexp_replace(smm.market_ticker, '^.*-', '')
+                else null
+            end as side_tag,
+            bbo24h.midpoint_24h_ago_micros
         from market_semantic_metadata smm
         left join market_metadata mm
             on mm.market_ticker = smm.market_ticker
@@ -85,6 +72,73 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             on lms.market_ticker = smm.market_ticker
         left join market_feature_stats mfs
             on mfs.market_ticker = smm.market_ticker
+        left join lateral (
+            select
+                case
+                    when (fo."values" ->> 'midpoint_micros') ~ '^-?[0-9]+$'
+                        then (fo."values" ->> 'midpoint_micros')::bigint
+                    else null
+                end as midpoint_24h_ago_micros
+            from feature_outputs fo
+            where fo.market_ticker = smm.market_ticker
+              and fo.feature_name = 'feature.bbo'
+              and fo.event_ts_ms is not null
+              and lms.last_event_ts_ms is not null
+              and fo.event_ts_ms >= lms.last_event_ts_ms - %d
+              and fo.event_ts_ms <= lms.last_event_ts_ms
+              and jsonb_exists(fo."values", 'midpoint_micros')
+            order by fo.event_ts_ms asc
+            limit 1
+        ) bbo24h on true
+        """.formatted(DAY_MS);
+    private static final String SELECT_OUTPUT_COLUMNS = """
+        )
+        select
+            market_ticker,
+            base_market_key,
+            side_tag,
+            event_ticker,
+            series_ticker,
+            market_status,
+            market_title,
+            taxonomy_version,
+            model,
+            prompt_version,
+            status as semantic_status,
+            sector,
+            subsector,
+            event_type,
+            region,
+            time_horizon,
+            liquidity_bucket,
+            risk_bucket,
+            tags::text as tags,
+            confidence,
+            rationale,
+            generated_at,
+            updated_at,
+            case when generated_at is null
+                then null
+                else greatest(0, (extract(epoch from (now() - generated_at)) * 1000)::bigint)
+            end as generated_age_ms,
+            greatest(0, (extract(epoch from (now() - updated_at)) * 1000)::bigint) as updated_age_ms,
+            last_event_ts_ms,
+            last_canonical_event_id,
+            last_canonical_commit_seq,
+            best_bid_micros,
+            best_ask_micros,
+            midpoint_micros,
+            open_interest,
+            sum(greatest(coalesce(open_interest, 0), 0)) over (partition by base_market_key) as aggregate_open_interest,
+            midpoint_micros as current_midpoint_micros,
+            midpoint_24h_ago_micros,
+            case when midpoint_micros is null or midpoint_24h_ago_micros is null
+                then null
+                else midpoint_micros - midpoint_24h_ago_micros
+            end as price_change_24h_micros,
+            latest_state_updated_at,
+            latest_state_age_ms
+        from filtered
         """;
 
     private final JdbcConnectionFactory connectionFactory;
@@ -166,15 +220,14 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             bindings.add(pattern);
         }
         sql.append(" and coalesce(mfs.display_eligible, false)");
+        sql.append(SELECT_OUTPUT_COLUMNS);
         sql.append("""
              order by
-                mfs.history_bars_24h_count desc nulls last,
-                mfs.trade_24h_count desc nulls last,
-                mfs.quote_24h_count desc nulls last,
-                lms.last_event_ts_ms desc nulls last,
-                lms.last_canonical_commit_seq desc nulls last,
-                smm.updated_at desc,
-                smm.market_ticker asc
+                aggregate_open_interest desc nulls last,
+                last_event_ts_ms desc nulls last,
+                last_canonical_commit_seq desc nulls last,
+                updated_at desc,
+                market_ticker asc
             """);
         sql.append(" limit ?");
         bindings.add(request.maxRows());
@@ -184,6 +237,8 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
     private SemanticMarketMetadataRow readRow(ResultSet resultSet) throws SQLException {
         return new SemanticMarketMetadataRow(
             resultSet.getString("market_ticker"),
+            resultSet.getString("base_market_key"),
+            resultSet.getString("side_tag"),
             resultSet.getString("event_ticker"),
             resultSet.getString("series_ticker"),
             resultSet.getString("market_status"),
@@ -213,6 +268,10 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             longOrNull(resultSet, "best_ask_micros"),
             longOrNull(resultSet, "midpoint_micros"),
             longOrNull(resultSet, "open_interest"),
+            longOrNull(resultSet, "aggregate_open_interest"),
+            longOrNull(resultSet, "current_midpoint_micros"),
+            longOrNull(resultSet, "midpoint_24h_ago_micros"),
+            longOrNull(resultSet, "price_change_24h_micros"),
             instantOrNull(resultSet, "latest_state_updated_at"),
             longOrNull(resultSet, "latest_state_age_ms")
         );
