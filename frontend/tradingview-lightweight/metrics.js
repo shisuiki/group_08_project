@@ -189,8 +189,6 @@ function renderPipeline(pipeline) {
   const body = pipeline && pipeline.pipeline ? pipeline.pipeline : pipeline || {};
   const status = body.status || (pipeline && pipeline.status) || 'unknown';
   const windowSeconds = nested(body, ['recent_window_seconds'], 1);
-  setText('product-status', status);
-  setText('runtime-profile', 'live-product');
   setText('data-age', formatAge(body.latest_state_age_ms));
   setText('data-source', body.latest_market_state_commit_seq
     ? `read-model commit ${body.latest_market_state_commit_seq}`
@@ -202,7 +200,7 @@ function renderPipeline(pipeline) {
   setText('state-rate', formatRate(body.recent_latest_market_states, windowSeconds));
   setText('state-total', `${formatNumber(body.recent_latest_market_states)} latest states in ${formatNumber(windowSeconds)}s`);
   setText('cursor-lag', formatNumber(body.cursor_lag_events));
-  setText('latest-state-age', `latest state ${formatAge(body.latest_state_age_ms)}`);
+  setText('latest-state-age', `pipeline ${status}, latest state ${formatAge(body.latest_state_age_ms)}`);
   if (!liveSnapshot.latency) {
     setPill('latency-status', status === 'ok' ? 'read-model proxy' : status, statusClass(status));
     setLatencyBar('canonical-state', body.latest_state_age_ms);
@@ -401,7 +399,7 @@ async function refresh() {
     .catch((error) => {
       errors.push(`pipeline: ${error}`);
       record('errors', errors);
-      setText('product-status', 'pipeline unavailable');
+      setText('latest-state-age', 'pipeline unavailable');
     });
   fetchPrometheus()
     .then((body) => {
