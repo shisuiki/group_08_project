@@ -50,6 +50,7 @@ public class DataProcessor {
     private final ConcurrentHashMap<DbOfferMetricKey, BackendMetrics.Counter> dbOfferCounters = new ConcurrentHashMap<>();
     private long parserLatencySampleCursor;
     private long messageAgeSampleCursor;
+    private long wsToTickerplantPublishSampleCursor;
 
     public DataProcessor(ESBClusterCommunicationOrchestrator communicationOrchestrator) {
         this(communicationOrchestrator, CanonicalDbSink.disabled());
@@ -261,8 +262,10 @@ public class DataProcessor {
     private void publish(CanonicalEvent event, String path) {
         CanonicalEvent publishedEvent = CanonicalEvents.withPublishTsNs(event, System.nanoTime());
         PublicationResult result = publisher.publishSerialized(publishedEvent);
+        long offerCompleteTsNs = System.nanoTime();
         if (result.success()) {
             publishSuccess.increment();
+            observeWsToTickerplantPublishLatency(publishedEvent, path, offerCompleteTsNs);
         } else {
             publishFailure.increment();
         }
@@ -270,6 +273,17 @@ public class DataProcessor {
             ? canonicalDbSink.offer(publishedEvent)
             : canonicalDbSink.offer(result.serializedEvent());
         dbOfferCounter(DbOfferMetricKey.from(publishedEvent, path, dbOfferResult)).increment();
+    }
+
+    private void observeWsToTickerplantPublishLatency(CanonicalEvent event, String path, long offerCompleteTsNs) {
+        if (!"canonical".equals(path) || event.metadata().ingestTsNs() <= 0L || !shouldSampleWsToTickerplantPublish()) {
+            return;
+        }
+        EventMetricHandles handles = eventMetricHandles.computeIfAbsent(
+            EventMetricKey.from(event),
+            this::eventMetricHandles
+        );
+        handles.wsToTickerplantPublish.observe(Math.max(0L, offerCompleteTsNs - event.metadata().ingestTsNs()));
     }
 
     private void observeEventMetrics(CanonicalEvent event) {
@@ -330,6 +344,7 @@ public class DataProcessor {
         );
         return new EventMetricHandles(
             metrics.distribution("backend_ws_message_age_ms", labels),
+            metrics.distribution("backend_hot_path_ws_to_tickerplant_publish_ns", labels),
             metrics.counter("backend_parser_errors_total", labels),
             metrics.counter("backend_unknown_message_type_total", labels),
             metrics.counter("backend_orderbook_snapshot_total", labels),
@@ -368,6 +383,10 @@ public class DataProcessor {
         return shouldSampleHotPathDistribution(messageAgeSampleCursor++);
     }
 
+    private boolean shouldSampleWsToTickerplantPublish() {
+        return shouldSampleHotPathDistribution(wsToTickerplantPublishSampleCursor++);
+    }
+
     private static String normalizeLabelValue(String value) {
         return value == null || value.isBlank() ? "" : value;
     }
@@ -385,6 +404,7 @@ public class DataProcessor {
 
     private record EventMetricHandles(
         BackendMetrics.DistributionHandle messageAge,
+        BackendMetrics.DistributionHandle wsToTickerplantPublish,
         BackendMetrics.Counter parserErrors,
         BackendMetrics.Counter unknownMessageType,
         BackendMetrics.Counter orderbookSnapshot,

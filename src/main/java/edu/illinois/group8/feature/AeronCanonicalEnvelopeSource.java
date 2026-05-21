@@ -71,9 +71,17 @@ public class AeronCanonicalEnvelopeSource implements CanonicalEnvelopeSource {
             StreamContract stream = streams.get(index);
             int remaining = target - fragments;
             fragments += streamPollers.get(index).poll((buffer, offset, length, header) -> {
+                long consumerReceiveTsNs = System.nanoTime();
                 byte[] bytes = new byte[length];
                 buffer.getBytes(offset, bytes);
-                handler.onEvent(CanonicalEnvelope.fromPayloadBytes(stream.streamName(), bytes, 0, length, mapper));
+                handler.onEvent(CanonicalEnvelope.fromPayloadBytes(
+                    stream.streamName(),
+                    bytes,
+                    0,
+                    length,
+                    consumerReceiveTsNs,
+                    mapper
+                ));
             }, remaining);
             visited++;
         }

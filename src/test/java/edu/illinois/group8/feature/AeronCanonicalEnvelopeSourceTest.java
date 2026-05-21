@@ -49,6 +49,19 @@ class AeronCanonicalEnvelopeSourceTest {
     }
 
     @Test
+    void liveAeronPollMarksConsumerReceiveTimestamp() {
+        FakePoller tradePoller = new FakePoller(payload("trade-1", TRADE.streamName()));
+        AeronCanonicalEnvelopeSource source = source(List.of(TRADE), tradePoller);
+        List<Long> receiveTsNs = new ArrayList<>();
+
+        assertEquals(1, source.poll(envelope -> receiveTsNs.add(envelope.consumerReceiveTsNs()), 1));
+
+        assertEquals(1, receiveTsNs.size());
+        org.junit.jupiter.api.Assertions.assertNotNull(receiveTsNs.get(0));
+        org.junit.jupiter.api.Assertions.assertTrue(receiveTsNs.get(0) > 0L);
+    }
+
+    @Test
     void emptyFirstPollerDoesNotBlockLaterStream() {
         FakePoller emptyPoller = new FakePoller();
         FakePoller topPoller = new FakePoller(payload("top-1", TOP_OF_BOOK.streamName()));

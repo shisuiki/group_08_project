@@ -30,13 +30,41 @@ public record CanonicalEnvelope(
         int length,
         ObjectMapper mapper
     ) {
+        return fromPayloadBytes(streamName, payloadUtf8, offset, length, null, mapper);
+    }
+
+    public static CanonicalEnvelope fromPayloadBytes(
+        String streamName,
+        byte[] payloadUtf8,
+        int offset,
+        int length,
+        Long consumerReceiveTsNs,
+        ObjectMapper mapper
+    ) {
         try {
             JsonNode event = mapper.readTree(payloadUtf8, offset, length);
             String payload = new String(payloadUtf8, offset, length, StandardCharsets.UTF_8);
-            return fromEvent(streamName, payload, event);
+            CanonicalEnvelope envelope = fromEvent(streamName, payload, event);
+            return consumerReceiveTsNs == null
+                ? envelope
+                : new CanonicalEnvelope(
+                    envelope.streamName(),
+                    envelope.payload(),
+                    envelope.event(),
+                    envelope.eventTsMs(),
+                    consumerReceiveTsNs
+                );
         } catch (IOException e) {
             throw new IllegalArgumentException("Malformed canonical envelope for stream " + streamName, e);
         }
+    }
+
+    public Long metadataIngestTsNs() {
+        return optionalLong(event.path("metadata").path("ingest_ts_ns"));
+    }
+
+    public Long metadataPublishTsNs() {
+        return optionalLong(event.path("metadata").path("publish_ts_ns"));
     }
 
     public static CanonicalEnvelope fromRecording(RecordingEvent event, ObjectMapper mapper) {

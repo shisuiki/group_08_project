@@ -96,6 +96,9 @@ class DataProcessorIngressEnvelopeTest {
         assertTrue(metrics.prometheusText().contains(
             "backend_ws_message_age_ms_count{event_type=\"market_trade\",schema_version=\"1\",service=\"backend\",source=\"kalshi\",stream=\"canonical.trade\"} 1\n"
         ));
+        assertTrue(metrics.prometheusText().contains(
+            "backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type=\"market_trade\",schema_version=\"1\",service=\"backend\",source=\"kalshi\",stream=\"canonical.trade\"} 1\n"
+        ));
     }
 
     @Test

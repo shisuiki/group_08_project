@@ -1,6 +1,7 @@
 package edu.illinois.group8.metrics;
 
 import java.util.Collections;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -9,6 +10,8 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
 public class BackendMetrics {
+    private static final int DEFAULT_RECENT_DISTRIBUTION_SAMPLE_CAPACITY = 1024;
+
     private final ConcurrentHashMap<String, LongAdder> counters = new ConcurrentHashMap<>();
     private final ConcurrentHashMap.KeySetView<String, Boolean> exportedCounters = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, AtomicLong> gauges = new ConcurrentHashMap<>();
@@ -179,24 +182,74 @@ public class BackendMetrics {
         private final LongAdder count = new LongAdder();
         private final LongAdder sum = new LongAdder();
         private final AtomicLong max = new AtomicLong();
+        private final long[] recentSamples = new long[DEFAULT_RECENT_DISTRIBUTION_SAMPLE_CAPACITY];
+        private long recentCursor;
 
         private void observe(long value) {
             count.increment();
             sum.add(value);
             max.accumulateAndGet(value, Math::max);
+            synchronized (this) {
+                recentSamples[(int) (recentCursor % recentSamples.length)] = value;
+                recentCursor++;
+            }
         }
 
         private void appendPrometheus(StringBuilder body, String baseKey) {
+            Snapshot snapshot = snapshot();
             String countKey = insertSuffix(baseKey, "_count");
             String sumKey = insertSuffix(baseKey, "_sum");
             String maxKey = insertSuffix(baseKey, "_max");
-            body.append(countKey).append(' ').append(count.sum()).append('\n');
-            body.append(sumKey).append(' ').append(sum.sum()).append('\n');
-            body.append(maxKey).append(' ').append(max.get()).append('\n');
+            body.append(countKey).append(' ').append(snapshot.count()).append('\n');
+            body.append(sumKey).append(' ').append(snapshot.sum()).append('\n');
+            body.append(maxKey).append(' ').append(snapshot.max()).append('\n');
+            body.append(insertSuffix(baseKey, "_recent_count")).append(' ').append(snapshot.recentCount()).append('\n');
+            body.append(insertSuffix(baseKey, "_recent_p50")).append(' ').append(snapshot.recentP50()).append('\n');
+            body.append(insertSuffix(baseKey, "_recent_p90")).append(' ').append(snapshot.recentP90()).append('\n');
+            body.append(insertSuffix(baseKey, "_recent_p99")).append(' ').append(snapshot.recentP99()).append('\n');
         }
 
         private long count() {
             return count.sum();
+        }
+
+        private Snapshot snapshot() {
+            long observedCount = count.sum();
+            long observedSum = sum.sum();
+            long observedMax = max.get();
+            long[] samples;
+            synchronized (this) {
+                int recentCount = (int) Math.min(recentCursor, recentSamples.length);
+                samples = new long[recentCount];
+                if (recentCount > 0) {
+                    if (recentCursor <= recentSamples.length) {
+                        System.arraycopy(recentSamples, 0, samples, 0, recentCount);
+                    } else {
+                        int start = (int) (recentCursor % recentSamples.length);
+                        int firstLength = recentSamples.length - start;
+                        System.arraycopy(recentSamples, start, samples, 0, firstLength);
+                        System.arraycopy(recentSamples, 0, samples, firstLength, start);
+                    }
+                }
+            }
+            Arrays.sort(samples);
+            return new Snapshot(
+                observedCount,
+                observedSum,
+                observedMax,
+                samples.length,
+                percentile(samples, 50),
+                percentile(samples, 90),
+                percentile(samples, 99)
+            );
+        }
+
+        private static long percentile(long[] sortedSamples, int percentile) {
+            if (sortedSamples.length == 0) {
+                return 0L;
+            }
+            int index = (int) Math.ceil((percentile / 100.0) * sortedSamples.length) - 1;
+            return sortedSamples[Math.max(0, Math.min(sortedSamples.length - 1, index))];
         }
 
         private static String insertSuffix(String key, String suffix) {
@@ -205,6 +258,17 @@ public class BackendMetrics {
                 return key + suffix;
             }
             return key.substring(0, labelStart) + suffix + key.substring(labelStart);
+        }
+
+        private record Snapshot(
+            long count,
+            long sum,
+            long max,
+            long recentCount,
+            long recentP50,
+            long recentP90,
+            long recentP99
+        ) {
         }
     }
 }

@@ -84,7 +84,9 @@ public class FeaturePlantService implements AutoCloseable {
                 throw e;
             } finally {
                 if (sampleDistributions) {
-                    handles.latency().observe(Math.max(0L, System.nanoTime() - startNs));
+                    long completeNs = System.nanoTime();
+                    handles.latency().observe(Math.max(0L, completeNs - startNs));
+                    observeConsumerToModuleCompleteLatency(handles, envelope, completeNs);
                 }
                 if (sampleDistributions && envelope.eventTsMs() != null) {
                     handles.lag().observe(Math.max(0L, System.currentTimeMillis() - envelope.eventTsMs()));
@@ -116,8 +118,21 @@ public class FeaturePlantService implements AutoCloseable {
             metrics.counter("feature_module_events_out_total", labels),
             metrics.counter("feature_module_errors_total", labels),
             metrics.distribution("feature_module_latency_ns", labels),
+            metrics.distribution("featureplant_hot_path_consumer_to_module_complete_ns", labels),
             metrics.distribution("feature_module_lag_ms", labels)
         );
+    }
+
+    private void observeConsumerToModuleCompleteLatency(
+        FeatureMetricHandles handles,
+        CanonicalEnvelope envelope,
+        long completeNs
+    ) {
+        Long consumerReceiveTsNs = envelope.consumerReceiveTsNs();
+        if (consumerReceiveTsNs == null || consumerReceiveTsNs <= 0L || consumerReceiveTsNs > completeNs) {
+            return;
+        }
+        handles.consumerToModuleComplete().observe(completeNs - consumerReceiveTsNs);
     }
 
     private record FeatureMetricKey(String moduleName, String streamName) {
@@ -132,6 +147,7 @@ public class FeaturePlantService implements AutoCloseable {
         BackendMetrics.Counter eventsOut,
         BackendMetrics.Counter errors,
         BackendMetrics.DistributionHandle latency,
+        BackendMetrics.DistributionHandle consumerToModuleComplete,
         BackendMetrics.DistributionHandle lag
     ) {
     }

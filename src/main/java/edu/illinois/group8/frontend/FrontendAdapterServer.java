@@ -100,6 +100,7 @@ public class FrontendAdapterServer {
     private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
     private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
     private final Supplier<ReplayDemoStatus> replayDemoStatus;
+    private volatile Supplier<HotPathLatencyStatus> hotPathLatencyStatus = HotPathLatencyStatus::disabled;
     private final FeatureOutputReader dbFeatureOutputReader;
     private final SemanticMarketMetadataReader semanticMarketMetadataReader;
     private final SemanticMetadataOperatorService semanticMetadataOperator;
@@ -595,6 +596,7 @@ public class FrontendAdapterServer {
         bind("/metrics", this::handleMetrics);
         bind("/ops/pipeline", this::handleOpsPipeline);
         bind("/ops/latency", this::handleOpsLatency);
+        bind("/ops/hot-path-latency", this::handleOpsHotPathLatency);
         bind("/operator/status", this::handleOperatorStatus);
         bind("/operator/plan", this::handleOperatorPlan);
         bind("/operator/catalog/sync", this::handleOperatorCatalogSync);
@@ -614,6 +616,10 @@ public class FrontendAdapterServer {
 
     public int boundPort() {
         return httpServer == null ? -1 : httpServer.getAddress().getPort();
+    }
+
+    public void setHotPathLatencyStatusSupplier(Supplier<HotPathLatencyStatus> hotPathLatencyStatus) {
+        this.hotPathLatencyStatus = hotPathLatencyStatus == null ? HotPathLatencyStatus::disabled : hotPathLatencyStatus;
     }
 
     public void stop() {
@@ -1328,6 +1334,22 @@ public class FrontendAdapterServer {
         writeJson(exchange, 200, body);
     }
 
+    private void handleOpsHotPathLatency(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        HotPathLatencyStatus status;
+        try {
+            status = hotPathLatencyStatus.get();
+        } catch (RuntimeException e) {
+            status = HotPathLatencyStatus.unavailable(e.getMessage());
+        }
+        Map<String, Object> body = hotPathLatencyStatusBody(status);
+        body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
+        writeJson(exchange, 200, body);
+    }
+
     private void handleOperatorStatus(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             writeError(exchange, 405, "method not allowed");
@@ -1816,6 +1838,44 @@ public class FrontendAdapterServer {
         if (view.error() != null) {
             body.put("error", operatorVisibleError(view.error()));
         }
+        return body;
+    }
+
+    private static Map<String, Object> hotPathLatencyStatusBody(HotPathLatencyStatus status) {
+        HotPathLatencyStatus view = status == null ? HotPathLatencyStatus.disabled() : status;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", view.status());
+        body.put("source", view.source());
+        body.put("note", view.note());
+        body.put("stages", view.stages().stream().map(FrontendAdapterServer::hotPathStageBody).toList());
+        if (view.error() != null) {
+            body.put("error", operatorVisibleError(view.error()));
+        }
+        return body;
+    }
+
+    private static Map<String, Object> hotPathStageBody(HotPathLatencyStatus.Stage stage) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", stage.id());
+        body.put("label", stage.label());
+        body.put("status", stage.status());
+        body.put("source", stage.source());
+        body.put("metric", stage.metric());
+        body.put("note", stage.note());
+        body.put("series", stage.series().stream().map(FrontendAdapterServer::hotPathSeriesBody).toList());
+        return body;
+    }
+
+    private static Map<String, Object> hotPathSeriesBody(HotPathLatencyStatus.Series series) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("labels", series.labels());
+        body.put("count", series.count());
+        body.put("recent_count", series.recentCount());
+        body.put("p50_ns", series.p50Ns());
+        body.put("p90_ns", series.p90Ns());
+        body.put("p99_ns", series.p99Ns());
+        body.put("max_ns", series.maxNs());
+        body.put("avg_ns", series.avgNs());
         return body;
     }
 

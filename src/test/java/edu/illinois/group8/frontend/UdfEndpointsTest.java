@@ -582,10 +582,14 @@ class UdfEndpointsTest {
         assertTrue(metricsCss.headers().firstValue("content-type").orElse("").contains("text/css"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
         assertTrue(metricsHtml.body().contains("Kalshi Ops Metrics"));
+        assertTrue(metricsHtml.body().contains("Hot-path p99"));
+        assertTrue(metricsHtml.body().contains("Read-Model Freshness"));
         assertTrue(metricsHtml.body().contains("metrics.js"));
         assertTrue(metricsJs.body().contains("/ops/pipeline"));
         assertTrue(metricsJs.body().contains("/ops/latency"));
+        assertTrue(metricsJs.body().contains("/ops/hot-path-latency"));
         assertTrue(metricsJs.body().contains("/metrics?format=prometheus"));
+        assertTrue(metricsJs.body().contains("excludes DB/read-model"));
         assertTrue(metricsCss.body().contains(".metric-grid"));
         assertTrue(js.body().contains("const MARKET_CATALOG_LIMIT = 200;"));
         assertTrue(js.body().contains("marketCatalogGeneration"));
@@ -647,6 +651,7 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/api/demo/replay/status"));
         assertTrue(js.body().contains("/ops/pipeline"));
         assertTrue(js.body().contains("/ops/latency"));
+        assertTrue(js.body().contains("ms projection"));
         assertTrue(js.body().contains("/api/semantic-metadata/treemap?"));
         assertTrue(js.body().contains("/api/semantic-metadata/markets?"));
         assertTrue(js.body().contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
@@ -1103,6 +1108,57 @@ class UdfEndpointsTest {
         assertEquals(5L, latency.path("canonical_to_feature_ms").asLong());
         assertEquals(7L, latency.path("feature_to_latest_state_ms").asLong());
         assertEquals(12L, latency.path("canonical_to_latest_state_ms").asLong());
+    }
+
+    @Test
+    void opsHotPathLatencyExposesRealHotPathDistributionTelemetry() throws Exception {
+        server.stop();
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.disabled("test"),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY
+        );
+        server.setHotPathLatencyStatusSupplier(() -> new HotPathLatencyStatus(
+            "ok",
+            "prometheus",
+            "Hot-path latency excludes DB read-model projection.",
+            List.of(new HotPathLatencyStatus.Stage(
+                "featureplant_bbo_module_processing",
+                "FeaturePlant BBO module processing",
+                "ok",
+                "featureplant",
+                "feature_module_latency_ns",
+                "module-only",
+                List.of(new HotPathLatencyStatus.Series(
+                    Map.of("service", "featureplant", "module", "feature.bbo", "stream", "derived.top_of_book"),
+                    64L,
+                    2L,
+                    4_000L,
+                    7_000L,
+                    9_000L,
+                    20_000L,
+                    5_000L
+                ))
+            )),
+            null
+        ));
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+
+        JsonNode hotPath = getJson("/ops/hot-path-latency");
+
+        assertEquals("ok", hotPath.path("status").asText());
+        assertEquals("prometheus", hotPath.path("source").asText());
+        assertTrue(hotPath.path("note").asText().contains("excludes"));
+        JsonNode stage = hotPath.path("stages").get(0);
+        assertEquals("featureplant_bbo_module_processing", stage.path("id").asText());
+        assertEquals("feature_module_latency_ns", stage.path("metric").asText());
+        assertEquals(9_000L, stage.path("series").get(0).path("p99_ns").asLong());
+        assertFalse(hotPath.toString().contains("latest_market_state_commit_seq"));
+        assertFalse(hotPath.toString().contains("canonical_to_latest_state_ms"));
     }
 
     @Test

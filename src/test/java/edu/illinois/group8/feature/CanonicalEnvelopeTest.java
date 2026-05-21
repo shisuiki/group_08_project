@@ -81,6 +81,23 @@ class CanonicalEnvelopeTest {
     }
 
     @Test
+    void bytePayloadParsingCanOverrideLiveConsumerReceiveTimestamp() {
+        byte[] bytes = PAYLOAD_WITH_STREAM.getBytes(StandardCharsets.UTF_8);
+
+        CanonicalEnvelope envelope = CanonicalEnvelope.fromPayloadBytes(
+            "fallback.stream",
+            bytes,
+            0,
+            bytes.length,
+            987654321L,
+            MAPPER
+        );
+
+        assertEquals(Long.valueOf(987654321L), envelope.consumerReceiveTsNs());
+        assertEquals(PAYLOAD_WITH_STREAM, envelope.payload());
+    }
+
+    @Test
     void malformedBytePayloadThrowsIllegalArgumentException() {
         byte[] bytes = "{\"event_id\":".getBytes(StandardCharsets.UTF_8);
 

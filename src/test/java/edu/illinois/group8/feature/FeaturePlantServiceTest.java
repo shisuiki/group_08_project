@@ -156,6 +156,36 @@ class FeaturePlantServiceTest {
     }
 
     @Test
+    void consumerReceiveToModuleCompleteLatencyIsRecordedWhenTimestampIsValid() {
+        CanonicalEnvelope envelope = new CanonicalEnvelope(
+            "canonical.test",
+            "{}",
+            com.fasterxml.jackson.databind.node.NullNode.getInstance(),
+            null,
+            System.nanoTime() - 1_000L
+        );
+        BackendMetrics metrics = new BackendMetrics();
+        CollectingFeatureOutputSink sink = new CollectingFeatureOutputSink();
+
+        try (FeaturePlantService service = new FeaturePlantService(
+            new ListCanonicalEnvelopeSource(List.of(envelope)),
+            List.of(new EmittingFeatureModule("feature.test", "canonical.test")),
+            sink,
+            metrics
+        )) {
+            assertEquals(1L, service.runUntilExhausted(10));
+        }
+
+        String text = metrics.prometheusText();
+        assertTrue(text.contains(
+            "featureplant_hot_path_consumer_to_module_complete_ns_count{module=\"feature.test\",service=\"featureplant\",stream=\"canonical.test\"} 1\n"
+        ));
+        assertTrue(text.contains(
+            "feature_module_latency_ns_count{module=\"feature.test\",service=\"featureplant\",stream=\"canonical.test\"} 1\n"
+        ));
+    }
+
+    @Test
     void moduleMetricHandlesRemainSeparatedByStream() {
         List<CanonicalEnvelope> envelopes = new ArrayList<>();
         for (int i = 0; i < 65; i++) {

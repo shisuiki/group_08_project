@@ -62,6 +62,10 @@ class BackendMetricsTest {
         assertTrue(prometheus.contains("latency_ns_count{a=\"1\",b=\"2\"} 2\n"));
         assertTrue(prometheus.contains("latency_ns_sum{a=\"1\",b=\"2\"} 12\n"));
         assertTrue(prometheus.contains("latency_ns_max{a=\"1\",b=\"2\"} 7\n"));
+        assertTrue(prometheus.contains("latency_ns_recent_count{a=\"1\",b=\"2\"} 2\n"));
+        assertTrue(prometheus.contains("latency_ns_recent_p50{a=\"1\",b=\"2\"} 5\n"));
+        assertTrue(prometheus.contains("latency_ns_recent_p90{a=\"1\",b=\"2\"} 7\n"));
+        assertTrue(prometheus.contains("latency_ns_recent_p99{a=\"1\",b=\"2\"} 7\n"));
     }
 
     @Test
@@ -86,6 +90,7 @@ class BackendMetricsTest {
         assertTrue(prometheus.contains("unused_latency_ns_count{stream=\"canonical.trade\"} 1\n"));
         assertTrue(prometheus.contains("unused_latency_ns_sum{stream=\"canonical.trade\"} 9\n"));
         assertTrue(prometheus.contains("unused_latency_ns_max{stream=\"canonical.trade\"} 9\n"));
+        assertTrue(prometheus.contains("unused_latency_ns_recent_count{stream=\"canonical.trade\"} 1\n"));
     }
 
     @Test
@@ -116,5 +121,23 @@ class BackendMetricsTest {
         String prometheus = metrics.prometheusText();
         assertTrue(prometheus.contains("escaped_total{value=\"a\\\"b\\nc\\\\d\"} 2\n"));
         assertTrue(prometheus.contains("escaped_latency_ns_count{value=\"a\\\"b\\nc\\\\d\"} 1\n"));
+    }
+
+    @Test
+    void distributionRecentPercentilesUseBoundedObservedSamples() {
+        BackendMetrics metrics = new BackendMetrics();
+        Map<String, String> labels = BackendMetrics.labels("stream", "canonical.trade");
+        BackendMetrics.DistributionHandle distribution = metrics.distribution("recent_latency_ns", labels);
+
+        for (int value = 1; value <= 100; value++) {
+            distribution.observe(value);
+        }
+
+        String prometheus = metrics.prometheusText();
+        assertTrue(prometheus.contains("recent_latency_ns_count{stream=\"canonical.trade\"} 100\n"));
+        assertTrue(prometheus.contains("recent_latency_ns_recent_count{stream=\"canonical.trade\"} 100\n"));
+        assertTrue(prometheus.contains("recent_latency_ns_recent_p50{stream=\"canonical.trade\"} 50\n"));
+        assertTrue(prometheus.contains("recent_latency_ns_recent_p90{stream=\"canonical.trade\"} 90\n"));
+        assertTrue(prometheus.contains("recent_latency_ns_recent_p99{stream=\"canonical.trade\"} 99\n"));
     }
 }

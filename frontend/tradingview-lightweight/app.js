@@ -2450,7 +2450,7 @@
         dom.demoSignalLive.parentElement.classList.toggle('stale', freshness.live_data_observed !== true);
         dom.demoSignalLatency.textContent = latency.canonical_to_latest_state_ms == null
             ? ageText
-            : `${latency.canonical_to_latest_state_ms} ms e2e`;
+            : `${latency.canonical_to_latest_state_ms} ms projection`;
         dom.demoSignalThroughput.textContent = throughputText(pipeline);
         dom.demoSignalDistribution.textContent =
             `${distributionUpdateCount} browser / ${health.quote_streams?.events || 0} SSE / ` +
@@ -2594,7 +2594,7 @@
         const e2e = latency.canonical_to_latest_state_ms;
         dom.operatorE2eLatency.textContent = e2e == null
             ? `${latency.status || 'missing'} / ${latency.reason || latency.error || '-'}`
-            : `${e2e} ms / ${latency.status || 'ok'}`;
+            : `${e2e} ms projection / ${latency.status || 'ok'}`;
         dom.operatorE2eLatency.className = latency.status === 'ok' ? 'fresh' : 'stale';
         dom.operatorLatencyBudget.textContent = e2e == null
             ? `${OPERATOR_LATENCY_BUDGET_MS} ms / missing`
@@ -2695,7 +2695,7 @@
         }
         return latency.canonical_to_latest_state_ms == null
             ? `${latency.status} / ${latency.reason || latency.error || '-'}`
-            : `${latency.status} / ${latency.canonical_to_latest_state_ms} ms`;
+            : `${latency.status} / ${latency.canonical_to_latest_state_ms} ms projection`;
     }
 
     function adapterStatusText(body) {

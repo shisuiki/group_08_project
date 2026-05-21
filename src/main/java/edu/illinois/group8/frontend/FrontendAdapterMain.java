@@ -85,6 +85,7 @@ public final class FrontendAdapterMain {
                 FrontendReleaseInfo.fromEnvironment(),
                 historyFeatureOutputReader
             );
+            server.setHotPathLatencyStatusSupplier(buildHotPathLatencyStatusSupplier(System.getenv()));
             server.start();
             refreshService.start();
             CountDownLatch stop = new CountDownLatch(1);
@@ -124,6 +125,7 @@ public final class FrontendAdapterMain {
             buildReplayDemoStatusSupplier(config),
             FrontendReleaseInfo.fromEnvironment()
         );
+        server.setHotPathLatencyStatusSupplier(buildHotPathLatencyStatusSupplier(System.getenv()));
         server.start();
 
         AtomicBoolean running = new AtomicBoolean(true);
@@ -192,6 +194,10 @@ public final class FrontendAdapterMain {
                 return OperatorPipelineStatus.unavailable(config.featurePlantCursorName(), e.getMessage());
             }
         };
+    }
+
+    static Supplier<HotPathLatencyStatus> buildHotPathLatencyStatusSupplier(Map<String, String> env) {
+        return PrometheusHotPathLatencyReader.fromEnvironment(env);
     }
 
     static Function<String, OperatorLatencyStatus> buildOperatorLatencyStatusFunction(FrontendAdapterConfig config) {

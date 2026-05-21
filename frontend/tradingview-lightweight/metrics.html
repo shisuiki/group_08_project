@@ -62,9 +62,9 @@
         <small id="latest-state-age">latest-state age</small>
       </article>
       <article class="metric-tile latency">
-        <span class="label">DB read-model freshness</span>
-        <strong id="e2e-latency">--</strong>
-        <small id="latency-source">projection freshness proxy</small>
+        <span class="label">Hot-path p99</span>
+        <strong id="hot-path-latency">--</strong>
+        <small id="hot-path-source">ws receive to processing</small>
       </article>
       <article class="metric-tile freshness">
         <span class="label">Projected quote age</span>
@@ -86,8 +86,35 @@
     <section class="band">
       <div class="section-head">
         <div>
+          <p class="eyebrow">Hot path</p>
+          <h2>Receive to Processing</h2>
+        </div>
+        <span id="hot-path-status" class="pill">loading</span>
+      </div>
+      <div class="latency-lanes" aria-label="Hot-path latency breakdown">
+        <div class="lane">
+          <span>WS receive to tickerplant publish</span>
+          <div class="bar-track"><div id="hot-ws-p99-bar" class="bar"></div></div>
+          <strong id="hot-ws-p99-ms">--</strong>
+        </div>
+        <div class="lane">
+          <span>Tickerplant receive to BBO complete</span>
+          <div class="bar-track"><div id="hot-feature-p99-bar" class="bar alt"></div></div>
+          <strong id="hot-feature-p99-ms">--</strong>
+        </div>
+        <div class="lane">
+          <span>BBO module processing</span>
+          <div class="bar-track"><div id="hot-module-p99-bar" class="bar warn"></div></div>
+          <strong id="hot-module-p99-ms">--</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="section-head">
+        <div>
           <p class="eyebrow">DB projection path</p>
-          <h2>Canonical to Read Model</h2>
+          <h2>Read-Model Freshness</h2>
         </div>
         <span id="latency-status" class="pill">loading</span>
       </div>

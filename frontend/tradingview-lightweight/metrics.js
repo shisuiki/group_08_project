@@ -2,6 +2,7 @@ const REFRESH_MS = 3000;
 const REQUEST_TIMEOUT_MS = 5500;
 const OPTIONAL_REQUEST_TIMEOUT_MS = 1800;
 const LATENCY_BAR_MAX_MS = 1000;
+const HOT_PATH_BAR_MAX_NS = 100_000_000;
 
 const PROMETHEUS_ROWS = [
   ['frontend_adapter_symbols', 'Frontend symbols'],
@@ -93,6 +94,20 @@ function formatMs(value) {
     return `${formatNumber(number / 1000, 2)}s`;
   }
   return `${formatNumber(number, 0)}ms`;
+}
+
+function formatNs(value) {
+  const number = asNumber(value);
+  if (number == null) {
+    return '--';
+  }
+  if (number >= 1_000_000) {
+    return `${formatNumber(number / 1_000_000, 2)}ms`;
+  }
+  if (number >= 1_000) {
+    return `${formatNumber(number / 1_000, 1)}us`;
+  }
+  return `${formatNumber(number, 0)}ns`;
 }
 
 function formatAge(value) {
@@ -190,8 +205,6 @@ function renderPipeline(pipeline) {
   setText('latest-state-age', `latest state ${formatAge(body.latest_state_age_ms)}`);
   if (!liveSnapshot.latency) {
     setPill('latency-status', status === 'ok' ? 'read-model proxy' : status, statusClass(status));
-    setText('e2e-latency', formatAge(body.latest_state_age_ms));
-    setText('latency-source', 'not hot-path latency');
     setLatencyBar('canonical-state', body.latest_state_age_ms);
   }
 }
@@ -221,8 +234,6 @@ function renderHealth(health, operator) {
 function renderLatency(latency) {
   const status = latency ? latency.status : 'unavailable';
   setPill('latency-status', status, statusClass(status));
-  setText('e2e-latency', formatMs(latency && latency.canonical_to_latest_state_ms));
-  setText('latency-source', latency && latency.source_event_id ? latency.source_event_id : 'latest source event');
   setLatencyBar('canonical-feature', latency && latency.canonical_to_feature_ms);
   setLatencyBar('feature-state', latency && latency.feature_to_latest_state_ms);
   setLatencyBar('canonical-state', latency && latency.canonical_to_latest_state_ms);
@@ -231,11 +242,45 @@ function renderLatency(latency) {
 function renderLatencyUnavailable(reason) {
   const body = liveSnapshot.pipeline && liveSnapshot.pipeline.pipeline ? liveSnapshot.pipeline.pipeline : {};
   setPill('latency-status', reason || 'timeout', 'warn');
-  setText('e2e-latency', formatAge(body.latest_state_age_ms));
-  setText('latency-source', 'not hot-path latency');
   setLatencyBar('canonical-feature', null);
   setLatencyBar('feature-state', null);
   setLatencyBar('canonical-state', body.latest_state_age_ms);
+}
+
+function renderHotPathLatency(hotPath) {
+  const status = hotPath ? hotPath.status : 'unavailable';
+  setPill('hot-path-status', status, statusClass(status));
+  const ws = hotPathStage(hotPath, 'ws_to_tickerplant_publish');
+  const feature = hotPathStage(hotPath, 'featureplant_consumer_to_bbo_complete');
+  const module = hotPathStage(hotPath, 'featureplant_bbo_module_processing');
+  const best = bestSeries(ws) || bestSeries(feature) || bestSeries(module);
+  setText('hot-path-latency', best && best.p99_ns != null ? formatNs(best.p99_ns) : status);
+  setText('hot-path-source', best ? 'recent p99, excludes DB/read-model' : (hotPath && hotPath.note) || 'missing hot-path samples');
+  setHotPathBar('hot-ws-p99', bestSeries(ws) && bestSeries(ws).p99_ns);
+  setHotPathBar('hot-feature-p99', bestSeries(feature) && bestSeries(feature).p99_ns);
+  setHotPathBar('hot-module-p99', bestSeries(module) && bestSeries(module).p99_ns);
+}
+
+function renderHotPathUnavailable(reason) {
+  setPill('hot-path-status', reason || 'timeout', 'warn');
+  setText('hot-path-latency', '--');
+  setText('hot-path-source', 'hot-path metrics unavailable');
+  setHotPathBar('hot-ws-p99', null);
+  setHotPathBar('hot-feature-p99', null);
+  setHotPathBar('hot-module-p99', null);
+}
+
+function hotPathStage(hotPath, id) {
+  const stages = hotPath && Array.isArray(hotPath.stages) ? hotPath.stages : [];
+  return stages.find((stage) => stage.id === id) || null;
+}
+
+function bestSeries(stage) {
+  const series = stage && Array.isArray(stage.series) ? stage.series : [];
+  if (!series.length) {
+    return null;
+  }
+  return [...series].sort((left, right) => (asNumber(right.recent_count) || 0) - (asNumber(left.recent_count) || 0))[0];
 }
 
 function setLatencyBar(prefix, value) {
@@ -246,6 +291,16 @@ function setLatencyBar(prefix, value) {
     bar.style.width = `${width}%`;
   }
   setText(`${prefix}-ms`, formatMs(value));
+}
+
+function setHotPathBar(prefix, value) {
+  const number = Math.max(0, asNumber(value) || 0);
+  const width = Math.min(100, (number / HOT_PATH_BAR_MAX_NS) * 100);
+  const bar = byId(`${prefix}-bar`);
+  if (bar) {
+    bar.style.width = `${width}%`;
+  }
+  setText(`${prefix}-ms`, formatNs(value));
 }
 
 function renderPrometheus(text) {
@@ -321,6 +376,16 @@ async function refresh() {
       errors.push(`latency: ${error}`);
       record('errors', errors);
       renderLatencyUnavailable('timeout');
+    });
+  fetchJson('/ops/hot-path-latency', OPTIONAL_REQUEST_TIMEOUT_MS)
+    .then((body) => {
+      record('hot_path_latency', body);
+      renderHotPathLatency(body);
+    })
+    .catch((error) => {
+      errors.push(`hot_path_latency: ${error}`);
+      record('errors', errors);
+      renderHotPathUnavailable('timeout');
     });
   Promise.allSettled([
     fetchJson('/health', OPTIONAL_REQUEST_TIMEOUT_MS),

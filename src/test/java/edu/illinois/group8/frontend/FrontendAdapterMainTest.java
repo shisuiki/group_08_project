@@ -112,6 +112,13 @@ class FrontendAdapterMainTest {
     }
 
     @Test
+    void hotPathLatencySupplierIsDisabledWithoutMetricsUrls() {
+        HotPathLatencyStatus status = FrontendAdapterMain.buildHotPathLatencyStatusSupplier(Map.of()).get();
+
+        assertEquals("disabled", status.status());
+    }
+
+    @Test
     void semanticMetadataStatusSupplierIsDisabledWithoutDatabase() {
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
             "FRONTEND_ADAPTER_SEMANTIC_METADATA_STATUS_SOURCE", "db",
