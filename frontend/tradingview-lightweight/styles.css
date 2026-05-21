@@ -941,6 +941,10 @@ main[data-active-role="operator"] #live-panel > .panel {
     display: none !important;
 }
 
+.semantic-market-detail:not(.visible) {
+    display: none !important;
+}
+
 .semantic-market-detail.visible {
     display: grid;
 }

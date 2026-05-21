@@ -1657,6 +1657,7 @@
     function renderSemanticDetail(detail) {
         dom.semanticMarketDetail.hidden = !detail;
         dom.semanticMarketDetail.classList.toggle('visible', Boolean(detail));
+        dom.semanticMarketDetail.setAttribute('aria-hidden', detail ? 'false' : 'true');
         if (!detail) {
             dom.semanticMarketDetail.removeAttribute('style');
             return;
