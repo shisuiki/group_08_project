@@ -317,6 +317,31 @@ main {
     color: #e45757;
 }
 
+.mode-chip-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.mode-chip {
+    border: 1px solid #3b444b;
+    border-radius: 4px;
+    padding: 5px 6px;
+    color: #a8b0b7;
+    font-size: 11px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mode-chip.active {
+    border-color: #d5a64f;
+    background: #242117;
+    color: #f4f7f9;
+}
+
 .feature-list {
     display: flex;
     flex-direction: column;

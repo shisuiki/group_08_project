@@ -11,6 +11,7 @@ import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.ReplayDemoStatus;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataRow;
@@ -761,6 +762,8 @@ class UdfEndpointsTest {
         assertEquals("disabled", body.path("operator_pipeline").path("status").asText());
         assertEquals("disabled", body.path("semantic_metadata").path("status").asText());
         assertFalse(body.path("semantic_metadata").path("runtime_supported").asBoolean());
+        assertEquals("disabled", body.path("replay_demo").path("status").asText());
+        assertEquals("demo-db-primary-long-replay", body.path("replay_demo").path("replay_id").asText());
     }
 
     @Test
@@ -788,6 +791,61 @@ class UdfEndpointsTest {
         assertEquals(5L, pipeline.path("cursor_lag_events").asLong());
         assertEquals(7L, pipeline.path("latest_market_state_commit_seq").asLong());
         assertEquals(250L, pipeline.path("latest_state_age_ms").asLong());
+    }
+
+    @Test
+    void replayDemoStatusEndpointReportsPopulatedDataset() throws Exception {
+        restartWithReplayDemoStatus(ReplayDemoStatus.fromCounts(
+            "demo-db-primary-long-replay",
+            2L,
+            366L,
+            362L,
+            0L,
+            1_800_000_000_000L,
+            1_800_000_180_000L,
+            10L,
+            375L,
+            List.of("DEMO-DBPRIMARY-26MAY19-T50", "DEMO-DBPRIMARY-26MAY19-T60")
+        ));
+
+        JsonNode body = getJson("/api/demo/replay/status");
+
+        assertEquals("projected", body.path("status").asText());
+        JsonNode replay = body.path("replay_demo");
+        assertEquals("demo-db-primary-long-replay", replay.path("replay_id").asText());
+        assertEquals(2L, replay.path("market_count").asLong());
+        assertEquals(366L, replay.path("canonical_event_count").asLong());
+        assertEquals(362L, replay.path("feature_output_count").asLong());
+        assertEquals(0L, replay.path("latest_market_state_count").asLong());
+        assertEquals(2, replay.path("available_symbols").size());
+        assertTrue(replay.path("featureplant_projected").asBoolean());
+        assertTrue(replay.path("dataset_ready").asBoolean());
+        assertEquals("projected", getJson("/health").path("replay_demo").path("status").asText());
+        assertEquals("projected", getJson("/operator/status").path("replay_demo").path("status").asText());
+    }
+
+    @Test
+    void replayDemoStatusEndpointHandlesEmptyDataset() throws Exception {
+        restartWithReplayDemoStatus(ReplayDemoStatus.fromCounts(
+            "demo-db-primary-long-replay",
+            0L,
+            0L,
+            0L,
+            0L,
+            null,
+            null,
+            null,
+            null,
+            List.of()
+        ));
+
+        JsonNode replay = getJson("/api/demo/replay/status").path("replay_demo");
+
+        assertEquals("empty", replay.path("status").asText());
+        assertEquals(0L, replay.path("canonical_event_count").asLong());
+        assertFalse(replay.path("featureplant_projected").asBoolean());
+        assertFalse(replay.path("dataset_ready").asBoolean());
+        assertEquals(0, replay.path("available_symbols").size());
     }
 
     @Test
@@ -1603,6 +1661,40 @@ class UdfEndpointsTest {
 
         assertEquals(401, unauthorized.statusCode());
         assertEquals(202, authorized.statusCode());
+    }
+
+    @Test
+    void operatorDemoOrchestratorReplayCheckReturnsConcreteReplayStatus() throws Exception {
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> summary(0, 0, 0, 0, 0, 0),
+            Map.of(),
+            config -> catalogSummary(0, 0, 0, 0, 0)
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"replay_demo_check\"}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        JsonNode summary = completed.path("latest_run").path("summary");
+        assertEquals("replay_demo_check", completed.path("latest_run").path("action").asText());
+        assertEquals("replay_demo", completed.path("latest_run").path("mode").asText());
+        assertEquals("/api/demo/replay/status", completed.path("latest_run").path("evidence_url").asText());
+        assertEquals(
+            "seeded",
+            summary.path("replay_demo").path("status").asText()
+        );
+        assertEquals(
+            366L,
+            summary.path("replay_demo").path("canonical_event_count").asLong()
+        );
+        assertTrue(summary.path("replay_demo_status").path("replay_demo").isObject());
+        assertTrue(summary.path("status_snapshot").isObject());
     }
 
     @Test
@@ -2458,6 +2550,31 @@ class UdfEndpointsTest {
         baseUrl = "http://127.0.0.1:" + server.boundPort();
     }
 
+    private void restartWithReplayDemoStatus(ReplayDemoStatus status) throws Exception {
+        server.stop();
+        FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
+        seed(store);
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        server = new FrontendAdapterServer(
+            config,
+            store,
+            FrontendMarketMetadataCatalog.loaded("test", List.of(
+                metadata("MKT-1", "EVENT-1", "SERIES-1", "open"),
+                metadata("MKT-META", "EVENT-META", "SERIES-META", "closed")
+            )),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("model", "fallback", "tax-v1"),
+            request -> List.of(),
+            () -> status,
+            FrontendReleaseInfo.empty()
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+    }
+
     private void restartWithSemanticOperator(
         Map<String, String> serviceEnv,
         Function<SemanticMetadataConfig, SemanticMetadataBatchSummary> runner
@@ -2587,6 +2704,12 @@ class UdfEndpointsTest {
             catalogService,
             semanticService,
             () -> Map.of(),
+            () -> Map.of("replay_demo", Map.of(
+                "status", "seeded",
+                "replay_id", "demo-db-primary-long-replay",
+                "canonical_event_count", 366L,
+                "feature_output_count", 0L
+            )),
             Executors.newSingleThreadExecutor(),
             liveEnv,
             liveCredentialChecker

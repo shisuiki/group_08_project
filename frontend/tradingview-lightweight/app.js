@@ -54,6 +54,19 @@
         marketSourceKind: document.getElementById('market-source-kind'),
         marketLiveObserved: document.getElementById('market-live-observed'),
         marketSyntheticState: document.getElementById('market-synthetic-state'),
+        productModeState: document.getElementById('product-mode-state'),
+        modeChipReplay: document.getElementById('mode-chip-replay'),
+        modeChipLive: document.getElementById('mode-chip-live'),
+        modeChipSemantic: document.getElementById('mode-chip-semantic'),
+        modeChipOps: document.getElementById('mode-chip-ops'),
+        modeSourceMode: document.getElementById('mode-source-mode'),
+        modeFeatureSource: document.getElementById('mode-feature-source'),
+        modeReleaseProfile: document.getElementById('mode-release-profile'),
+        modeLiveFreshness: document.getElementById('mode-live-freshness'),
+        modeReplayReadiness: document.getElementById('mode-replay-readiness'),
+        modeReplayProjection: document.getElementById('mode-replay-projection'),
+        modeSemanticStatus: document.getElementById('mode-semantic-status'),
+        modeOpsLatency: document.getElementById('mode-ops-latency'),
         researchFeatureSelect: document.getElementById('research-feature-select'),
         researchFeatureLimit: document.getElementById('research-feature-limit'),
         researchFeatureWindow: document.getElementById('research-feature-window'),
@@ -1384,6 +1397,7 @@
             renderRuntimeOperator(body);
             renderLatencyFreshness(body);
             renderOpsTelemetry();
+            renderProductModeSurface(body);
         } catch (err) {
             dom.adapterHealth.textContent = 'unavailable';
             dom.adapterHealth.className = 'stale';
@@ -1839,6 +1853,98 @@
             ? `${OPERATOR_LATENCY_BUDGET_MS} ms / missing`
             : `${OPERATOR_LATENCY_BUDGET_MS} ms / ${e2e <= OPERATOR_LATENCY_BUDGET_MS ? 'within' : 'over'}`;
         dom.operatorLatencyBudget.className = e2e != null && e2e <= OPERATOR_LATENCY_BUDGET_MS ? 'fresh' : 'stale';
+        renderProductModeSurface(lastHealthBody);
+    }
+
+    function renderProductModeSurface(body) {
+        const health = body || {};
+        const replay = health.replay_demo || {};
+        const semantic = health.semantic_metadata || {};
+        const freshness = health.data_freshness || {};
+        const release = health.release || {};
+        const latency = lastOpsLatency || {};
+        const liveState = dataFreshnessLiveState(freshness);
+        const replayReady = replay.dataset_ready === true || replay.canonical_event_count > 0;
+        const semanticRows = (semantic.generated_count || 0)
+            + (semantic.review_required_count || 0)
+            + (semantic.failed_count || 0)
+            + (semantic.rate_limited_count || 0);
+        const mode = replayReady && (freshness.source_kind === 'demo' || health.source_mode === 'db')
+            ? 'Replay Demo'
+            : freshness.live_data_observed === true
+                ? 'Live Product'
+                : semanticRows > 0
+                    ? 'Semantic Metadata'
+                    : 'Ops/Latency';
+        dom.productModeState.textContent = mode;
+        dom.productModeState.className = mode === 'Live Product' && liveState === 'live' ? 'fresh'
+            : mode === 'Replay Demo' && replayReady ? 'fresh'
+            : 'stale';
+        setModeChip(dom.modeChipReplay, mode === 'Replay Demo', replayReady);
+        setModeChip(dom.modeChipLive, mode === 'Live Product', freshness.live_data_observed === true);
+        setModeChip(dom.modeChipSemantic, mode === 'Semantic Metadata', semanticRows > 0);
+        setModeChip(dom.modeChipOps, mode === 'Ops/Latency', latency.status === 'ok');
+        dom.modeSourceMode.textContent = health.source_mode || '-';
+        dom.modeFeatureSource.textContent = health.feature_source || '-';
+        dom.modeReleaseProfile.textContent = releaseStatusText(release);
+        dom.modeLiveFreshness.textContent = dataFreshnessText(freshness);
+        dom.modeLiveFreshness.className = dataFreshnessClass(freshness);
+        dom.modeReplayReadiness.textContent = replayStatusText(replay);
+        dom.modeReplayReadiness.className = replayReady ? 'fresh' : 'stale';
+        dom.modeReplayProjection.textContent = replayProjectionText(replay);
+        dom.modeReplayProjection.className = replay.featureplant_projected === true ? 'fresh' : 'stale';
+        dom.modeSemanticStatus.textContent = semanticStatusText(semantic);
+        dom.modeSemanticStatus.className = semanticRows > 0 ? 'fresh' : 'stale';
+        dom.modeOpsLatency.textContent = latencyStatusText(latency);
+        dom.modeOpsLatency.className = latency.status === 'ok' ? 'fresh' : 'stale';
+    }
+
+    function setModeChip(element, active, ready) {
+        if (!element) {
+            return;
+        }
+        element.classList.toggle('active', active);
+        element.classList.toggle('fresh', ready === true);
+        element.classList.toggle('stale', active && ready !== true);
+    }
+
+    function replayStatusText(replay) {
+        if (!replay || !replay.status) {
+            return 'unknown';
+        }
+        const symbols = Array.isArray(replay.available_symbols) ? replay.available_symbols.length : 0;
+        return `${replay.status} / markets ${replay.market_count || 0}` +
+            ` / canonical ${replay.canonical_event_count || 0}` +
+            ` / symbols ${symbols}`;
+    }
+
+    function replayProjectionText(replay) {
+        if (!replay || !replay.status) {
+            return 'unknown';
+        }
+        return `features ${replay.feature_output_count || 0}` +
+            ` / latest ${replay.latest_market_state_count || 0}` +
+            ` / projected ${yesNo(replay.featureplant_projected)}`;
+    }
+
+    function semanticStatusText(semantic) {
+        if (!semantic || !semantic.status) {
+            return 'unknown';
+        }
+        const rows = (semantic.generated_count || 0)
+            + (semantic.review_required_count || 0)
+            + (semantic.failed_count || 0)
+            + (semantic.rate_limited_count || 0);
+        return `${semantic.status} / rows ${rows} / treemap ${yesNo(semantic.read_api?.available)}`;
+    }
+
+    function latencyStatusText(latency) {
+        if (!latency || !latency.status) {
+            return 'missing';
+        }
+        return latency.canonical_to_latest_state_ms == null
+            ? `${latency.status} / ${latency.reason || latency.error || '-'}`
+            : `${latency.status} / ${latency.canonical_to_latest_state_ms} ms`;
     }
 
     function adapterStatusText(body) {

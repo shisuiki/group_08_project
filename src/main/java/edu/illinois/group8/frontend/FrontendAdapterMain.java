@@ -23,6 +23,7 @@ import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
 import edu.illinois.group8.storage.db.JdbcOperatorLatencyReader;
 import edu.illinois.group8.storage.db.JdbcOperatorPipelineStatusReader;
 import edu.illinois.group8.storage.db.JdbcOperatorSemanticMetadataStatusReader;
+import edu.illinois.group8.storage.db.JdbcReplayDemoStatusReader;
 import edu.illinois.group8.storage.db.JdbcSemanticMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
@@ -30,6 +31,7 @@ import edu.illinois.group8.storage.db.MarketMetadataReader;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.ReplayDemoStatus;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
 
 import java.util.ArrayList;
@@ -39,8 +41,9 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Function;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public final class FrontendAdapterMain {
     private FrontendAdapterMain() {
@@ -71,6 +74,7 @@ public final class FrontendAdapterMain {
                 buildOperatorLatencyStatusFunction(config),
                 buildOperatorSemanticMetadataStatusSupplier(config),
                 buildSemanticMarketMetadataReader(config),
+                buildReplayDemoStatusSupplier(config),
                 FrontendReleaseInfo.fromEnvironment()
             );
             server.start();
@@ -109,6 +113,7 @@ public final class FrontendAdapterMain {
             buildOperatorLatencyStatusFunction(config),
             buildOperatorSemanticMetadataStatusSupplier(config),
             buildSemanticMarketMetadataReader(config),
+            buildReplayDemoStatusSupplier(config),
             FrontendReleaseInfo.fromEnvironment()
         );
         server.start();
@@ -245,6 +250,24 @@ public final class FrontendAdapterMain {
             config.dbUser(),
             config.dbPassword()
         );
+    }
+
+    static Supplier<ReplayDemoStatus> buildReplayDemoStatusSupplier(FrontendAdapterConfig config) {
+        if (config.dbUrl().isBlank()) {
+            return () -> ReplayDemoStatus.disabled(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID);
+        }
+        JdbcReplayDemoStatusReader reader = JdbcReplayDemoStatusReader.fromDriverManager(
+            config.dbUrl(),
+            config.dbUser(),
+            config.dbPassword()
+        );
+        return () -> {
+            try {
+                return reader.readDefault();
+            } catch (RuntimeException e) {
+                return ReplayDemoStatus.unavailable(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID, e.getMessage());
+            }
+        };
     }
 
     static FeatureOutputRefreshService.RowReader buildFeatureOutputRowReader(FrontendAdapterConfig config) {

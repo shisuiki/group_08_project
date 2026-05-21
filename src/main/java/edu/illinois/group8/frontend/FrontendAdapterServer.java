@@ -9,11 +9,13 @@ import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
 import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcReplayDemoStatusReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
 import edu.illinois.group8.storage.db.OperatorPipelineStatus;
 import edu.illinois.group8.storage.db.OperatorSemanticMetadataStatus;
+import edu.illinois.group8.storage.db.ReplayDemoStatus;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataReadRequest;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataReader;
 import edu.illinois.group8.storage.db.SemanticMarketMetadataRow;
@@ -84,6 +86,7 @@ public class FrontendAdapterServer {
     private final Supplier<OperatorPipelineStatus> operatorPipelineStatus;
     private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
     private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
+    private final Supplier<ReplayDemoStatus> replayDemoStatus;
     private final SemanticMarketMetadataReader semanticMarketMetadataReader;
     private final SemanticMetadataOperatorService semanticMetadataOperator;
     private final CatalogSyncOperatorService catalogSyncOperator;
@@ -242,8 +245,37 @@ public class FrontendAdapterServer {
             operatorLatencyStatus,
             operatorSemanticMetadataStatus,
             semanticMarketMetadataReader,
+            defaultReplayDemoStatusSupplier(),
+            releaseInfo
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        Supplier<ReplayDemoStatus> replayDemoStatus,
+        FrontendReleaseInfo releaseInfo
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
             releaseInfo,
-            SemanticMetadataOperatorService.create(config, System.getenv())
+            SemanticMetadataOperatorService.create(config, System.getenv()),
+            replayDemoStatus
         );
     }
 
@@ -272,7 +304,39 @@ public class FrontendAdapterServer {
             semanticMarketMetadataReader,
             releaseInfo,
             semanticMetadataOperator,
-            CatalogSyncOperatorService.create(config, System.getenv())
+            defaultReplayDemoStatusSupplier()
+        );
+    }
+
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        Supplier<ReplayDemoStatus> replayDemoStatus
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            semanticMetadataOperator,
+            CatalogSyncOperatorService.create(config, System.getenv()),
+            replayDemoStatus,
+            null
         );
     }
 
@@ -303,6 +367,7 @@ public class FrontendAdapterServer {
             releaseInfo,
             semanticMetadataOperator,
             catalogSyncOperator,
+            defaultReplayDemoStatusSupplier(),
             null
         );
     }
@@ -320,6 +385,40 @@ public class FrontendAdapterServer {
         FrontendReleaseInfo releaseInfo,
         SemanticMetadataOperatorService semanticMetadataOperator,
         CatalogSyncOperatorService catalogSyncOperator,
+        DemoOrchestratorService demoOrchestrator
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            semanticMetadataOperator,
+            catalogSyncOperator,
+            defaultReplayDemoStatusSupplier(),
+            demoOrchestrator
+        );
+    }
+
+    FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        CatalogSyncOperatorService catalogSyncOperator,
+        Supplier<ReplayDemoStatus> replayDemoStatus,
         DemoOrchestratorService demoOrchestrator
     ) {
         this.config = config;
@@ -340,6 +439,7 @@ public class FrontendAdapterServer {
         this.operatorSemanticMetadataStatus = operatorSemanticMetadataStatus == null
             ? () -> OperatorSemanticMetadataStatus.disabled("", "", "")
             : operatorSemanticMetadataStatus;
+        this.replayDemoStatus = replayDemoStatus == null ? defaultReplayDemoStatusSupplier() : replayDemoStatus;
         this.semanticMarketMetadataReader = semanticMarketMetadataReader == null
             ? request -> List.of()
             : semanticMarketMetadataReader;
@@ -356,7 +456,8 @@ public class FrontendAdapterServer {
             this.releaseInfo,
             this.catalogSyncOperator,
             this.semanticMetadataOperator,
-            this::demoProductStatusSnapshot
+            this::demoProductStatusSnapshot,
+            this::demoReplayStatusSnapshot
         ) : demoOrchestrator;
     }
 
@@ -373,6 +474,7 @@ public class FrontendAdapterServer {
         bind("/quotes", this::handleQuotes);
         bind("/features", this::handleFeatures);
         bind("/markets", this::handleMarkets);
+        bind("/api/demo/replay/status", this::handleReplayDemoStatus);
         bind("/api/semantic-metadata/markets", this::handleSemanticMetadataMarkets);
         bind("/api/semantic-metadata/treemap", this::handleSemanticMetadataTreemap);
         bind("/health", this::handleHealth);
@@ -841,6 +943,19 @@ public class FrontendAdapterServer {
         writeJson(exchange, 200, body);
     }
 
+    private void handleReplayDemoStatus(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            writeError(exchange, 405, "method not allowed");
+            return;
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        ReplayDemoStatus status = currentReplayDemoStatus();
+        body.put("status", status.status());
+        body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
+        body.put("replay_demo", replayDemoStatusBody(status));
+        writeJson(exchange, 200, body);
+    }
+
     private void handleSemanticMetadataMarkets(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             writeError(exchange, 405, "method not allowed");
@@ -937,6 +1052,7 @@ public class FrontendAdapterServer {
         health.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
         health.put("operator_pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
         health.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
+        health.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
         writeJson(exchange, 200, health);
     }
 
@@ -1002,6 +1118,7 @@ public class FrontendAdapterServer {
         body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
         body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
         body.put("demo_orchestrator", demoOrchestrator.statusBody());
+        body.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
         body.put("data_freshness", dataFreshnessBody(freshness));
         body.put("product_readiness", productReadinessBody(freshness, refreshStatus));
         body.put("feature_output_refresh", featureOutputRefreshBody(refreshStatus));
@@ -1162,6 +1279,7 @@ public class FrontendAdapterServer {
         body.put("quote_streams", quoteStreamsBody());
         body.put("pipeline", operatorPipelineStatusBody(operatorPipelineStatus.get()));
         body.put("semantic_metadata", semanticMetadataStatusBody(operatorSemanticMetadataStatus.get()));
+        body.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
         body.put("catalog_sync", catalogSyncOperator.statusBody());
         body.put("semantic_metadata_run", semanticMetadataOperator.statusBody());
         body.put("market_metadata", Map.of(
@@ -1169,6 +1287,13 @@ public class FrontendAdapterServer {
             "status", metadataCatalog.loadStatus().name().toLowerCase(Locale.ROOT),
             "markets", metadataCatalog.size()
         ));
+        return body;
+    }
+
+    private Map<String, Object> demoReplayStatusSnapshot() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
+        body.put("replay_demo", replayDemoStatusBody(currentReplayDemoStatus()));
         return body;
     }
 
@@ -1320,6 +1445,41 @@ public class FrontendAdapterServer {
         body.put("last_row_count", view.lastRowCount());
         body.put("total_loaded", view.totalLoaded());
         body.put("refresh_errors", view.refreshErrors());
+        return body;
+    }
+
+    private ReplayDemoStatus currentReplayDemoStatus() {
+        try {
+            ReplayDemoStatus status = replayDemoStatus.get();
+            return status == null
+                ? ReplayDemoStatus.unavailable(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID, "status supplier returned null")
+                : status;
+        } catch (RuntimeException e) {
+            return ReplayDemoStatus.unavailable(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID, e.getMessage());
+        }
+    }
+
+    private static Map<String, Object> replayDemoStatusBody(ReplayDemoStatus status) {
+        ReplayDemoStatus view = status == null
+            ? ReplayDemoStatus.disabled(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID)
+            : status;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", view.status());
+        body.put("replay_id", view.replayId());
+        body.put("market_count", view.marketCount());
+        body.put("canonical_event_count", view.canonicalEventCount());
+        body.put("feature_output_count", view.featureOutputCount());
+        body.put("latest_market_state_count", view.latestMarketStateCount());
+        body.put("first_event_ts_ms", view.firstEventTsMs());
+        body.put("last_event_ts_ms", view.lastEventTsMs());
+        body.put("first_canonical_commit_seq", view.firstCanonicalCommitSeq());
+        body.put("last_canonical_commit_seq", view.lastCanonicalCommitSeq());
+        body.put("available_symbols", view.availableSymbols());
+        body.put("featureplant_projected", view.featurePlantProjected());
+        body.put("dataset_ready", view.canonicalEventCount() > 0L && view.marketCount() > 0L);
+        if (view.error() != null) {
+            body.put("error", operatorVisibleError(view.error()));
+        }
         return body;
     }
 
@@ -1952,6 +2112,10 @@ public class FrontendAdapterServer {
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
             .replace("\n", "\\n");
+    }
+
+    private static Supplier<ReplayDemoStatus> defaultReplayDemoStatusSupplier() {
+        return () -> ReplayDemoStatus.disabled(JdbcReplayDemoStatusReader.DEFAULT_REPLAY_ID);
     }
 
     private static ThreadFactory daemonThreadFactory(String prefix) {

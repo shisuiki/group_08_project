@@ -55,6 +55,7 @@ final class DemoOrchestratorService implements AutoCloseable {
     private final CatalogSyncOperatorService catalogSyncOperator;
     private final SemanticMetadataOperatorService semanticMetadataOperator;
     private final Supplier<Map<String, Object>> productStatusSnapshot;
+    private final Supplier<Map<String, Object>> replayDemoStatusSnapshot;
     private final ExecutorService executor;
     private final Map<String, String> env;
     private final KalshiLiveCredentialPreflight.LiveCredentialChecker liveCredentialChecker;
@@ -70,6 +71,24 @@ final class DemoOrchestratorService implements AutoCloseable {
         SemanticMetadataOperatorService semanticMetadataOperator,
         Supplier<Map<String, Object>> productStatusSnapshot
     ) {
+        return create(
+            config,
+            releaseInfo,
+            catalogSyncOperator,
+            semanticMetadataOperator,
+            productStatusSnapshot,
+            () -> Map.of()
+        );
+    }
+
+    static DemoOrchestratorService create(
+        FrontendAdapterConfig config,
+        FrontendReleaseInfo releaseInfo,
+        CatalogSyncOperatorService catalogSyncOperator,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        Supplier<Map<String, Object>> productStatusSnapshot,
+        Supplier<Map<String, Object>> replayDemoStatusSnapshot
+    ) {
         ExecutorService executor = Executors.newSingleThreadExecutor(daemonThreadFactory("demo-orchestrator-runner"));
         return new DemoOrchestratorService(
             config,
@@ -77,6 +96,7 @@ final class DemoOrchestratorService implements AutoCloseable {
             catalogSyncOperator,
             semanticMetadataOperator,
             productStatusSnapshot,
+            replayDemoStatusSnapshot,
             executor,
             System.getenv(),
             new KalshiLiveCredentialPreflight()::check
@@ -97,6 +117,7 @@ final class DemoOrchestratorService implements AutoCloseable {
             catalogSyncOperator,
             semanticMetadataOperator,
             productStatusSnapshot,
+            () -> Map.of(),
             executor,
             System.getenv(),
             new KalshiLiveCredentialPreflight()::check
@@ -109,6 +130,7 @@ final class DemoOrchestratorService implements AutoCloseable {
         CatalogSyncOperatorService catalogSyncOperator,
         SemanticMetadataOperatorService semanticMetadataOperator,
         Supplier<Map<String, Object>> productStatusSnapshot,
+        Supplier<Map<String, Object>> replayDemoStatusSnapshot,
         ExecutorService executor,
         Map<String, String> env,
         KalshiLiveCredentialPreflight.LiveCredentialChecker liveCredentialChecker
@@ -118,6 +140,7 @@ final class DemoOrchestratorService implements AutoCloseable {
         this.catalogSyncOperator = Objects.requireNonNull(catalogSyncOperator, "catalogSyncOperator");
         this.semanticMetadataOperator = Objects.requireNonNull(semanticMetadataOperator, "semanticMetadataOperator");
         this.productStatusSnapshot = Objects.requireNonNull(productStatusSnapshot, "productStatusSnapshot");
+        this.replayDemoStatusSnapshot = Objects.requireNonNull(replayDemoStatusSnapshot, "replayDemoStatusSnapshot");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.env = env == null ? Map.of() : Map.copyOf(env);
         this.liveCredentialChecker = Objects.requireNonNull(liveCredentialChecker, "liveCredentialChecker");
@@ -187,7 +210,8 @@ final class DemoOrchestratorService implements AutoCloseable {
 
     private Map<String, Object> runAction(RunConfig runConfig) {
         return switch (runConfig.action()) {
-            case PRODUCT_READINESS_CHECK, REPLAY_DEMO_CHECK -> productReadinessSummary(runConfig);
+            case PRODUCT_READINESS_CHECK -> productReadinessSummary(runConfig);
+            case REPLAY_DEMO_CHECK -> replayDemoSummary(runConfig);
             case LIVE_PRODUCT_CHECK -> liveProductSummary(runConfig);
             case LIVE_CREDENTIAL_CHECK -> liveCredentialSummary(runConfig);
             case LIVE_CATALOG_SYNC_BOUNDED -> liveCatalogSyncBoundedSummary(runConfig);
@@ -203,6 +227,19 @@ final class DemoOrchestratorService implements AutoCloseable {
         Map<String, Object> snapshot = productStatusSnapshot.get();
         Map<String, Object> body = baseSummary(runConfig, "read product readiness and quote/latency evidence");
         body.put("status_snapshot", snapshot);
+        return body;
+    }
+
+    private Map<String, Object> replayDemoSummary(RunConfig runConfig) {
+        Map<String, Object> body = baseSummary(runConfig, "read replay demo dataset and FeaturePlant projection status");
+        Map<String, Object> snapshot = replayDemoStatusSnapshot.get();
+        if (snapshot == null) {
+            snapshot = Map.of("status", "unavailable");
+        }
+        Object replayDemo = snapshot.get("replay_demo");
+        body.put("replay_demo", replayDemo instanceof Map<?, ?> ? replayDemo : snapshot);
+        body.put("replay_demo_status", snapshot);
+        body.put("status_snapshot", productStatusSnapshot.get());
         return body;
     }
 
@@ -436,6 +473,11 @@ final class DemoOrchestratorService implements AutoCloseable {
                 "/operator/catalog/sync-status",
                 "/operator/semantic-metadata/run-status",
                 "/api/semantic-metadata/treemap?group_by=sector&limit=50"
+            );
+            case REPLAY_DEMO_CHECK -> List.of(
+                "/api/demo/replay/status",
+                "/operator/demo-orchestrator/run-status",
+                "/health"
             );
             default -> List.of(
                 "/health",

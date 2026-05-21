@@ -888,6 +888,12 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"demo-orchestrator-panel\""));
         assertTrue(index.contains("id=\"demo-run-action\""));
         assertTrue(index.contains("id=\"demo-run-live-credentials\""));
+        assertTrue(index.contains("id=\"product-mode-panel\""));
+        assertTrue(index.contains("id=\"product-mode-state\""));
+        assertTrue(index.contains("id=\"mode-chip-replay\""));
+        assertTrue(index.contains("id=\"mode-chip-live\""));
+        assertTrue(index.contains("id=\"mode-replay-readiness\""));
+        assertTrue(index.contains("id=\"mode-ops-latency\""));
         assertTrue(index.contains("value=\"live_credential_check\""));
         assertTrue(index.contains("value=\"live_catalog_sync_bounded\""));
         assertTrue(index.contains("value=\"s3_preflight_check\""));
@@ -914,6 +920,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("/operator/semantic-metadata/run"));
         assertTrue(app.contains("/operator/catalog/sync"));
         assertTrue(app.contains("/operator/demo-orchestrator/run"));
+        assertTrue(app.contains("renderProductModeSurface"));
+        assertTrue(app.contains("replayStatusText"));
+        assertTrue(app.contains("featureplant_projected"));
+        assertTrue(app.contains("canonical_event_count"));
         assertTrue(app.contains("buildDemoRunRequest"));
         assertTrue(app.contains("demoActionRequiresConfirm"));
         assertTrue(app.contains("live_catalog_sync_bounded"));
@@ -931,6 +941,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(styles.contains("semantic-treemap"));
         assertTrue(styles.contains("role-hidden"));
         assertTrue(styles.contains("demo-orchestrator-grid"));
+        assertTrue(styles.contains("mode-chip-row"));
+        assertTrue(styles.contains("mode-chip.active"));
         assertTrue(styles.contains("ticker-text"));
         assertTrue(styles.contains("source-event-text"));
         assertTrue(chart.contains("TradingView Lightweight Charts"));
