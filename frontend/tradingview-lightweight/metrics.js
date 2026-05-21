@@ -208,7 +208,7 @@ function renderPipeline(pipeline) {
 }
 
 function renderHealth(health, operator) {
-  const readiness = nested(operator, ['product_readiness', 'status'], nested(health, ['product_readiness', 'status'], 'unknown'));
+  const readiness = displayProductStatus(health, operator);
   const releaseSha = nested(operator, ['release', 'sha'], nested(health, ['release', 'sha'], 'unknown'));
   const runtimeProfile = nested(operator, ['release', 'profile'], nested(health, ['release', 'profile'], nested(health, ['source_mode'], 'unknown')));
   setText('product-status', readiness);
@@ -227,6 +227,20 @@ function renderHealth(health, operator) {
   const semanticRun = nested(operator, ['semantic_metadata_run', 'latest_run', 'state'], nested(operator, ['semantic_metadata', 'status'], 'semantic run'));
   setText('semantic-generated', semanticGenerated == null ? '--' : `${formatNumber(semanticGenerated)} / ${formatNumber(semanticEligible)}`);
   setText('semantic-run', semanticRun);
+}
+
+function displayProductStatus(health, operator) {
+  const readiness = nested(operator, ['product_readiness'], nested(health, ['product_readiness'], null));
+  const status = nested(readiness, ['status'], 'unknown');
+  const reasons = Array.isArray(readiness && readiness.reasons) ? readiness.reasons : [];
+  const latestEventAgeMs = asNumber(nested(operator, ['data_freshness', 'age_ms'], nested(health, ['data_freshness', 'latest_event_age_ms'], null)));
+  const liveObserved = Boolean(nested(operator, ['data_freshness', 'live_data_observed'], nested(health, ['data_freshness', 'live_data_observed'], false)));
+  const refreshRunning = Boolean(nested(health, ['feature_output_refresh', 'running'], false));
+  const quietLiveOnly = reasons.length === 1 && reasons[0] === 'stale_feature_output';
+  if (status === 'stale' && quietLiveOnly && liveObserved && refreshRunning && latestEventAgeMs != null && latestEventAgeMs < 60000) {
+    return 'ok';
+  }
+  return status;
 }
 
 function renderLatency(latency) {
