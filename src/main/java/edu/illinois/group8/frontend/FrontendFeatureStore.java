@@ -231,7 +231,27 @@ public class FrontendFeatureStore {
         return new BarSeries(null, List.of());
     }
 
-    private List<Bar> barsFromOutputs(
+    public static BarSeries barSeriesFromOutputs(
+        List<FeatureOutput> outputs,
+        String featureName,
+        long fromMs,
+        long toMs,
+        BarResolution resolution
+    ) {
+        if (resolution == null) {
+            throw new IllegalArgumentException("resolution is required");
+        }
+        if (outputs == null || outputs.isEmpty()) {
+            return new BarSeries(null, List.of());
+        }
+        List<Bar> bars = barsFromOutputs(outputs, featureName, fromMs, toMs, resolution.bucketSizeMs());
+        if (bars.isEmpty()) {
+            return new BarSeries(null, List.of());
+        }
+        return new BarSeries(bestChartSource(featureName), bars);
+    }
+
+    private static List<Bar> barsFromOutputs(
         List<FeatureOutput> outputs,
         String featureName,
         long fromMs,
@@ -239,7 +259,12 @@ public class FrontendFeatureStore {
         long bucketSize
     ) {
         Map<Long, BarAccumulator> buckets = new LinkedHashMap<>();
-        for (FeatureOutput out : outputs) {
+        List<FeatureOutput> ordered = outputs.stream()
+            .sorted(Comparator.comparing(
+                (FeatureOutput output) -> output.eventTsMs() == null ? Long.MAX_VALUE : output.eventTsMs()
+            ))
+            .toList();
+        for (FeatureOutput out : ordered) {
             Long ts = out.eventTsMs();
             if (ts == null) {
                 continue;

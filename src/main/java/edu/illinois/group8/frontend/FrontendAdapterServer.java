@@ -8,6 +8,8 @@ import com.sun.net.httpserver.HttpServer;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
+import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
+import edu.illinois.group8.storage.db.FeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcMarketAssetCatalogReader;
 import edu.illinois.group8.storage.db.JdbcMarketCapabilityReader;
 import edu.illinois.group8.storage.db.JdbcReplayDemoStatusReader;
@@ -73,6 +75,7 @@ public class FrontendAdapterServer {
     private static final long DATA_FRESHNESS_STALE_AFTER_MS = 15_000L;
     private static final long DISPLAY_ELIGIBLE_WINDOW_MS = 86_400_000L;
     private static final long DISPLAY_ELIGIBLE_MIN_BARS_24H = 10L;
+    private static final int DB_HISTORY_MAX_ROWS = 10_000;
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
         "app.js",
@@ -94,6 +97,7 @@ public class FrontendAdapterServer {
     private final Function<String, OperatorLatencyStatus> operatorLatencyStatus;
     private final Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus;
     private final Supplier<ReplayDemoStatus> replayDemoStatus;
+    private final FeatureOutputReader dbFeatureOutputReader;
     private final SemanticMarketMetadataReader semanticMarketMetadataReader;
     private final SemanticMetadataOperatorService semanticMetadataOperator;
     private final CatalogSyncOperatorService catalogSyncOperator;
@@ -347,6 +351,32 @@ public class FrontendAdapterServer {
         );
     }
 
+    FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        FeatureOutputReader dbFeatureOutputReader
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            FeatureOutputRefreshStatus::disabled,
+            OperatorPipelineStatus::disabled,
+            sourceEventId -> OperatorLatencyStatus.disabled(),
+            () -> OperatorSemanticMetadataStatus.disabled("", "", ""),
+            request -> List.of(),
+            FrontendReleaseInfo.empty(),
+            null,
+            null,
+            defaultReplayDemoStatusSupplier(),
+            null,
+            dbFeatureOutputReader
+        );
+    }
+
     public FrontendAdapterServer(
         FrontendAdapterConfig config,
         FrontendFeatureStore store,
@@ -412,6 +442,39 @@ public class FrontendAdapterServer {
         );
     }
 
+    public FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        Supplier<ReplayDemoStatus> replayDemoStatus,
+        FrontendReleaseInfo releaseInfo,
+        FeatureOutputReader dbFeatureOutputReader
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            SemanticMetadataOperatorService.create(config, System.getenv()),
+            CatalogSyncOperatorService.create(config, System.getenv()),
+            replayDemoStatus,
+            null,
+            dbFeatureOutputReader
+        );
+    }
+
     FrontendAdapterServer(
         FrontendAdapterConfig config,
         FrontendFeatureStore store,
@@ -427,6 +490,42 @@ public class FrontendAdapterServer {
         CatalogSyncOperatorService catalogSyncOperator,
         Supplier<ReplayDemoStatus> replayDemoStatus,
         DemoOrchestratorService demoOrchestrator
+    ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            semanticMetadataOperator,
+            catalogSyncOperator,
+            replayDemoStatus,
+            demoOrchestrator,
+            null
+        );
+    }
+
+    FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        CatalogSyncOperatorService catalogSyncOperator,
+        Supplier<ReplayDemoStatus> replayDemoStatus,
+        DemoOrchestratorService demoOrchestrator,
+        FeatureOutputReader dbFeatureOutputReader
     ) {
         this.config = config;
         this.store = store;
@@ -456,6 +555,7 @@ public class FrontendAdapterServer {
         this.catalogSyncOperator = catalogSyncOperator == null
             ? CatalogSyncOperatorService.create(config, System.getenv())
             : catalogSyncOperator;
+        this.dbFeatureOutputReader = dbFeatureOutputReader;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
         this.demoOrchestrator = demoOrchestrator == null ? DemoOrchestratorService.create(
@@ -622,7 +722,20 @@ public class FrontendAdapterServer {
     }
 
     private boolean hasChartBars(String symbol) {
-        return !store.barSeries(symbol, 0L, Long.MAX_VALUE, BarResolution.M1).bars().isEmpty();
+        try {
+            if (dbFeatureOutputReader == null) {
+                return !store.barSeries(symbol, 0L, Long.MAX_VALUE, BarResolution.M1).bars().isEmpty();
+            }
+            long nowMs = System.currentTimeMillis();
+            return !historySeries(
+                symbol,
+                nowMs - DISPLAY_ELIGIBLE_WINDOW_MS,
+                nowMs,
+                BarResolution.M1
+            ).bars().isEmpty();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private void handleDatafeedSearch(HttpExchange exchange) throws IOException {
@@ -689,7 +802,13 @@ public class FrontendAdapterServer {
             writeError(exchange, 400, e.getMessage());
             return;
         }
-        FrontendFeatureStore.BarSeries series = store.barSeries(symbol, fromMs, toMs, resolution);
+        FrontendFeatureStore.BarSeries series;
+        try {
+            series = historySeries(symbol, fromMs, toMs, resolution);
+        } catch (RuntimeException e) {
+            writeError(exchange, 500, "history unavailable: " + operatorVisibleError(e.getMessage()));
+            return;
+        }
         List<Bar> bars = series.bars();
         if (bars.isEmpty()) {
             writeJson(exchange, 200, Map.of("s", "no_data"));
@@ -719,6 +838,43 @@ public class FrontendAdapterServer {
         body.put("v", v);
         body.put("source", series.source());
         writeJson(exchange, 200, body);
+    }
+
+    private FrontendFeatureStore.BarSeries historySeries(
+        String symbol,
+        long fromMs,
+        long toMs,
+        BarResolution resolution
+    ) {
+        if (dbFeatureOutputReader == null) {
+            return store.barSeries(symbol, fromMs, toMs, resolution);
+        }
+        for (String featureName : List.of(
+            FrontendFeatureStore.BBO_FEATURE,
+            FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+            FrontendFeatureStore.TRADE_TAPE_FEATURE
+        )) {
+            List<FeatureOutput> outputs = dbFeatureOutputReader.read(
+                new FeatureOutputReadRequest(
+                    List.of(featureName),
+                    symbol,
+                    fromMs,
+                    toMs,
+                    DB_HISTORY_MAX_ROWS
+                )
+            );
+            FrontendFeatureStore.BarSeries series = FrontendFeatureStore.barSeriesFromOutputs(
+                outputs,
+                featureName,
+                fromMs,
+                toMs,
+                resolution
+            );
+            if (!series.bars().isEmpty()) {
+                return series;
+            }
+        }
+        return new FrontendFeatureStore.BarSeries(null, List.of());
     }
 
     private void handleDatafeedTime(HttpExchange exchange) throws IOException {

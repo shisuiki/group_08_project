@@ -6,6 +6,8 @@ import edu.illinois.group8.backfill.CatalogSyncSummary;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.semantic.SemanticMetadataBatchSummary;
 import edu.illinois.group8.semantic.SemanticMetadataConfig;
+import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
+import edu.illinois.group8.storage.db.FeatureOutputReader;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.OperatorLatencyStatus;
@@ -377,6 +379,62 @@ class UdfEndpointsTest {
         assertEquals(2, body.path("t").size());
         assertEquals(0.42, body.path("c").get(0).asDouble(), 1e-9);
         assertEquals(0.44, body.path("c").get(1).asDouble(), 1e-9);
+    }
+
+    @Test
+    void dbBackedHistoryReturnsTickerSnapshotBars() throws Exception {
+        long startMs = System.currentTimeMillis() - 30 * 60_000L;
+        String market = "MKT-DB-TICKER";
+        FakeFeatureOutputReader reader = restartWithDbHistory(
+            market,
+            dbHistoryOutputs(
+                market,
+                FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE,
+                startMs,
+                "price_micros"
+            )
+        );
+
+        JsonNode symbols = getJson("/datafeed/symbols?symbol=" + market);
+        assertTrue(symbols.path("has_intraday").asBoolean());
+        assertTrue(symbols.path("has_seconds").asBoolean());
+
+        JsonNode body = getJson("/datafeed/history?symbol=" + market
+            + "&resolution=1&from=" + ((startMs - 1_000L) / 1_000L)
+            + "&to=" + ((startMs + 15 * 60_000L) / 1_000L));
+        assertEquals("ok", body.path("s").asText());
+        assertEquals("ticker_snapshot", body.path("source").asText());
+        assertTrue(body.path("t").size() >= 10);
+        assertTrue(reader.requests.stream().anyMatch(request ->
+            market.equals(request.marketTicker())
+                && request.featureNames().equals(List.of(FrontendFeatureStore.TICKER_SNAPSHOT_FEATURE))
+                && request.maxRows() == 10_000
+        ));
+    }
+
+    @Test
+    void dbBackedHistoryReturnsTradeTapeBars() throws Exception {
+        long startMs = System.currentTimeMillis() - 30 * 60_000L;
+        String market = "MKT-DB-TRADE";
+        restartWithDbHistory(
+            market,
+            dbHistoryOutputs(
+                market,
+                FrontendFeatureStore.TRADE_TAPE_FEATURE,
+                startMs,
+                "yes_price_micros"
+            )
+        );
+
+        JsonNode symbols = getJson("/datafeed/symbols?symbol=" + market);
+        assertTrue(symbols.path("has_intraday").asBoolean());
+
+        JsonNode body = getJson("/datafeed/history?symbol=" + market
+            + "&resolution=1&from=" + ((startMs - 1_000L) / 1_000L)
+            + "&to=" + ((startMs + 15 * 60_000L) / 1_000L));
+        assertEquals("ok", body.path("s").asText());
+        assertEquals("trade_tape", body.path("source").asText());
+        assertTrue(body.path("t").size() >= 10);
     }
 
     @Test
@@ -3025,6 +3083,70 @@ class UdfEndpointsTest {
             reader,
             FrontendReleaseInfo.empty()
         );
+    }
+
+    private FakeFeatureOutputReader restartWithDbHistory(String marketTicker, List<FeatureOutput> rows)
+        throws Exception {
+        server.stop();
+        FakeFeatureOutputReader reader = new FakeFeatureOutputReader(rows);
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(
+            "FRONTEND_ADAPTER_PORT", "0",
+            "FRONTEND_ADAPTER_FEATURE_SOURCE", "latest_market_state",
+            "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://db/kalshi"
+        ));
+        server = new FrontendAdapterServer(
+            config,
+            new FrontendFeatureStore(100, 100),
+            FrontendMarketMetadataCatalog.loaded("test", List.of(
+                metadata(marketTicker, "EVENT-" + marketTicker, "SERIES-" + marketTicker, "open")
+            )),
+            () -> FrontendAdapterServer.FeaturePlantStats.EMPTY,
+            reader
+        );
+        server.start();
+        baseUrl = "http://127.0.0.1:" + server.boundPort();
+        return reader;
+    }
+
+    private static List<FeatureOutput> dbHistoryOutputs(
+        String marketTicker,
+        String featureName,
+        long startMs,
+        String priceField
+    ) {
+        List<FeatureOutput> rows = new ArrayList<>();
+        for (int index = 0; index < 12; index++) {
+            rows.add(new FeatureOutput(
+                featureName,
+                featureName,
+                marketTicker,
+                startMs + index * 60_000L,
+                "db-history-" + featureName + "-" + index,
+                Map.of(priceField, 420_000L + index * 1_000L)
+            ));
+        }
+        return List.copyOf(rows);
+    }
+
+    private static final class FakeFeatureOutputReader implements FeatureOutputReader {
+        private final List<FeatureOutput> rows;
+        private final List<FeatureOutputReadRequest> requests = new ArrayList<>();
+
+        private FakeFeatureOutputReader(List<FeatureOutput> rows) {
+            this.rows = List.copyOf(rows);
+        }
+
+        @Override
+        public List<FeatureOutput> read(FeatureOutputReadRequest request) {
+            requests.add(request);
+            return rows.stream()
+                .filter(row -> request.marketTicker() == null || request.marketTicker().equals(row.marketTicker()))
+                .filter(row -> request.featureNames().isEmpty() || request.featureNames().contains(row.featureName()))
+                .filter(row -> request.fromEventTsMs() == null || row.eventTsMs() >= request.fromEventTsMs())
+                .filter(row -> request.toEventTsMs() == null || row.eventTsMs() <= request.toEventTsMs())
+                .limit(request.maxRows())
+                .toList();
+        }
     }
 
     private static JsonNode group(JsonNode groups, String key) {

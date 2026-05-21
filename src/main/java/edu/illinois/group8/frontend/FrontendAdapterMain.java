@@ -56,7 +56,14 @@ public final class FrontendAdapterMain {
             config.maxSymbolsIndexed()
         );
         if (config.featureSource().dbBacked()) {
-            FeatureOutputRefreshService.RowReader featureOutputReader = buildFeatureOutputRowReader(config);
+            JdbcFeatureOutputReader historyFeatureOutputReader = buildFeatureOutputReader(config);
+            FeatureOutputRefreshService.RowReader featureOutputReader = switch (config.featureSource()) {
+                case FEATURE_OUTPUTS -> historyFeatureOutputReader::readRows;
+                case LATEST_MARKET_STATE -> buildLatestMarketStateReader(config)::readRows;
+                case MODULES -> throw new IllegalArgumentException(
+                    "FRONTEND_ADAPTER_FEATURE_SOURCE must be DB-backed for feature output refresh"
+                );
+            };
             FeatureOutputRefreshService refreshService = new FeatureOutputRefreshService(
                 config,
                 store,
@@ -75,7 +82,8 @@ public final class FrontendAdapterMain {
                 buildOperatorSemanticMetadataStatusSupplier(config),
                 buildSemanticMarketMetadataReader(config),
                 buildReplayDemoStatusSupplier(config),
-                FrontendReleaseInfo.fromEnvironment()
+                FrontendReleaseInfo.fromEnvironment(),
+                historyFeatureOutputReader
             );
             server.start();
             refreshService.start();
