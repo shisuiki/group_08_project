@@ -590,7 +590,7 @@ class UdfEndpointsTest {
         assertTrue(metricsJs.body().contains("/ops/latency"));
         assertTrue(metricsJs.body().contains("/ops/hot-path-latency"));
         assertTrue(metricsJs.body().contains("/metrics?format=prometheus"));
-        assertTrue(metricsJs.body().contains("excludes DB/read-model"));
+        assertTrue(metricsJs.body().contains("recent p99.9"));
         assertTrue(metricsCss.body().contains(".metric-grid"));
         assertTrue(js.body().contains("const MARKET_CATALOG_LIMIT = 200;"));
         assertTrue(js.body().contains("marketCatalogGeneration"));

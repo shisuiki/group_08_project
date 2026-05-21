@@ -259,7 +259,7 @@ function renderHotPathLatency(hotPath) {
   const best = wsBest || featureBest || moduleBest;
   const bestTail = hotPathTailNs(best);
   setText('hot-path-latency', bestTail != null ? formatNs(bestTail) : status);
-  setText('hot-path-source', best ? 'recent p99.9, target <1ms, excludes DB/read-model' : (hotPath && hotPath.note) || 'missing hot-path samples');
+  setText('hot-path-source', best ? 'recent p99.9' : (hotPath && hotPath.note) || 'missing hot-path samples');
   setHotPathDistribution('hot-ws-p99', wsBest);
   setHotPathDistribution('hot-feature-p99', featureBest);
   setHotPathDistribution('hot-module-p99', moduleBest);
