@@ -48,7 +48,7 @@
         </nav>
     </header>
 
-    <main>
+    <main id="dashboard-shell" data-active-role="viewer">
         <section id="market-panel" class="panel" aria-label="market catalog">
             <div class="panel-heading">
                 <h2>Market Catalog</h2>
@@ -91,7 +91,7 @@
         </section>
 
         <aside id="live-panel">
-            <section class="panel">
+            <section class="panel" data-role-panel="viewer">
                 <div class="panel-heading">
                     <h2>Current Quote</h2>
                     <span id="live-symbol" class="ticker-text">-</span>
@@ -120,7 +120,7 @@
                 </dl>
             </section>
 
-            <section id="product-market-panel" class="panel">
+            <section id="product-market-panel" class="panel" data-role-panel="viewer">
                 <div class="panel-heading">
                     <h2>Product Readiness</h2>
                     <span id="product-readiness-state">-</span>
@@ -133,7 +133,7 @@
                 </dl>
             </section>
 
-            <section id="product-mode-panel" class="panel">
+            <section id="product-mode-panel" class="panel" data-role-panel="viewer">
                 <div class="panel-heading">
                     <h2>Product Mode</h2>
                     <span id="product-mode-state">-</span>
@@ -156,7 +156,7 @@
                 </dl>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-role-panel="viewer">
                 <div class="panel-heading">
                     <h2>Selected Market</h2>
                     <span id="market-status">-</span>
@@ -270,7 +270,7 @@
                 </dl>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-role-panel="viewer">
                 <div class="panel-heading">
                     <h2>Runtime Health</h2>
                     <span id="adapter-health">-</span>

@@ -107,6 +107,24 @@ main {
     min-height: 540px;
 }
 
+main[data-active-role]:not([data-active-role="viewer"]) {
+    grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
+}
+
+main[data-active-role]:not([data-active-role="viewer"]) #chart-panel {
+    display: none;
+}
+
+main[data-active-role]:not([data-active-role="viewer"]) #live-panel {
+    grid-column: 2;
+    min-width: 0;
+    border-left: 1px solid #30373c;
+}
+
+main[data-active-role]:not([data-active-role="viewer"]) #live-panel > .panel {
+    padding: 16px 18px;
+}
+
 .panel {
     border-bottom: 1px solid #30373c;
     padding: 12px 14px;
@@ -274,6 +292,7 @@ main {
     overflow-y: auto;
     background: #1c2023;
     border-left: 1px solid #30373c;
+    min-width: 0;
 }
 
 #live-panel dl {
@@ -601,6 +620,50 @@ main {
     padding-top: 8px;
 }
 
+main[data-active-role="semantic"] #semantic-map-panel {
+    display: grid;
+    grid-template-rows: auto auto auto minmax(520px, 1fr) auto;
+    min-height: 100%;
+}
+
+main[data-active-role="semantic"] .semantic-controls {
+    grid-template-columns: repeat(6, minmax(110px, 1fr));
+}
+
+main[data-active-role="semantic"] .semantic-search-field {
+    grid-column: span 2;
+}
+
+main[data-active-role="semantic"] .semantic-group-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+main[data-active-role="semantic"] .semantic-treemap {
+    height: auto;
+    min-height: 520px;
+}
+
+main[data-active-role="semantic"] .semantic-market-detail {
+    display: grid;
+    grid-template-columns: 116px minmax(0, 1fr) 116px minmax(0, 1fr);
+    gap: 7px 10px;
+}
+
+main[data-active-role="semantic"] .semantic-market-detail dt,
+main[data-active-role="semantic"] .semantic-market-detail dd {
+    margin: 0;
+}
+
+main[data-active-role="semantic"] .semantic-market-detail dt {
+    color: #a8b0b7;
+}
+
+main[data-active-role="semantic"] .semantic-market-detail dd {
+    color: #f4f7f9;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 .operator-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -670,6 +733,37 @@ main {
 
 .semantic-run-grid {
     grid-template-columns: 1fr;
+}
+
+main[data-active-role="research"] .research-controls {
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+}
+
+main[data-active-role="research"] .feature-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 14px;
+}
+
+main[data-active-role="trader"] #trader-monitor-panel dl,
+main[data-active-role="operator"] #runtime-operator-panel dl,
+main[data-active-role="operator"] #latency-freshness-panel dl,
+main[data-active-role="operator"] #demo-orchestrator-panel dl,
+main[data-active-role="operator"] #catalog-sync-panel dl,
+main[data-active-role="operator"] #semantic-operator-panel dl {
+    grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr);
+}
+
+main[data-active-role="operator"] .operator-grid {
+    grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
+main[data-active-role="operator"] .demo-orchestrator-grid {
+    grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+}
+
+main[data-active-role="operator"] .operator-plan-output {
+    max-height: 360px;
 }
 
 .operator-warnings {
@@ -761,6 +855,14 @@ footer.ok { color: #2fbf71; }
         min-height: 0;
     }
 
+    main[data-active-role]:not([data-active-role="viewer"]) {
+        grid-template-columns: 1fr;
+    }
+
+    main[data-active-role]:not([data-active-role="viewer"]) #live-panel {
+        grid-column: auto;
+    }
+
     #market-panel,
     #live-panel {
         border: 0;
@@ -787,12 +889,36 @@ footer.ok { color: #2fbf71; }
         grid-template-columns: 1fr;
     }
 
+    main[data-active-role="semantic"] .semantic-controls,
+    main[data-active-role="semantic"] .semantic-group-summary,
+    main[data-active-role="semantic"] .semantic-market-detail,
+    main[data-active-role="research"] .feature-list,
+    main[data-active-role="trader"] #trader-monitor-panel dl,
+    main[data-active-role="operator"] #runtime-operator-panel dl,
+    main[data-active-role="operator"] #latency-freshness-panel dl,
+    main[data-active-role="operator"] #demo-orchestrator-panel dl,
+    main[data-active-role="operator"] #catalog-sync-panel dl,
+    main[data-active-role="operator"] #semantic-operator-panel dl,
+    main[data-active-role="operator"] .operator-grid,
+    main[data-active-role="operator"] .demo-orchestrator-grid {
+        grid-template-columns: 1fr;
+    }
+
     .semantic-search-field {
+        grid-column: auto;
+    }
+
+    main[data-active-role="semantic"] .semantic-search-field {
         grid-column: auto;
     }
 
     .semantic-treemap {
         height: 300px;
         min-height: 300px;
+    }
+
+    main[data-active-role="semantic"] .semantic-treemap {
+        height: 360px;
+        min-height: 360px;
     }
 }

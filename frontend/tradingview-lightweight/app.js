@@ -21,6 +21,7 @@
     });
 
     const dom = {
+        dashboardShell: document.getElementById('dashboard-shell'),
         adapterUrl: document.getElementById('adapter-url'),
         symbolSelect: document.getElementById('symbol-select'),
         resolutionSelect: document.getElementById('resolution-select'),
@@ -2706,6 +2707,9 @@
     }
 
     function setActiveRole(role) {
+        if (dom.dashboardShell) {
+            dom.dashboardShell.dataset.activeRole = role;
+        }
         for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
             const active = button.dataset.role === role;
             button.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -2716,10 +2720,12 @@
         if (target) {
             target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-        chart.applyOptions({
-            width: dom.chartContainer.clientWidth,
-            height: dom.chartContainer.clientHeight
-        });
+        if (dom.chartContainer.clientWidth > 0 && dom.chartContainer.clientHeight > 0) {
+            chart.applyOptions({
+                width: dom.chartContainer.clientWidth,
+                height: dom.chartContainer.clientHeight
+            });
+        }
         if (role === 'semantic') {
             loadSemanticMap();
         }
