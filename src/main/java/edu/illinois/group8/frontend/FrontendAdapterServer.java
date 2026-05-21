@@ -1357,15 +1357,18 @@ public class FrontendAdapterServer {
             writeError(exchange, 405, "method not allowed");
             return;
         }
-        HotPathLatencyStatus status;
-        try {
-            status = hotPathLatencyStatus.get();
-        } catch (RuntimeException e) {
-            status = HotPathLatencyStatus.unavailable(e.getMessage());
-        }
+        HotPathLatencyStatus status = readHotPathLatencyStatus();
         Map<String, Object> body = hotPathLatencyStatusBody(status);
         body.put("generated_at", java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString());
         writeJson(exchange, 200, body);
+    }
+
+    private HotPathLatencyStatus readHotPathLatencyStatus() {
+        try {
+            return hotPathLatencyStatus.get();
+        } catch (RuntimeException e) {
+            return HotPathLatencyStatus.unavailable(e.getMessage());
+        }
     }
 
     private void handleOperatorStatus(HttpExchange exchange) throws IOException {
@@ -1660,7 +1663,139 @@ public class FrontendAdapterServer {
                 .append(count.sum())
                 .append('\n');
         });
+        appendHotPathLatencyPrometheusMetrics(body, readHotPathLatencyStatus());
         write(exchange, 200, "text/plain; charset=utf-8", body.toString());
+    }
+
+    private static void appendHotPathLatencyPrometheusMetrics(
+        StringBuilder body,
+        HotPathLatencyStatus status
+    ) {
+        HotPathLatencyStatus view = status == null ? HotPathLatencyStatus.disabled() : status;
+        Map<String, String> statusLabels = new LinkedHashMap<>();
+        statusLabels.put("status", view.status());
+        statusLabels.put("source", view.source());
+        appendPrometheusGauge(
+            body,
+            "frontend_adapter_hot_path_latency_status",
+            statusLabels,
+            1L
+        );
+        for (HotPathLatencyStatus.Stage stage : view.stages()) {
+            for (HotPathLatencyStatus.Series series : stage.series()) {
+                Map<String, String> labels = hotPathPrometheusLabels(stage, series);
+                appendPrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_count",
+                    labels,
+                    series.recentCount()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_p50_ns",
+                    labels,
+                    series.p50Ns()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_p90_ns",
+                    labels,
+                    series.p90Ns()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_p95_ns",
+                    labels,
+                    series.p95Ns()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_p99_ns",
+                    labels,
+                    series.p99Ns()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_p999_ns",
+                    labels,
+                    series.p999Ns()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_recent_max_ns",
+                    labels,
+                    series.maxNs()
+                );
+                appendNullablePrometheusGauge(
+                    body,
+                    "frontend_adapter_hot_path_latency_avg_ns",
+                    labels,
+                    series.avgNs()
+                );
+            }
+        }
+    }
+
+    private static Map<String, String> hotPathPrometheusLabels(
+        HotPathLatencyStatus.Stage stage,
+        HotPathLatencyStatus.Series series
+    ) {
+        Map<String, String> labels = new LinkedHashMap<>();
+        labels.put("stage", stage.id());
+        labels.put("source", stage.source());
+        labels.put("metric", stage.metric());
+        series.labels().entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> {
+                String key = entry.getKey();
+                String labelKey = switch (key) {
+                    case "stage", "source", "metric" -> "upstream_" + key;
+                    default -> key;
+                };
+                labels.putIfAbsent(labelKey, entry.getValue());
+            });
+        return labels;
+    }
+
+    private static void appendNullablePrometheusGauge(
+        StringBuilder body,
+        String metricName,
+        Map<String, String> labels,
+        Long value
+    ) {
+        if (value != null) {
+            appendPrometheusGauge(body, metricName, labels, value);
+        }
+    }
+
+    private static void appendPrometheusGauge(
+        StringBuilder body,
+        String metricName,
+        Map<String, String> labels,
+        long value
+    ) {
+        body.append(metricName);
+        appendPrometheusLabels(body, labels);
+        body.append(' ').append(value).append('\n');
+    }
+
+    private static void appendPrometheusLabels(StringBuilder body, Map<String, String> labels) {
+        if (labels.isEmpty()) {
+            return;
+        }
+        body.append('{');
+        boolean first = true;
+        for (Map.Entry<String, String> label : labels.entrySet()) {
+            if (!first) {
+                body.append(',');
+            }
+            first = false;
+            body.append(label.getKey())
+                .append("=\"")
+                .append(escape(label.getValue() == null ? "" : label.getValue()))
+                .append('"');
+        }
+        body.append('}');
     }
 
     private static boolean wantsMetricsDashboard(HttpExchange exchange) {
@@ -1952,7 +2087,9 @@ public class FrontendAdapterServer {
         body.put("recent_count", series.recentCount());
         body.put("p50_ns", series.p50Ns());
         body.put("p90_ns", series.p90Ns());
+        body.put("p95_ns", series.p95Ns());
         body.put("p99_ns", series.p99Ns());
+        body.put("p999_ns", series.p999Ns());
         body.put("max_ns", series.maxNs());
         body.put("avg_ns", series.avgNs());
         return body;

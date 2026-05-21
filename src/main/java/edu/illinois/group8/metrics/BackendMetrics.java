@@ -206,7 +206,9 @@ public class BackendMetrics {
             body.append(insertSuffix(baseKey, "_recent_count")).append(' ').append(snapshot.recentCount()).append('\n');
             body.append(insertSuffix(baseKey, "_recent_p50")).append(' ').append(snapshot.recentP50()).append('\n');
             body.append(insertSuffix(baseKey, "_recent_p90")).append(' ').append(snapshot.recentP90()).append('\n');
+            body.append(insertSuffix(baseKey, "_recent_p95")).append(' ').append(snapshot.recentP95()).append('\n');
             body.append(insertSuffix(baseKey, "_recent_p99")).append(' ').append(snapshot.recentP99()).append('\n');
+            body.append(insertSuffix(baseKey, "_recent_p999")).append(' ').append(snapshot.recentP999()).append('\n');
         }
 
         private long count() {
@@ -240,11 +242,13 @@ public class BackendMetrics {
                 samples.length,
                 percentile(samples, 50),
                 percentile(samples, 90),
-                percentile(samples, 99)
+                percentile(samples, 95),
+                percentile(samples, 99),
+                percentile(samples, 99.9)
             );
         }
 
-        private static long percentile(long[] sortedSamples, int percentile) {
+        private static long percentile(long[] sortedSamples, double percentile) {
             if (sortedSamples.length == 0) {
                 return 0L;
             }
@@ -267,7 +271,9 @@ public class BackendMetrics {
             long recentCount,
             long recentP50,
             long recentP90,
-            long recentP99
+            long recentP95,
+            long recentP99,
+            long recentP999
         ) {
         }
     }

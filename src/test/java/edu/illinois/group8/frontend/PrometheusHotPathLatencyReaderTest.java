@@ -32,7 +32,9 @@ class PrometheusHotPathLatencyReaderTest {
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 2
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p50{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 4000
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p90{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 8000
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p95{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 8000
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 8000
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p999{event_type="orderbook_delta",schema_version="1",service="backend",source="kalshi",stream="canonical.orderbook.delta"} 8000
             """;
         String featureplant = """
             featureplant_hot_path_consumer_to_module_complete_ns_count{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 1
@@ -41,14 +43,18 @@ class PrometheusHotPathLatencyReaderTest {
             featureplant_hot_path_consumer_to_module_complete_ns_recent_count{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 1
             featureplant_hot_path_consumer_to_module_complete_ns_recent_p50{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 3000
             featureplant_hot_path_consumer_to_module_complete_ns_recent_p90{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 3000
+            featureplant_hot_path_consumer_to_module_complete_ns_recent_p95{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 3000
             featureplant_hot_path_consumer_to_module_complete_ns_recent_p99{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 3000
+            featureplant_hot_path_consumer_to_module_complete_ns_recent_p999{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 3000
             feature_module_latency_ns_count{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 2
             feature_module_latency_ns_sum{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 900
             feature_module_latency_ns_max{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 600
             feature_module_latency_ns_recent_count{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 2
             feature_module_latency_ns_recent_p50{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 300
             feature_module_latency_ns_recent_p90{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 600
+            feature_module_latency_ns_recent_p95{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 600
             feature_module_latency_ns_recent_p99{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 600
+            feature_module_latency_ns_recent_p999{module="feature.bbo",service="featureplant",stream="derived.top_of_book"} 600
             """;
 
         HotPathLatencyStatus status = PrometheusHotPathLatencyReader.fromPrometheusTexts(backend, featureplant);
@@ -59,7 +65,9 @@ class PrometheusHotPathLatencyReaderTest {
         HotPathLatencyStatus.Stage backendStage = status.stages().get(0);
         assertEquals("ws_to_tickerplant_publish", backendStage.id());
         assertEquals("backend_hot_path_ws_to_tickerplant_publish_ns", backendStage.metric());
+        assertEquals(8_000L, backendStage.series().get(0).p95Ns());
         assertEquals(8_000L, backendStage.series().get(0).p99Ns());
+        assertEquals(8_000L, backendStage.series().get(0).p999Ns());
         HotPathLatencyStatus.Stage featureStage = status.stages().get(1);
         assertEquals("featureplant_consumer_to_bbo_complete", featureStage.id());
         assertEquals(3_000L, featureStage.series().get(0).p99Ns());
@@ -77,7 +85,9 @@ class PrometheusHotPathLatencyReaderTest {
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 2
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p50{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 40
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p90{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p95{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p999{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
             """;
         String second = """
             backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 3
@@ -86,7 +96,9 @@ class PrometheusHotPathLatencyReaderTest {
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 3
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p50{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 50
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p90{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 80
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p95{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 85
             backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 90
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p999{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 90
             """;
 
         HotPathLatencyStatus status = PrometheusHotPathLatencyReader.fromPrometheusTexts(first + "\n" + second, "");
@@ -96,7 +108,9 @@ class PrometheusHotPathLatencyReaderTest {
         assertEquals(5L, series.recentCount());
         assertEquals(60L, series.avgNs());
         assertEquals(90L, series.maxNs());
+        assertEquals(85L, series.p95Ns());
         assertEquals(90L, series.p99Ns());
+        assertEquals(90L, series.p999Ns());
     }
 
     @Test

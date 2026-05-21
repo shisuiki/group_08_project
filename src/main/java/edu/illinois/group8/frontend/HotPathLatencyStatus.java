@@ -109,7 +109,9 @@ public record HotPathLatencyStatus(
         long recentCount,
         Long p50Ns,
         Long p90Ns,
+        Long p95Ns,
         Long p99Ns,
+        Long p999Ns,
         Long maxNs,
         Long avgNs
     ) {

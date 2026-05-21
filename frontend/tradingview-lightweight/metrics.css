@@ -227,12 +227,17 @@ main {
   align-items: center;
   display: grid;
   gap: 12px;
-  grid-template-columns: 190px minmax(120px, 1fr) 90px;
+  grid-template-columns: 210px minmax(120px, 1fr) minmax(210px, 260px);
 }
 
 .lane span,
 .lane strong {
   font-size: 13px;
+}
+
+.lane strong {
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .bar-track {
@@ -256,6 +261,10 @@ main {
 
 .bar.warn {
   background: var(--amber);
+}
+
+.bar.bad {
+  background: var(--red);
 }
 
 .split {

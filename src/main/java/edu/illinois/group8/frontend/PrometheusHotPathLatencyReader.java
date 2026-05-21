@@ -329,7 +329,9 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         RECENT_COUNT("_recent_count"),
         RECENT_P50("_recent_p50"),
         RECENT_P90("_recent_p90"),
+        RECENT_P95("_recent_p95"),
         RECENT_P99("_recent_p99"),
+        RECENT_P999("_recent_p999"),
         COUNT("_count"),
         SUM("_sum"),
         MAX("_max");
@@ -357,7 +359,9 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         private long recentCount;
         private Long p50;
         private Long p90;
+        private Long p95;
         private Long p99;
+        private Long p999;
 
         private void put(Suffix suffix, long value) {
             switch (suffix) {
@@ -367,13 +371,15 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
                 case RECENT_COUNT -> recentCount += value;
                 case RECENT_P50 -> p50 = p50 == null ? value : Math.max(p50, value);
                 case RECENT_P90 -> p90 = p90 == null ? value : Math.max(p90, value);
+                case RECENT_P95 -> p95 = p95 == null ? value : Math.max(p95, value);
                 case RECENT_P99 -> p99 = p99 == null ? value : Math.max(p99, value);
+                case RECENT_P999 -> p999 = p999 == null ? value : Math.max(p999, value);
             }
         }
 
         private HotPathLatencyStatus.Series toSeries(Map<String, String> labels) {
             Long avg = count <= 0L ? null : sum / count;
-            return new HotPathLatencyStatus.Series(labels, count, recentCount, p50, p90, p99, max, avg);
+            return new HotPathLatencyStatus.Series(labels, count, recentCount, p50, p90, p95, p99, p999, max, avg);
         }
     }
 }

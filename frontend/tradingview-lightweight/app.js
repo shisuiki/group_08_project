@@ -1583,6 +1583,7 @@
     }
 
     function renderSemanticDetail(detail) {
+        dom.semanticMarketDetail.hidden = !detail;
         dom.semanticMarketDetail.classList.toggle('visible', Boolean(detail));
         if (!detail) {
             dom.semanticMarketDetail.removeAttribute('style');

@@ -879,6 +879,10 @@ main[data-active-role="operator"] #live-panel > .panel {
     z-index: 80;
 }
 
+.semantic-market-detail[hidden] {
+    display: none !important;
+}
+
 .semantic-market-detail.visible {
     display: grid;
 }

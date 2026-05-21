@@ -65,7 +65,9 @@ class BackendMetricsTest {
         assertTrue(prometheus.contains("latency_ns_recent_count{a=\"1\",b=\"2\"} 2\n"));
         assertTrue(prometheus.contains("latency_ns_recent_p50{a=\"1\",b=\"2\"} 5\n"));
         assertTrue(prometheus.contains("latency_ns_recent_p90{a=\"1\",b=\"2\"} 7\n"));
+        assertTrue(prometheus.contains("latency_ns_recent_p95{a=\"1\",b=\"2\"} 7\n"));
         assertTrue(prometheus.contains("latency_ns_recent_p99{a=\"1\",b=\"2\"} 7\n"));
+        assertTrue(prometheus.contains("latency_ns_recent_p999{a=\"1\",b=\"2\"} 7\n"));
     }
 
     @Test
@@ -138,6 +140,8 @@ class BackendMetricsTest {
         assertTrue(prometheus.contains("recent_latency_ns_recent_count{stream=\"canonical.trade\"} 100\n"));
         assertTrue(prometheus.contains("recent_latency_ns_recent_p50{stream=\"canonical.trade\"} 50\n"));
         assertTrue(prometheus.contains("recent_latency_ns_recent_p90{stream=\"canonical.trade\"} 90\n"));
+        assertTrue(prometheus.contains("recent_latency_ns_recent_p95{stream=\"canonical.trade\"} 95\n"));
         assertTrue(prometheus.contains("recent_latency_ns_recent_p99{stream=\"canonical.trade\"} 99\n"));
+        assertTrue(prometheus.contains("recent_latency_ns_recent_p999{stream=\"canonical.trade\"} 100\n"));
     }
 }

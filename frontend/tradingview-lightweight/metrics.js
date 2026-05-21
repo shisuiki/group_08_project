@@ -2,7 +2,7 @@ const REFRESH_MS = 3000;
 const REQUEST_TIMEOUT_MS = 5500;
 const OPTIONAL_REQUEST_TIMEOUT_MS = 1800;
 const LATENCY_BAR_MAX_MS = 1000;
-const HOT_PATH_BAR_MAX_NS = 100_000_000;
+const HOT_PATH_BAR_TARGET_NS = 1_000_000;
 
 const PROMETHEUS_ROWS = [
   ['frontend_adapter_symbols', 'Frontend symbols'],
@@ -253,12 +253,16 @@ function renderHotPathLatency(hotPath) {
   const ws = hotPathStage(hotPath, 'ws_to_tickerplant_publish');
   const feature = hotPathStage(hotPath, 'featureplant_consumer_to_bbo_complete');
   const module = hotPathStage(hotPath, 'featureplant_bbo_module_processing');
-  const best = bestSeries(ws) || bestSeries(feature) || bestSeries(module);
-  setText('hot-path-latency', best && best.p99_ns != null ? formatNs(best.p99_ns) : status);
-  setText('hot-path-source', best ? 'recent p99, excludes DB/read-model' : (hotPath && hotPath.note) || 'missing hot-path samples');
-  setHotPathBar('hot-ws-p99', bestSeries(ws) && bestSeries(ws).p99_ns);
-  setHotPathBar('hot-feature-p99', bestSeries(feature) && bestSeries(feature).p99_ns);
-  setHotPathBar('hot-module-p99', bestSeries(module) && bestSeries(module).p99_ns);
+  const wsBest = bestSeries(ws);
+  const featureBest = bestSeries(feature);
+  const moduleBest = bestSeries(module);
+  const best = wsBest || featureBest || moduleBest;
+  const bestTail = hotPathTailNs(best);
+  setText('hot-path-latency', bestTail != null ? formatNs(bestTail) : status);
+  setText('hot-path-source', best ? 'recent p99.9, target <1ms, excludes DB/read-model' : (hotPath && hotPath.note) || 'missing hot-path samples');
+  setHotPathDistribution('hot-ws-p99', wsBest);
+  setHotPathDistribution('hot-feature-p99', featureBest);
+  setHotPathDistribution('hot-module-p99', moduleBest);
 }
 
 function renderHotPathUnavailable(reason) {
@@ -283,6 +287,13 @@ function bestSeries(stage) {
   return [...series].sort((left, right) => (asNumber(right.recent_count) || 0) - (asNumber(left.recent_count) || 0))[0];
 }
 
+function hotPathTailNs(series) {
+  if (!series) {
+    return null;
+  }
+  return asNumber(series.p999_ns) ?? asNumber(series.p99_ns) ?? asNumber(series.p95_ns) ?? asNumber(series.p50_ns);
+}
+
 function setLatencyBar(prefix, value) {
   const number = Math.max(0, asNumber(value) || 0);
   const width = Math.min(100, (number / LATENCY_BAR_MAX_MS) * 100);
@@ -295,12 +306,25 @@ function setLatencyBar(prefix, value) {
 
 function setHotPathBar(prefix, value) {
   const number = Math.max(0, asNumber(value) || 0);
-  const width = Math.min(100, (number / HOT_PATH_BAR_MAX_NS) * 100);
+  const width = Math.min(100, (number / HOT_PATH_BAR_TARGET_NS) * 100);
   const bar = byId(`${prefix}-bar`);
   if (bar) {
     bar.style.width = `${width}%`;
+    bar.classList.toggle('bad', number > HOT_PATH_BAR_TARGET_NS);
   }
   setText(`${prefix}-ms`, formatNs(value));
+}
+
+function setHotPathDistribution(prefix, series) {
+  setHotPathBar(prefix, hotPathTailNs(series));
+  if (!series) {
+    setText(`${prefix}-ms`, '--');
+    return;
+  }
+  setText(
+    `${prefix}-ms`,
+    `p50 ${formatNs(series.p50_ns)} / p95 ${formatNs(series.p95_ns)} / p99.9 ${formatNs(series.p999_ns ?? series.p99_ns)}`
+  );
 }
 
 function renderPrometheus(text) {

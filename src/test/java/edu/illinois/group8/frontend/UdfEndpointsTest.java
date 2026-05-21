@@ -1139,7 +1139,9 @@ class UdfEndpointsTest {
                     2L,
                     4_000L,
                     7_000L,
+                    8_000L,
                     9_000L,
+                    12_000L,
                     20_000L,
                     5_000L
                 ))
@@ -1157,9 +1159,16 @@ class UdfEndpointsTest {
         JsonNode stage = hotPath.path("stages").get(0);
         assertEquals("featureplant_bbo_module_processing", stage.path("id").asText());
         assertEquals("feature_module_latency_ns", stage.path("metric").asText());
+        assertEquals(8_000L, stage.path("series").get(0).path("p95_ns").asLong());
         assertEquals(9_000L, stage.path("series").get(0).path("p99_ns").asLong());
+        assertEquals(12_000L, stage.path("series").get(0).path("p999_ns").asLong());
         assertFalse(hotPath.toString().contains("latest_market_state_commit_seq"));
         assertFalse(hotPath.toString().contains("canonical_to_latest_state_ms"));
+
+        String metrics = get("/metrics?format=prometheus").body();
+        assertTrue(metrics.contains("frontend_adapter_hot_path_latency_recent_p95_ns{"));
+        assertTrue(metrics.contains("frontend_adapter_hot_path_latency_recent_p999_ns{"));
+        assertTrue(metrics.contains("stage=\"featureplant_bbo_module_processing\""));
     }
 
     @Test
@@ -2757,6 +2766,63 @@ class UdfEndpointsTest {
         assertTrue(body.contains("frontend_adapter_http_requests_total{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_sum{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_count{path=\"/symbols\"}"));
+    }
+
+    @Test
+    void rawPrometheusMetricsExposeHotPathLatencyGauges() throws Exception {
+        server.setHotPathLatencyStatusSupplier(() -> new HotPathLatencyStatus(
+            "ok",
+            "prometheus",
+            "Hot-path latency excludes DB read-model projection.",
+            List.of(new HotPathLatencyStatus.Stage(
+                "ws_to_tickerplant_publish",
+                "WS receive to tickerplant publish",
+                "ok",
+                "backend",
+                "backend_ws_to_tickerplant_publish_latency_ns",
+                "ws-to-cluster",
+                List.of(new HotPathLatencyStatus.Series(
+                    Map.of(
+                        "service", "backend",
+                        "source", "kalshi",
+                        "stream", "canonical.trade",
+                        "event_type", "trade",
+                        "schema_version", "1"
+                    ),
+                    128L,
+                    4L,
+                    1_000L,
+                    2_000L,
+                    2_500L,
+                    3_000L,
+                    4_000L,
+                    5_000L,
+                    1_500L
+                ))
+            )),
+            null
+        ));
+
+        String body = get("/metrics?format=prometheus").body();
+
+        assertTrue(body.contains("frontend_adapter_hot_path_latency_status{status=\"ok\",source=\"prometheus\"} 1"));
+        assertTrue(body.contains(
+            "frontend_adapter_hot_path_latency_recent_count{stage=\"ws_to_tickerplant_publish\","
+                + "source=\"backend\",metric=\"backend_ws_to_tickerplant_publish_latency_ns\","
+                + "event_type=\"trade\",schema_version=\"1\",service=\"backend\",upstream_source=\"kalshi\","
+                + "stream=\"canonical.trade\"} 4"
+        ));
+        assertTrue(body.contains(
+            "frontend_adapter_hot_path_latency_recent_p99_ns{stage=\"ws_to_tickerplant_publish\","
+                + "source=\"backend\",metric=\"backend_ws_to_tickerplant_publish_latency_ns\","
+                + "event_type=\"trade\",schema_version=\"1\",service=\"backend\",upstream_source=\"kalshi\","
+                + "stream=\"canonical.trade\"} 3000"
+        ));
+        assertTrue(body.contains("frontend_adapter_hot_path_latency_recent_p50_ns"));
+        assertTrue(body.contains("frontend_adapter_hot_path_latency_recent_p90_ns"));
+        assertTrue(body.contains("frontend_adapter_hot_path_latency_recent_p95_ns"));
+        assertTrue(body.contains("frontend_adapter_hot_path_latency_recent_max_ns"));
+        assertTrue(body.contains("frontend_adapter_hot_path_latency_recent_p999_ns"));
     }
 
     @Test
