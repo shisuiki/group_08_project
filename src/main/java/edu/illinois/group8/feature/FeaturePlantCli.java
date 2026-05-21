@@ -301,6 +301,7 @@ public final class FeaturePlantCli {
             List<FeatureOutputSink> sinks = new ArrayList<>();
             for (String mode : outputModes(outputMode)) {
                 switch (mode) {
+                    case "none", "noop", "metrics" -> sinks.add(new NoopFeatureOutputSink());
                     case "stdout", "console" -> sinks.add(new StdoutFeatureOutputSink());
                     case "db", "postgres", "postgresql", "timescale", "timescaledb" ->
                         sinks.add(dbOutputSink(dbSinkFactory, metrics));

@@ -6,6 +6,14 @@ scrape_configs:
     static_configs:
       - targets: ["wsclient:8091"]
 
+  - job_name: cluster-nodes
+    static_configs:
+      - targets: ["node0:8091", "node1:8091", "node2:8091"]
+
+  - job_name: featureplant-aeron-metrics
+    static_configs:
+      - targets: ["featureplant-aeron-metrics:8095"]
+
   - job_name: tickerplant-stream-recorder
     # This target is up only when the explicit recording-capture profile is
     # enabled. Pure observability intentionally does not start NDJSON capture.

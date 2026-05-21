@@ -171,6 +171,9 @@ public record BackendConfig(
         if (isBlank(baseDir)) {
             errors.append("BASE_DIR is required. ");
         }
+        if (metricsPort < 0) {
+            errors.append("BACKEND_METRICS_PORT must be zero or positive. ");
+        }
         if (!errors.isEmpty()) {
             throw new IllegalStateException(errors.toString().trim());
         }

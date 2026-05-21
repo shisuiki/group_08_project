@@ -13,11 +13,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencyStatus> {
+    static final String BACKEND_METRICS_URLS_ENV = "FRONTEND_ADAPTER_BACKEND_METRICS_URLS";
     static final String BACKEND_METRICS_URL_ENV = "FRONTEND_ADAPTER_BACKEND_METRICS_URL";
     static final String FEATUREPLANT_METRICS_URL_ENV = "FRONTEND_ADAPTER_FEATUREPLANT_METRICS_URL";
     static final String TIMEOUT_MS_ENV = "FRONTEND_ADAPTER_HOT_PATH_METRICS_TIMEOUT_MS";
@@ -32,32 +36,36 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
     );
 
     private final HttpClient client;
-    private final URI backendMetricsUri;
+    private final List<URI> backendMetricsUris;
     private final URI featureplantMetricsUri;
     private final Duration timeout;
 
     private PrometheusHotPathLatencyReader(
         HttpClient client,
-        URI backendMetricsUri,
+        List<URI> backendMetricsUris,
         URI featureplantMetricsUri,
         Duration timeout
     ) {
         this.client = Objects.requireNonNull(client, "client");
-        this.backendMetricsUri = backendMetricsUri;
+        this.backendMetricsUris = backendMetricsUris == null ? List.of() : List.copyOf(backendMetricsUris);
         this.featureplantMetricsUri = featureplantMetricsUri;
         this.timeout = timeout == null ? Duration.ofMillis(DEFAULT_TIMEOUT_MS) : timeout;
     }
 
     static Supplier<HotPathLatencyStatus> fromEnvironment(Map<String, String> env) {
-        URI backendUrl = uriOrNull(value(env, BACKEND_METRICS_URL_ENV, ""));
+        List<URI> backendUrls = urisOrEmpty(value(
+            env,
+            BACKEND_METRICS_URLS_ENV,
+            value(env, BACKEND_METRICS_URL_ENV, "")
+        ));
         URI featureplantUrl = uriOrNull(value(env, FEATUREPLANT_METRICS_URL_ENV, ""));
-        if (backendUrl == null && featureplantUrl == null) {
+        if (backendUrls.isEmpty() && featureplantUrl == null) {
             return HotPathLatencyStatus::disabled;
         }
         int timeoutMs = positiveInt(value(env, TIMEOUT_MS_ENV, Integer.toString(DEFAULT_TIMEOUT_MS)));
         return new PrometheusHotPathLatencyReader(
             HttpClient.newBuilder().connectTimeout(Duration.ofMillis(timeoutMs)).build(),
-            backendUrl,
+            backendUrls,
             featureplantUrl,
             Duration.ofMillis(timeoutMs)
         );
@@ -70,9 +78,47 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
     @Override
     public HotPathLatencyStatus get() {
         List<String> errors = new ArrayList<>();
-        String backendText = fetch("backend", backendMetricsUri, errors);
+        String backendText = String.join("\n", fetchAll("backend", backendMetricsUris, errors));
         String featureplantText = fetch("featureplant", featureplantMetricsUri, errors);
         return statusFromTexts(backendText, featureplantText, errors);
+    }
+
+    private List<String> fetchAll(String name, List<URI> uris, List<String> errors) {
+        if (uris == null || uris.isEmpty()) {
+            return List.of();
+        }
+        List<CompletableFuture<String>> futures = new ArrayList<>();
+        for (int i = 0; i < uris.size(); i++) {
+            URI uri = uris.get(i);
+            String fetchName = name + "[" + i + "]";
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                .timeout(timeout)
+                .header("Accept", "text/plain")
+                .GET()
+                .build();
+            futures.add(client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .handle((response, error) -> responseBody(fetchName, response, error, errors)));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            addError(errors, name + " metrics timed out after " + timeout.toMillis() + "ms");
+            futures.forEach(future -> future.cancel(true));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            addError(errors, name + " metrics interrupted");
+            futures.forEach(future -> future.cancel(true));
+        } catch (java.util.concurrent.ExecutionException e) {
+            addError(errors, name + " metrics unavailable: " + e.getMessage());
+        }
+        List<String> bodies = new ArrayList<>();
+        for (CompletableFuture<String> future : futures) {
+            if (future.isDone() && !future.isCancelled()) {
+                bodies.add(future.join());
+            }
+        }
+        return bodies;
     }
 
     private String fetch(String name, URI uri, List<String> errors) {
@@ -101,6 +147,29 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         } catch (RuntimeException e) {
             errors.add(name + " metrics unavailable: " + e.getMessage());
             return "";
+        }
+    }
+
+    private static String responseBody(
+        String name,
+        HttpResponse<String> response,
+        Throwable error,
+        List<String> errors
+    ) {
+        if (error != null) {
+            addError(errors, name + " metrics unavailable: " + error.getMessage());
+            return "";
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            addError(errors, name + " metrics returned HTTP " + response.statusCode());
+            return "";
+        }
+        return response.body();
+    }
+
+    private static void addError(List<String> errors, String error) {
+        synchronized (errors) {
+            errors.add(error);
         }
     }
 
@@ -229,6 +298,20 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         return URI.create(raw.trim());
     }
 
+    private static List<URI> urisOrEmpty(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        List<URI> uris = new ArrayList<>();
+        for (String item : raw.split(",")) {
+            String trimmed = item.trim();
+            if (!trimmed.isBlank()) {
+                uris.add(URI.create(trimmed));
+            }
+        }
+        return List.copyOf(uris);
+    }
+
     private static String value(Map<String, String> env, String key, String defaultValue) {
         String value = env == null ? null : env.get(key);
         return value == null || value.isBlank() ? defaultValue : value;
@@ -278,13 +361,13 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
 
         private void put(Suffix suffix, long value) {
             switch (suffix) {
-                case COUNT -> count = value;
-                case SUM -> sum = value;
-                case MAX -> max = value;
-                case RECENT_COUNT -> recentCount = value;
-                case RECENT_P50 -> p50 = value;
-                case RECENT_P90 -> p90 = value;
-                case RECENT_P99 -> p99 = value;
+                case COUNT -> count += value;
+                case SUM -> sum += value;
+                case MAX -> max = Math.max(max, value);
+                case RECENT_COUNT -> recentCount += value;
+                case RECENT_P50 -> p50 = p50 == null ? value : Math.max(p50, value);
+                case RECENT_P90 -> p90 = p90 == null ? value : Math.max(p90, value);
+                case RECENT_P99 -> p99 = p99 == null ? value : Math.max(p99, value);
             }
         }
 

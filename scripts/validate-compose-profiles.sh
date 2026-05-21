@@ -118,14 +118,14 @@ assert_db_primary_product_services_present() {
 assert_live_product_services_present() {
     assert_exact_services \
         "live-product" \
-        "node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower frontend-adapter-db-primary" \
+        "node0 node1 node2 wsclient db-migrate-live streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary" \
         --profile live-product
 }
 
 assert_live_product_local_db_services_present() {
     assert_exact_services \
         "live-product-local-db" \
-        "node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower frontend-adapter-db-primary" \
+        "node0 node1 node2 wsclient timescaledb db-migrate streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary" \
         --profile live-product-local-db
 }
 
@@ -158,7 +158,10 @@ assert_db_primary_product_defaults_aligned() {
     done
     for expected in \
         "FEATUREPLANT_METRICS_HOST_PORT: \${{ vars.FEATUREPLANT_METRICS_HOST_PORT || '8094' }}" \
-        'FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT'; do
+        "FEATUREPLANT_AERON_METRICS_HOST_PORT: \${{ vars.FEATUREPLANT_AERON_METRICS_HOST_PORT || '8098' }}" \
+        "FRONTEND_ADAPTER_BACKEND_METRICS_URLS: \${{ vars.FRONTEND_ADAPTER_BACKEND_METRICS_URLS || 'http://node0:8091/metrics,http://node1:8091/metrics,http://node2:8091/metrics' }}" \
+        'FEATUREPLANT_METRICS_HOST_PORT=$FEATUREPLANT_METRICS_HOST_PORT' \
+        'FEATUREPLANT_AERON_METRICS_HOST_PORT=$FEATUREPLANT_AERON_METRICS_HOST_PORT'; do
         if ! grep -Fq "$expected" .github/workflows/deploy-ec2.yml; then
             printf 'deploy workflow missing featureplant metrics propagation: %s\n' "$expected" >&2
             exit 1
@@ -441,6 +444,20 @@ assert_live_product_db_writer_expectations() {
         fi
     done
 
+    rendered_aeron_featureplant="$(service_config_for featureplant-aeron-metrics --profile live-product)"
+    for expected in \
+        "FEATUREPLANT_SOURCE: aeron" \
+        "FEATUREPLANT_OUTPUT: none" \
+        "FEATUREPLANT_STREAMS: derived.top_of_book" \
+        "FEATUREPLANT_MODULES: bbo" \
+        "FEATUREPLANT_RUN_ONCE: \"false\"" \
+        "FEATUREPLANT_METRICS_PORT: \"8095\""; do
+        if ! printf '%s\n' "$rendered_aeron_featureplant" | grep -q "^      ${expected}$"; then
+            printf 'live-product featureplant-aeron-metrics missing setting %s\n' "$expected" >&2
+            exit 1
+        fi
+    done
+
     rendered_frontend="$(
         DB_WRITER_DATABASE_URL="$live_db_url" \
         DB_WRITER_DATABASE_USER="$live_db_user" \
@@ -506,6 +523,7 @@ assert_live_product_db_writer_expectations() {
         'wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health"' \
         'streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health"' \
         'featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health"' \
+        'featureplant-aeron-metrics "http://127.0.0.1:${FEATUREPLANT_AERON_METRICS_HOST_PORT}/health"' \
         'frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"' \
         'node0 node1 node2 wsclient streamtap'; do
         if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
@@ -602,7 +620,7 @@ assert_live_product_local_db_writer_expectations() {
         'live-product-local-db) printf '\''%s\n'\'' wsclient' \
         'live-product|live-product-local-db)' \
         'COMPOSE_PROFILE="$DEPLOY_PROFILE"' \
-        'node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary'; do
+        'node0 node1 node2 wsclient streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary'; do
         if ! grep -Fq "$expected" scripts/ec2-compose-rollback-gate.sh; then
             printf 'rollback gate missing live-product-local-db behavior: %s\n' "$expected" >&2
             exit 1

@@ -8,6 +8,7 @@ DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-.deploy-state}"
 WSCLIENT_METRICS_HOST_PORT="${WSCLIENT_METRICS_HOST_PORT:-8091}"
 WSCLIENT_CAPTURE_METRICS_HOST_PORT="${WSCLIENT_CAPTURE_METRICS_HOST_PORT:-8093}"
 FEATUREPLANT_METRICS_HOST_PORT="${FEATUREPLANT_METRICS_HOST_PORT:-8094}"
+FEATUREPLANT_AERON_METRICS_HOST_PORT="${FEATUREPLANT_AERON_METRICS_HOST_PORT:-8098}"
 DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT="${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT:-8090}"
 STREAM_TAP_HOST_PORT="${STREAM_TAP_HOST_PORT:-8080}"
 STREAM_RECORDER_HOST_PORT="${STREAM_RECORDER_HOST_PORT:-8092}"
@@ -155,12 +156,12 @@ diagnose_profile() {
         log "Recent live-product logs:"
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
             db-migrate-live node0 node1 node2 wsclient streamtap \
-            featureplant-db-follower frontend-adapter-db-primary >&2 || true
+            featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary >&2 || true
     elif [ "$DEPLOY_PROFILE" = "live-product-local-db" ]; then
         log "Recent live-product-local-db logs:"
         sudo docker compose --env-file "$env_file" --profile "$DEPLOY_PROFILE" logs --tail=120 \
             timescaledb db-migrate node0 node1 node2 wsclient streamtap \
-            featureplant-db-follower frontend-adapter-db-primary >&2 || true
+            featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary >&2 || true
     fi
 }
 
@@ -982,6 +983,7 @@ profile_health_smoke() {
                 wsclient "http://127.0.0.1:${WSCLIENT_METRICS_HOST_PORT}/health" \
                 streamtap "http://127.0.0.1:${STREAM_TAP_HOST_PORT}/health" \
                 featureplant-db-follower "http://127.0.0.1:${FEATUREPLANT_METRICS_HOST_PORT}/health" \
+                featureplant-aeron-metrics "http://127.0.0.1:${FEATUREPLANT_AERON_METRICS_HOST_PORT}/health" \
                 frontend-adapter-db-primary "http://127.0.0.1:${DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT}/health"
             ;;
         *)
@@ -996,8 +998,8 @@ profile_app_services() {
         cluster-live) printf '%s\n' node0 node1 node2 wsclient streamtap ;;
         recording-capture) printf '%s\n' node0-capture wsclient-capture stream-recorder ;;
         db-primary-product) printf '%s\n' featureplant-db-follower frontend-adapter-db-primary ;;
-        live-product) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary ;;
-        live-product-local-db) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower frontend-adapter-db-primary ;;
+        live-product) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary ;;
+        live-product-local-db) printf '%s\n' node0 node1 node2 wsclient streamtap featureplant-db-follower featureplant-aeron-metrics frontend-adapter-db-primary ;;
         featureplant) printf '%s\n' featureplant ;;
         raw-replay) printf '%s\n' raw-ingress-replay ;;
         historical-backfill) printf '%s\n' historical-backfill ;;

@@ -143,6 +143,20 @@ class FeaturePlantCliTest {
     }
 
     @Test
+    void noopOutputModeDoesNotCreateDbSink() {
+        RecordingDbSinkFactory factory = new RecordingDbSinkFactory();
+
+        FeatureOutputSink sink = FeaturePlantCli.Config.from(Map.of(
+            "FEATUREPLANT_SOURCE", "aeron",
+            "FEATUREPLANT_OUTPUT", "none",
+            "FEATUREPLANT_DB_URL", ""
+        )).outputSink(new BackendMetrics(), factory);
+
+        assertEquals("edu.illinois.group8.feature.NoopFeatureOutputSink", sink.getClass().getName());
+        assertTrue(factory.calls.isEmpty());
+    }
+
+    @Test
     void dbOutputUsesWriterUrlFallbackAndSyncDefault() {
         RecordingDbSinkFactory factory = new RecordingDbSinkFactory();
 

@@ -17,9 +17,12 @@ import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
 
 import edu.illinois.group8.config.BackendConfig;
+import edu.illinois.group8.KalshiMetricsServer;
+import edu.illinois.group8.metrics.BackendMetrics;
 
 import java.io.File;
 import java.util.List;
+import java.util.Objects;
 
 public class ClusterMain {
     // private static generate
@@ -95,6 +98,8 @@ public class ClusterMain {
     public static void main(String[] args) {
         BackendConfig config = BackendConfig.fromEnvironment();
         config.validateForClusterNode();
+        BackendMetrics backendMetrics = new BackendMetrics();
+        AutoCloseable metricsServer = startMetricsServer(config, backendMetrics, KalshiMetricsServer::start);
 
         List<String> clusterAddresses = config.clusterAddresses();
         int nodeID = Integer.parseInt(config.nodeId());
@@ -147,7 +152,7 @@ public class ClusterMain {
             .aeronDirectoryName(aeronDirName)
             .archiveContext(aeronArchiveContext.clone())
             .clusterDir(new File(baseDir, "cluster"))
-            .clusteredService(new ESBClusteredService(aeronDirName, hostname))
+            .clusteredService(new ESBClusteredService(aeronDirName, hostname, backendMetrics))
             .errorHandler(errorHandler("Clustered Service"));;
         
         try (
@@ -159,7 +164,42 @@ public class ClusterMain {
             System.out.println("[" + nodeID + "] Started Cluster Node on " + hostname + "...");
             barrier.await();
             System.out.println("[" + nodeID + "] Exiting");
+        } finally {
+            closeMetricsServer(metricsServer);
         }
 
+    }
+
+    static AutoCloseable startMetricsServer(
+        BackendConfig config,
+        BackendMetrics metrics,
+        MetricsServerFactory serverFactory
+    ) {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(metrics, "metrics");
+        Objects.requireNonNull(serverFactory, "serverFactory");
+        if (config.metricsPort() == 0) {
+            return null;
+        }
+        if (config.metricsPort() < 0) {
+            throw new IllegalStateException("BACKEND_METRICS_PORT must be zero or positive.");
+        }
+        return serverFactory.start(config.metricsHost(), config.metricsPort(), metrics);
+    }
+
+    @FunctionalInterface
+    interface MetricsServerFactory {
+        AutoCloseable start(String host, int port, BackendMetrics metrics);
+    }
+
+    private static void closeMetricsServer(AutoCloseable metricsServer) {
+        if (metricsServer == null) {
+            return;
+        }
+        try {
+            metricsServer.close();
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to close cluster metrics server.", e);
+        }
     }
 }

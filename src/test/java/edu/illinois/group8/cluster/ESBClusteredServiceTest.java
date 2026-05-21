@@ -48,6 +48,7 @@ class ESBClusteredServiceTest {
         ESBClusteredService service = new ESBClusteredService(
             "aeron-dir",
             "localhost",
+            metrics,
             () -> config,
             (providedConfig, providedMetrics) -> {
                 seenConfig.set(providedConfig);
@@ -56,7 +57,7 @@ class ESBClusteredServiceTest {
             }
         );
 
-        service.initializeCanonicalDbSink(metrics);
+        service.initializeCanonicalDbSink();
         service.onTerminate(null);
         service.onTerminate(null);
 

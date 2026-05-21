@@ -163,6 +163,24 @@ class KalshiSystemTest {
     }
 
     @Test
+    void backendConfigValidatesClusterMetricsPort() {
+        BackendConfig disabled = BackendConfig.from(Map.of(
+            "NODE_ID", "0",
+            "BACKEND_METRICS_PORT", "0"
+        ));
+        assertDoesNotThrow(disabled::validateForClusterNode);
+
+        IllegalStateException negative = assertThrows(
+            IllegalStateException.class,
+            () -> BackendConfig.from(Map.of(
+                "NODE_ID", "0",
+                "BACKEND_METRICS_PORT", "-1"
+            )).validateForClusterNode()
+        );
+        assertTrue(negative.getMessage().contains("BACKEND_METRICS_PORT"));
+    }
+
+    @Test
     void backendConfigRejectsInvalidGapConsumerValues() {
         IllegalStateException badFragmentLimit = assertThrows(
             IllegalStateException.class,

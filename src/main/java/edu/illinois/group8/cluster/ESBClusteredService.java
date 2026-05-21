@@ -50,12 +50,17 @@ public class ESBClusteredService implements ClusteredService {
     private CanonicalDbSink canonicalDbSink;
     private Thread tickerplantThread;
     private Thread clientThread;
+    private final BackendMetrics metrics;
     private final Supplier<DbWriterConfig> dbWriterConfigSupplier;
     private final BiFunction<DbWriterConfig, BackendMetrics, AsyncDbWriter> dbWriterFactory;
     private byte[] sessionMessageScratch = new byte[0];
 
     public ESBClusteredService(String aeronDirName, String hostname) {
-        this(aeronDirName, hostname, DbWriterConfig::fromEnvironment, AsyncDbWriterFactory::create);
+        this(aeronDirName, hostname, new BackendMetrics());
+    }
+
+    ESBClusteredService(String aeronDirName, String hostname, BackendMetrics metrics) {
+        this(aeronDirName, hostname, metrics, DbWriterConfig::fromEnvironment, AsyncDbWriterFactory::create);
     }
 
     ESBClusteredService(
@@ -64,8 +69,19 @@ public class ESBClusteredService implements ClusteredService {
         Supplier<DbWriterConfig> dbWriterConfigSupplier,
         BiFunction<DbWriterConfig, BackendMetrics, AsyncDbWriter> dbWriterFactory
     ) {
+        this(aeronDirName, hostname, new BackendMetrics(), dbWriterConfigSupplier, dbWriterFactory);
+    }
+
+    ESBClusteredService(
+        String aeronDirName,
+        String hostname,
+        BackendMetrics metrics,
+        Supplier<DbWriterConfig> dbWriterConfigSupplier,
+        BiFunction<DbWriterConfig, BackendMetrics, AsyncDbWriter> dbWriterFactory
+    ) {
         this.aeronDirName = aeronDirName;
         this.hostname = hostname;
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.dbWriterConfigSupplier = Objects.requireNonNull(dbWriterConfigSupplier, "dbWriterConfigSupplier");
         this.dbWriterFactory = Objects.requireNonNull(dbWriterFactory, "dbWriterFactory");
     }
@@ -109,8 +125,7 @@ public class ESBClusteredService implements ClusteredService {
         aeron = Aeron.connect(ctx);
 
         this.communicationOrchestrator = new ESBClusterCommunicationOrchestrator(this.hostname, true, aeronDirName);
-        BackendMetrics metrics = new BackendMetrics();
-        initializeCanonicalDbSink(metrics);
+        initializeCanonicalDbSink();
         this.processor = new DataProcessor(communicationOrchestrator, metrics, canonicalDbSink);
         loadSnapshot(cluster, snapshotImage);
 
@@ -258,7 +273,7 @@ public class ESBClusteredService implements ClusteredService {
         closeCanonicalDbSink();
     }
 
-    void initializeCanonicalDbSink(BackendMetrics metrics) {
+    void initializeCanonicalDbSink() {
         DbWriterConfig config = dbWriterConfigSupplier.get();
         AsyncDbWriter writer = dbWriterFactory.apply(config, metrics);
         this.canonicalDbSink = new CanonicalDbSink(writer);

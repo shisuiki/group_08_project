@@ -1,7 +1,11 @@
 package edu.illinois.group8.frontend;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -65,6 +69,74 @@ class PrometheusHotPathLatencyReaderTest {
     }
 
     @Test
+    void mergesBackendSeriesFromMultiplePrometheusTexts() {
+        String first = """
+            backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 2
+            backend_hot_path_ws_to_tickerplant_publish_ns_sum{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 100
+            backend_hot_path_ws_to_tickerplant_publish_ns_max{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 2
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p50{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 40
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p90{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 70
+            """;
+        String second = """
+            backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 3
+            backend_hot_path_ws_to_tickerplant_publish_ns_sum{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 200
+            backend_hot_path_ws_to_tickerplant_publish_ns_max{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 90
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 3
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p50{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 50
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p90{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 80
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 90
+            """;
+
+        HotPathLatencyStatus status = PrometheusHotPathLatencyReader.fromPrometheusTexts(first + "\n" + second, "");
+        HotPathLatencyStatus.Series series = status.stages().get(0).series().get(0);
+
+        assertEquals(5L, series.count());
+        assertEquals(5L, series.recentCount());
+        assertEquals(60L, series.avgNs());
+        assertEquals(90L, series.maxNs());
+        assertEquals(90L, series.p99Ns());
+    }
+
+    @Test
+    void fetchesCommaSeparatedBackendMetricsUrls() throws Exception {
+        HttpServer first = metricsServer("""
+            backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 1
+            backend_hot_path_ws_to_tickerplant_publish_ns_sum{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 10
+            backend_hot_path_ws_to_tickerplant_publish_ns_max{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 10
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 1
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 10
+            """);
+        HttpServer second = metricsServer("""
+            backend_hot_path_ws_to_tickerplant_publish_ns_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 1
+            backend_hot_path_ws_to_tickerplant_publish_ns_sum{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 30
+            backend_hot_path_ws_to_tickerplant_publish_ns_max{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 30
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_count{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 1
+            backend_hot_path_ws_to_tickerplant_publish_ns_recent_p99{event_type="trade",schema_version="1",service="backend",source="kalshi",stream="canonical.trade"} 30
+            """);
+        try {
+            HotPathLatencyStatus status = PrometheusHotPathLatencyReader.fromEnvironment(Map.of(
+                PrometheusHotPathLatencyReader.BACKEND_METRICS_URLS_ENV,
+                "http://127.0.0.1:" + first.getAddress().getPort() + "/metrics,"
+                    + "http://127.0.0.1:" + second.getAddress().getPort() + "/metrics",
+                PrometheusHotPathLatencyReader.BACKEND_METRICS_URL_ENV,
+                "http://127.0.0.1:1/metrics",
+                PrometheusHotPathLatencyReader.TIMEOUT_MS_ENV,
+                "250"
+            )).get();
+
+            HotPathLatencyStatus.Series series = status.stages().get(0).series().get(0);
+            assertEquals(2L, series.count());
+            assertEquals(20L, series.avgNs());
+            assertEquals(30L, series.p99Ns());
+        } finally {
+            first.stop(0);
+            second.stop(0);
+        }
+    }
+
+    @Test
     void rejectsInvalidTimeout() {
         IllegalArgumentException thrown = assertThrows(
             IllegalArgumentException.class,
@@ -77,5 +149,18 @@ class PrometheusHotPathLatencyReaderTest {
         );
 
         assertTrue(thrown.getMessage().contains(PrometheusHotPathLatencyReader.TIMEOUT_MS_ENV));
+    }
+
+    private static HttpServer metricsServer(String body) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/metrics", exchange -> {
+            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        server.start();
+        return server;
     }
 }
