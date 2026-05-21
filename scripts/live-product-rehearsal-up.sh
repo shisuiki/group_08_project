@@ -102,26 +102,30 @@ fi
 
 choose_free_port() {
     python3 - "$@" <<'PY'
+import os
 import socket
 import sys
 
 used = {int(value) for value in sys.argv[1:] if value}
-for _ in range(100):
+start = int(os.environ.get("LIVE_PRODUCT_REHEARSAL_PORT_SCAN_START", "10000"))
+end = int(os.environ.get("LIVE_PRODUCT_REHEARSAL_PORT_SCAN_END", "32000"))
+for port in range(start, end + 1):
+    if port in used:
+        continue
     sock = socket.socket()
     try:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
+        sock.bind(("127.0.0.1", port))
     finally:
         sock.close()
-    if port not in used:
-        print(port)
-        raise SystemExit(0)
-raise SystemExit("failed to allocate an unused localhost port")
+    print(port)
+    raise SystemExit(0)
+raise SystemExit(f"failed to allocate an unused localhost port in {start}-{end}")
 PY
 }
 
 choose_free_port_range() {
     python3 - "$@" <<'PY'
+import os
 import socket
 import sys
 
@@ -130,15 +134,12 @@ used = {int(value) for value in sys.argv[2:] if value}
 if count < 1:
     raise SystemExit("port range count must be positive")
 
-for _ in range(200):
-    probe = socket.socket()
-    try:
-        probe.bind(("127.0.0.1", 0))
-        start = probe.getsockname()[1]
-    finally:
-        probe.close()
+scan_start = int(os.environ.get("LIVE_PRODUCT_REHEARSAL_PORT_SCAN_START", "10000"))
+scan_end = int(os.environ.get("LIVE_PRODUCT_REHEARSAL_PORT_SCAN_END", "32000"))
+
+for start in range(scan_start, scan_end - count + 2):
     end = start + count - 1
-    if end > 65535 or any(port in used for port in range(start, end + 1)):
+    if any(port in used for port in range(start, end + 1)):
         continue
     sockets = []
     try:
@@ -154,7 +155,7 @@ for _ in range(200):
         for sock in sockets:
             sock.close()
 
-raise SystemExit("failed to allocate an unused localhost port range")
+raise SystemExit(f"failed to allocate an unused localhost port range in {scan_start}-{scan_end}")
 PY
 }
 
@@ -257,6 +258,7 @@ print_redacted_log() {
 import os
 import re
 import sys
+from pathlib import Path
 
 path = sys.argv[1]
 max_lines = int(sys.argv[2])
@@ -277,20 +279,20 @@ for name in secret_names:
     value = os.environ.get(name, "")
     if len(value) >= 4:
         replacements.append((value, f"<redacted:{name}>"))
-with open(path, "r", encoding="utf-8", errors="replace") as handle:
-    for index, line in enumerate(handle):
-        if index >= max_lines:
-            print(f"... redacted preview truncated at {max_lines} lines ...")
-            break
-        line = re.sub(
-            r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-            "<redacted:PRIVATE_KEY>",
-            line,
-            flags=re.DOTALL,
-        )
-        for value, replacement in replacements:
-            line = line.replace(value, replacement)
-        print(line, end="")
+content = Path(path).read_text(encoding="utf-8", errors="replace")
+content = re.sub(
+    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
+    "<redacted:PRIVATE_KEY>",
+    content,
+    flags=re.DOTALL,
+)
+for value, replacement in replacements:
+    content = content.replace(value, replacement)
+for index, line in enumerate(content.splitlines(keepends=True)):
+    if index >= max_lines:
+        print(f"... redacted preview truncated at {max_lines} lines ...")
+        break
+    print(line, end="")
 PY
 }
 
@@ -332,18 +334,16 @@ for name in secret_names:
     if len(value) >= 4:
         replacements.append((value, f"<redacted:{name}>"))
 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-with open(input_path, "r", encoding="utf-8", errors="replace") as source, \
-        open(output_path, "w", encoding="utf-8") as dest:
-    for line in source:
-        line = re.sub(
-            r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-            "<redacted:PRIVATE_KEY>",
-            line,
-            flags=re.DOTALL,
-        )
-        for value, replacement in replacements:
-            line = line.replace(value, replacement)
-        dest.write(line)
+content = Path(input_path).read_text(encoding="utf-8", errors="replace")
+content = re.sub(
+    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
+    "<redacted:PRIVATE_KEY>",
+    content,
+    flags=re.DOTALL,
+)
+for value, replacement in replacements:
+    content = content.replace(value, replacement)
+Path(output_path).write_text(content, encoding="utf-8")
 PY
     chmod 600 "$output_file"
 }

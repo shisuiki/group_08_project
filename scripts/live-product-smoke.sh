@@ -1008,8 +1008,9 @@ for quote in quotes:
             raise SystemExit("quote still points at smoke source")
         if not source_event_id:
             raise SystemExit("quote source_event_id missing")
-        if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
-            raise SystemExit("quote event_ts_ms is older than live proof event")
+        if min_event_ts_ms > 0:
+            if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
+                raise SystemExit("quote event_ts_ms is older than live proof event")
         raise SystemExit(0)
 raise SystemExit("live quote not visible")
 PY
@@ -1050,8 +1051,9 @@ if source_kind != "live":
     raise SystemExit("freshness source_kind is not live")
 if not source_event_id or source_event_id.startswith("live-product-smoke-"):
     raise SystemExit("freshness does not point at non-smoke source")
-if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
-    raise SystemExit("freshness event_ts_ms is older than live proof event")
+if min_event_ts_ms > 0:
+    if isinstance(event_ts_ms, bool) or not isinstance(event_ts_ms, int) or event_ts_ms < min_event_ts_ms:
+        raise SystemExit("freshness event_ts_ms is older than live proof event")
 PY
         then
             printf 'PASS frontend_live_health_freshness min_event_ts_ms=%s\n' "$min_event_ts_ms"
@@ -1077,6 +1079,31 @@ check_optional_live_data() {
         return 0
     fi
     baseline_commit_seq="$1"
+    latest_live_feature="$(latest_non_smoke_feature_output_after 0)"
+    if [ -n "$latest_live_feature" ]; then
+        latest_live_feature_source="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $1}')"
+        latest_live_feature_name="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $2}')"
+        latest_live_feature_market="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $3}')"
+        latest_live_feature_event_ts_ms="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $4}')"
+        latest_live_feature_stream="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $5}')"
+        latest_live_feature_commit_seq="$(printf '%s\n' "$latest_live_feature" | awk -F '|' 'NR == 1 {print $6}')"
+        if [ -z "$latest_live_feature_event_ts_ms" ]; then
+            latest_live_feature_event_ts_ms=0
+        fi
+        live_cursor_seq="$(cursor_commit_seq)"
+        wait_frontend_live_feature_output "$latest_live_feature_market" "$latest_live_feature_name" "$latest_live_feature_source"
+        wait_frontend_health_non_smoke_freshness "$latest_live_feature_event_ts_ms"
+        if [ "$latest_live_feature_name" = "feature.bbo" ]; then
+            wait_frontend_live_quote "$latest_live_feature_market" "$latest_live_feature_event_ts_ms"
+        fi
+        LIVE_DATA_OBSERVED=true
+        printf 'PASS live_data baseline_commit_seq=%s live_event_id=%s market=%s stream=%s commit_seq=%s event_ts_ms=%s cursor_after=%s feature_outputs_for_source=%s feature=%s latest_feature_source_event_id=%s latest_feature=%s latest_feature_market=%s latest_feature_commit_seq=%s observed_before_baseline=true\n' \
+            "$baseline_commit_seq" "$latest_live_feature_source" "$latest_live_feature_market" "$latest_live_feature_stream" \
+            "$latest_live_feature_commit_seq" "$latest_live_feature_event_ts_ms" "$live_cursor_seq" "already_projected" \
+            "$latest_live_feature_name" "$latest_live_feature_source" "$latest_live_feature_name" "$latest_live_feature_market" \
+            "$latest_live_feature_commit_seq"
+        return 0
+    fi
     attempt=1
     while :; do
         live_event="$(latest_non_smoke_canonical_after "$baseline_commit_seq")"

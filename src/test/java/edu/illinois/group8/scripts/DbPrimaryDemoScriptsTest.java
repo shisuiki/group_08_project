@@ -426,7 +426,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("PASS pipeline_reliability"));
         assertTrue(script.contains("wait_featureplant_cursor_caught_up"));
         assertTrue(script.contains("wait_frontend_health_non_smoke_freshness"));
-        assertFalse(script.contains("wait_frontend_live_feature_output \"$live_feature_market\""));
+        assertTrue(script.contains("wait_frontend_live_feature_output \"$latest_live_feature_market\""));
+        assertTrue(script.contains("observed_before_baseline=true"));
         assertTrue(script.contains("LIVE_PRODUCT_BROWSER_SMOKE_ENABLED"));
         assertTrue(script.contains("check_product_browser_ui"));
         assertTrue(probe.contains("insert into canonical_events"));
