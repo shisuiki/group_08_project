@@ -745,7 +745,9 @@ main[data-active-role="operator"] #live-panel > .panel {
 .semantic-treemap {
     position: relative;
     min-height: 340px;
-    height: 340px;
+    height: auto;
+    aspect-ratio: 4 / 3;
+    width: 100%;
     overflow: hidden;
     background: #111315;
     border: 1px solid #30373c;
@@ -836,25 +838,69 @@ main[data-active-role="operator"] #live-panel > .panel {
     line-height: 1;
 }
 
-.semantic-group-tile {
-    grid-template-rows: auto auto minmax(0, 1fr);
-    border-color: rgba(244, 247, 249, 0.24);
-}
-
-.semantic-group-mini-map {
-    position: relative;
-    min-height: 38px;
-    margin-top: 2px;
-    overflow: hidden;
-    border-radius: 3px;
-    background: rgba(17, 19, 21, 0.32);
-}
-
-.semantic-group-mini-map span {
+.semantic-group-region {
     position: absolute;
-    border: 1px solid rgba(244, 247, 249, 0.12);
-    border-radius: 2px;
-    pointer-events: none;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid rgba(244, 247, 249, 0.18);
+    border-radius: 4px;
+    contain: layout paint;
+}
+
+.semantic-group-label {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    right: 4px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    min-width: 0;
+    height: 22px;
+    padding: 2px 6px;
+    border: 1px solid rgba(244, 247, 249, 0.18);
+    border-radius: 3px;
+    background: rgba(17, 19, 21, 0.74);
+    color: #f4f7f9;
+    cursor: pointer;
+    text-align: left;
+}
+
+.semantic-group-label:hover,
+.semantic-group-label:focus-visible {
+    border-color: rgba(244, 247, 249, 0.62);
+    outline: none;
+}
+
+.semantic-group-label strong,
+.semantic-group-label span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.semantic-group-label strong {
+    font-size: 11px;
+}
+
+.semantic-group-label span {
+    flex: 0 0 auto;
+    color: #d5a64f;
+    font-size: 10px;
+}
+
+.semantic-group-leaves {
+    position: absolute;
+    inset: 30px 4px 4px;
+    overflow: hidden;
+}
+
+.semantic-group-leaves .semantic-tile {
+    border-radius: 3px;
+    padding: 4px;
 }
 
 .semantic-other-tile {
@@ -914,10 +960,10 @@ main[data-active-role="semantic"] .semantic-coverage-summary {
 main[data-active-role="semantic"] .semantic-treemap {
     aspect-ratio: 4 / 3;
     height: auto;
-    justify-self: center;
-    min-height: 420px;
-    max-height: calc(100vh - 330px);
-    width: min(100%, calc((100vh - 330px) * 4 / 3));
+    justify-self: stretch;
+    min-height: 460px;
+    max-height: none;
+    width: 100%;
 }
 
 main[data-active-role="semantic"] .semantic-market-detail {

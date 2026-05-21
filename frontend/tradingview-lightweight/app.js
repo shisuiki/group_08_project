@@ -1232,8 +1232,13 @@
         }
         const mode = dom.semanticRenderMode.value || 'groups';
         if (!semanticActiveGroupKey && mode === 'groups') {
+            const renderableLeaves = semanticLeaves(groups).filter(leaf => leaf && leaf.market_ticker);
+            const displayLeaves = semanticRenderableLeaves(groups, SEMANTIC_RENDER_LEAF_LIMIT);
+            const hiddenCount = Math.max(0, renderableLeaves.length - displayLeaves.length);
             dom.semanticMapState.textContent =
-                `${groups.length} group(s) / ${leaves.length} rendered semantic market(s) / size by OI when available / color by recent quote activity / grouped by ${groupBy}` +
+                `${groups.length} segment(s) / ${displayLeaves.length} visible market tile(s)` +
+                `${hiddenCount > 0 ? ` / ${hiddenCount} hidden` : ''}` +
+                ` / grouped by ${groupBy} / color by recent quote activity` +
                 coverageSuffix;
             renderSemanticGroupTiles(groups);
             renderSemanticDetail(null);
@@ -1247,40 +1252,13 @@
         const displayLeaves = semanticRenderableLeaves(selectedGroups, limit);
         const hiddenCount = Math.max(0, renderableLeaves.length - displayLeaves.length);
         dom.semanticMapState.textContent =
-            `${displayLeaves.length} rendered / ${leaves.length} market(s) / size by OI when available / color by recent quote activity` +
+            `${displayLeaves.length} visible / ${leaves.length} market(s) / color by recent quote activity` +
             `${hiddenCount > 0 ? ` / ${hiddenCount} hidden` : ''}` +
             `${activeGroup ? ` / ${activeGroup.label || activeGroup.key}` : ` / grouped by ${groupBy}`}` +
             coverageSuffix;
         const fragment = document.createDocumentFragment();
         for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
-            const tile = document.createElement('button');
-            const sizeClass = semanticTileSizeClass(rect);
-            const title = semanticTileTitle(rect.leaf, rect.groupKey);
-            tile.type = 'button';
-            tile.className = `semantic-tile ${sizeClass} semantic-${semanticStatusClass(rect.leaf.semantic_status)}` +
-                `${rect.leaf.is_other ? ' semantic-other-tile' : ''}`;
-            tile.dataset.market = rect.leaf.market_ticker || '';
-            tile.title = title;
-            tile.setAttribute('aria-label', title.replace(/\n/g, '; '));
-            tile.style.left = `${rect.x}%`;
-            tile.style.top = `${rect.y}%`;
-            tile.style.width = `${rect.width}%`;
-            tile.style.height = `${rect.height}%`;
-            tile.style.background = semanticTileColor(rect.leaf);
-            tile.innerHTML = semanticTileMarkup(rect.leaf, rect.groupKey, sizeClass);
-            tile.addEventListener('mouseenter', event => showSemanticDetailFromLeaf(rect.leaf, event));
-            tile.addEventListener('mousemove', event => positionSemanticDetail(event));
-            tile.addEventListener('mouseleave', hideSemanticDetail);
-            tile.addEventListener('focus', event => showSemanticDetailFromLeaf(rect.leaf, semanticElementAnchor(event.currentTarget)));
-            tile.addEventListener('blur', hideSemanticDetail);
-            tile.addEventListener('click', () => {
-                if (rect.leaf.market_ticker) {
-                    selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey);
-                } else {
-                    showSemanticDetailFromLeaf(rect.leaf, semanticElementAnchor(tile));
-                }
-            });
-            fragment.appendChild(tile);
+            fragment.appendChild(createSemanticMarketTile(rect));
         }
         dom.semanticTreemap.appendChild(fragment);
         const first = displayLeaves[0];
@@ -1314,60 +1292,97 @@
     }
 
     function renderSemanticGroupTiles(groups) {
-        const sourceGroups = groups.map(group => ({
-            key: group.key || 'unknown',
-            label: group.label || group.key || 'unknown',
-            count: Number(group.count || 0),
-            value: Math.max(1, Number(group.value || 0)),
-            generated_count: Number(group.generated_count || 0),
-            review_required_count: Number(group.review_required_count || 0),
-            average_confidence: group.average_confidence,
-            leaves: Array.isArray(group.leaves) ? group.leaves : []
-        })).filter(group => group.count > 0);
+        const groupsByKey = new Map();
+        for (const group of groups) {
+            const key = String(group.key || 'unknown');
+            groupsByKey.set(key, group);
+        }
+        const sourceGroupsByKey = new Map();
+        for (const leaf of semanticRenderableLeaves(groups, SEMANTIC_RENDER_LEAF_LIMIT)) {
+            const key = String(leaf.group_key || 'unknown');
+            const sourceGroup = groupsByKey.get(key) || {};
+            if (!sourceGroupsByKey.has(key)) {
+                sourceGroupsByKey.set(key, {
+                    key,
+                    label: sourceGroup.label || sourceGroup.key || key,
+                    count: 0,
+                    total_count: Number(sourceGroup.count || 0),
+                    value: 0,
+                    generated_count: Number(sourceGroup.generated_count || 0),
+                    review_required_count: Number(sourceGroup.review_required_count || 0),
+                    average_confidence: sourceGroup.average_confidence,
+                    leaves: []
+                });
+            }
+            const targetGroup = sourceGroupsByKey.get(key);
+            targetGroup.leaves.push(leaf);
+            targetGroup.count += 1;
+            targetGroup.value += Math.max(1, Number(leaf.value || 0));
+        }
+        const sourceGroups = Array.from(sourceGroupsByKey.values()).filter(group => group.count > 0);
         const groupRects = squarifiedTreemap(
             sourceGroups.map(group => ({ item: group, value: group.value })),
             { x: 0, y: 0, width: 100, height: 100 },
         );
         for (const groupRect of groupRects) {
             const group = groupRect.item;
-            const tile = document.createElement('button');
-            tile.type = 'button';
-            tile.className = 'semantic-tile semantic-group-tile';
-            tile.title = `${group.label}\n${group.count} market(s) / ${formatCompactNumber(group.value)}`;
-            tile.setAttribute('aria-label', tile.title.replace(/\n/g, '; '));
-            tile.style.left = `${groupRect.x}%`;
-            tile.style.top = `${groupRect.y}%`;
-            tile.style.width = `${groupRect.width}%`;
-            tile.style.height = `${groupRect.height}%`;
-            tile.style.background = semanticGroupTileColor(group);
-            tile.innerHTML =
+            const region = document.createElement('section');
+            region.className = 'semantic-group-region';
+            region.setAttribute('aria-label', `${group.label}; ${group.count} visible market tile(s)`);
+            region.style.left = `${groupRect.x}%`;
+            region.style.top = `${groupRect.y}%`;
+            region.style.width = `${groupRect.width}%`;
+            region.style.height = `${groupRect.height}%`;
+            region.style.background = semanticGroupTileColor(group);
+            const label = document.createElement('button');
+            label.type = 'button';
+            label.className = 'semantic-group-label';
+            label.title = `${group.label}\n${group.count} visible market(s)`;
+            label.setAttribute('aria-label', `Drill into ${group.label}; ${group.count} visible market(s)`);
+            label.innerHTML =
                 `<strong>${escapeHtml(group.label)}</strong>` +
-                `<span>${group.count} market(s)</span>` +
-                `<small>${formatCompactNumber(group.value)} value / ${confidenceText(group.average_confidence)}</small>`;
-            const childLeaves = semanticRenderableLeaves([{ ...group, leaves: group.leaves || [] }], 18);
-            const childRects = layoutSemanticLeafTreemap(childLeaves).filter(rect => rect.leaf.market_ticker);
-            if (childRects.length > 0 && groupRect.width > 16 && groupRect.height > 16) {
-                const mini = document.createElement('div');
-                mini.className = 'semantic-group-mini-map';
-                for (const childRect of childRects.slice(0, 12)) {
-                    const child = document.createElement('span');
-                    child.style.left = `${childRect.x}%`;
-                    child.style.top = `${childRect.y}%`;
-                    child.style.width = `${childRect.width}%`;
-                    child.style.height = `${childRect.height}%`;
-                    child.style.background = semanticTileColor(childRect.leaf);
-                    mini.appendChild(child);
-                }
-                tile.appendChild(mini);
+                `<span>${group.count}</span>`;
+            label.addEventListener('click', () => selectSemanticGroup(group.key));
+            region.appendChild(label);
+            const leafLayer = document.createElement('div');
+            leafLayer.className = 'semantic-group-leaves';
+            for (const childRect of layoutSemanticLeafTreemap(group.leaves)) {
+                leafLayer.appendChild(createSemanticMarketTile(childRect));
             }
-            tile.addEventListener('mouseenter', event => showSemanticDetailFromGroup(group, event));
-            tile.addEventListener('mousemove', event => positionSemanticDetail(event));
-            tile.addEventListener('mouseleave', hideSemanticDetail);
-            tile.addEventListener('focus', event => showSemanticDetailFromGroup(group, semanticElementAnchor(event.currentTarget)));
-            tile.addEventListener('blur', hideSemanticDetail);
-            tile.addEventListener('click', () => selectSemanticGroup(group.key));
-            dom.semanticTreemap.appendChild(tile);
+            region.appendChild(leafLayer);
+            dom.semanticTreemap.appendChild(region);
         }
+    }
+
+    function createSemanticMarketTile(rect) {
+        const tile = document.createElement('button');
+        const sizeClass = semanticTileSizeClass(rect);
+        const title = semanticTileTitle(rect.leaf, rect.groupKey);
+        tile.type = 'button';
+        tile.className = `semantic-tile ${sizeClass} semantic-${semanticStatusClass(rect.leaf.semantic_status)}` +
+            `${rect.leaf.is_other ? ' semantic-other-tile' : ''}`;
+        tile.dataset.market = rect.leaf.market_ticker || '';
+        tile.title = title;
+        tile.setAttribute('aria-label', title.replace(/\n/g, '; '));
+        tile.style.left = `${rect.x}%`;
+        tile.style.top = `${rect.y}%`;
+        tile.style.width = `${rect.width}%`;
+        tile.style.height = `${rect.height}%`;
+        tile.style.background = semanticTileColor(rect.leaf);
+        tile.innerHTML = semanticTileMarkup(rect.leaf, rect.groupKey, sizeClass);
+        tile.addEventListener('mouseenter', event => showSemanticDetailFromLeaf(rect.leaf, event));
+        tile.addEventListener('mousemove', event => positionSemanticDetail(event));
+        tile.addEventListener('mouseleave', hideSemanticDetail);
+        tile.addEventListener('focus', event => showSemanticDetailFromLeaf(rect.leaf, semanticElementAnchor(event.currentTarget)));
+        tile.addEventListener('blur', hideSemanticDetail);
+        tile.addEventListener('click', () => {
+            if (rect.leaf.market_ticker) {
+                selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey);
+            } else {
+                showSemanticDetailFromLeaf(rect.leaf, semanticElementAnchor(tile));
+            }
+        });
+        return tile;
     }
 
     function semanticRenderableLeaves(groups, limit) {
@@ -1555,7 +1570,7 @@
             tags: dom.semanticGroupBy.value === 'tag' ? group.key : '-',
             confidence: confidenceText(group.average_confidence),
             openInterest: formatCompactNumber(group.value || 0),
-            freshness: `${Number(group.count || 0)} market(s), sized by OI`,
+            freshness: `${Number(group.count || 0)} market(s)`,
             quote: '-'
         });
     }
