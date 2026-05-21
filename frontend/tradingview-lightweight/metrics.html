@@ -87,31 +87,96 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Hot path</p>
-          <h2>Receive to Processing</h2>
+          <h2>Backend Hot-Path Percentiles</h2>
         </div>
         <span id="hot-path-status" class="pill">loading</span>
       </div>
-      <div class="latency-lanes" aria-label="Hot-path latency breakdown">
-        <div class="lane">
-          <span>WS receive to cluster offer</span>
-          <div class="bar-track"><div id="hot-ws-p99-bar" class="bar"></div></div>
-          <strong id="hot-ws-p99-ms">--</strong>
-        </div>
-        <div class="lane">
-          <span>Cluster receive to tickerplant publish</span>
-          <div class="bar-track"><div id="hot-cluster-p99-bar" class="bar alt"></div></div>
-          <strong id="hot-cluster-p99-ms">--</strong>
-        </div>
-        <div class="lane">
-          <span>Tickerplant receive to BBO complete</span>
-          <div class="bar-track"><div id="hot-feature-p99-bar" class="bar"></div></div>
-          <strong id="hot-feature-p99-ms">--</strong>
-        </div>
-        <div class="lane">
-          <span>BBO module processing</span>
-          <div class="bar-track"><div id="hot-module-p99-bar" class="bar warn"></div></div>
-          <strong id="hot-module-p99-ms">--</strong>
-        </div>
+      <div class="hot-path-grid" aria-label="Hot-path latency breakdown">
+        <article class="hot-stage-card" data-stage="wsclient_receive_to_cluster_offer">
+          <div class="hot-stage-head">
+            <strong id="hot-ws-label">WS receive -> cluster offer</strong>
+            <span id="hot-ws-state" class="mini-pill">loading</span>
+          </div>
+          <small id="hot-ws-detail">orderbook_delta headline when available</small>
+          <div id="hot-ws-dist" class="hot-dist" aria-label="WS receive to cluster offer distribution"></div>
+          <dl class="hot-stat-grid">
+            <div><dt>P50</dt><dd id="hot-ws-p50">--</dd></div>
+            <div><dt>P95</dt><dd id="hot-ws-p95">--</dd></div>
+            <div><dt>P99</dt><dd id="hot-ws-p99">--</dd></div>
+            <div><dt>P99.9</dt><dd id="hot-ws-p999">--</dd></div>
+            <div><dt>Recent</dt><dd id="hot-ws-count">--</dd></div>
+            <div><dt>Max</dt><dd id="hot-ws-max">--</dd></div>
+            <div><dt>Avg</dt><dd id="hot-ws-avg">--</dd></div>
+          </dl>
+        </article>
+        <article class="hot-stage-card" data-stage="cluster_receive_to_tickerplant_publish">
+          <div class="hot-stage-head">
+            <strong id="hot-cluster-label">Cluster receive -> tickerplant publish</strong>
+            <span id="hot-cluster-state" class="mini-pill">loading</span>
+          </div>
+          <small id="hot-cluster-detail">excludes wsclient and cluster ingress</small>
+          <div id="hot-cluster-dist" class="hot-dist" aria-label="Cluster receive to tickerplant publish distribution"></div>
+          <dl class="hot-stat-grid">
+            <div><dt>P50</dt><dd id="hot-cluster-p50">--</dd></div>
+            <div><dt>P95</dt><dd id="hot-cluster-p95">--</dd></div>
+            <div><dt>P99</dt><dd id="hot-cluster-p99">--</dd></div>
+            <div><dt>P99.9</dt><dd id="hot-cluster-p999">--</dd></div>
+            <div><dt>Recent</dt><dd id="hot-cluster-count">--</dd></div>
+            <div><dt>Max</dt><dd id="hot-cluster-max">--</dd></div>
+            <div><dt>Avg</dt><dd id="hot-cluster-avg">--</dd></div>
+          </dl>
+        </article>
+        <article class="hot-stage-card priority" data-stage="ws_to_tickerplant_publish">
+          <div class="hot-stage-head">
+            <strong id="hot-ws-tickerplant-label">WS receive -> tickerplant publish</strong>
+            <span id="hot-ws-tickerplant-state" class="mini-pill">loading</span>
+          </div>
+          <small id="hot-ws-tickerplant-detail">full hot path to canonical publisher offer completion</small>
+          <div id="hot-ws-tickerplant-dist" class="hot-dist" aria-label="WS receive to tickerplant publish distribution"></div>
+          <dl class="hot-stat-grid">
+            <div><dt>P50</dt><dd id="hot-ws-tickerplant-p50">--</dd></div>
+            <div><dt>P95</dt><dd id="hot-ws-tickerplant-p95">--</dd></div>
+            <div><dt>P99</dt><dd id="hot-ws-tickerplant-p99">--</dd></div>
+            <div><dt>P99.9</dt><dd id="hot-ws-tickerplant-p999">--</dd></div>
+            <div><dt>Recent</dt><dd id="hot-ws-tickerplant-count">--</dd></div>
+            <div><dt>Max</dt><dd id="hot-ws-tickerplant-max">--</dd></div>
+            <div><dt>Avg</dt><dd id="hot-ws-tickerplant-avg">--</dd></div>
+          </dl>
+        </article>
+        <article class="hot-stage-card" data-stage="featureplant_consumer_to_bbo_complete">
+          <div class="hot-stage-head">
+            <strong id="hot-feature-label">FeaturePlant consumer -> BBO complete</strong>
+            <span id="hot-feature-state" class="mini-pill">loading</span>
+          </div>
+          <small id="hot-feature-detail">consumer receive to BBO module complete</small>
+          <div id="hot-feature-dist" class="hot-dist" aria-label="FeaturePlant consumer to BBO complete distribution"></div>
+          <dl class="hot-stat-grid">
+            <div><dt>P50</dt><dd id="hot-feature-p50">--</dd></div>
+            <div><dt>P95</dt><dd id="hot-feature-p95">--</dd></div>
+            <div><dt>P99</dt><dd id="hot-feature-p99">--</dd></div>
+            <div><dt>P99.9</dt><dd id="hot-feature-p999">--</dd></div>
+            <div><dt>Recent</dt><dd id="hot-feature-count">--</dd></div>
+            <div><dt>Max</dt><dd id="hot-feature-max">--</dd></div>
+            <div><dt>Avg</dt><dd id="hot-feature-avg">--</dd></div>
+          </dl>
+        </article>
+        <article class="hot-stage-card" data-stage="featureplant_bbo_module_processing">
+          <div class="hot-stage-head">
+            <strong id="hot-module-label">FeaturePlant BBO processing</strong>
+            <span id="hot-module-state" class="mini-pill">loading</span>
+          </div>
+          <small id="hot-module-detail">module execution only</small>
+          <div id="hot-module-dist" class="hot-dist" aria-label="FeaturePlant BBO module processing distribution"></div>
+          <dl class="hot-stat-grid">
+            <div><dt>P50</dt><dd id="hot-module-p50">--</dd></div>
+            <div><dt>P95</dt><dd id="hot-module-p95">--</dd></div>
+            <div><dt>P99</dt><dd id="hot-module-p99">--</dd></div>
+            <div><dt>P99.9</dt><dd id="hot-module-p999">--</dd></div>
+            <div><dt>Recent</dt><dd id="hot-module-count">--</dd></div>
+            <div><dt>Max</dt><dd id="hot-module-max">--</dd></div>
+            <div><dt>Avg</dt><dd id="hot-module-avg">--</dd></div>
+          </dl>
+        </article>
       </div>
     </section>
 

@@ -3,6 +3,38 @@ const REQUEST_TIMEOUT_MS = 5500;
 const OPTIONAL_REQUEST_TIMEOUT_MS = 1800;
 const LATENCY_BAR_MAX_MS = 1000;
 const HOT_PATH_BAR_TARGET_NS = 1_000_000;
+const HOT_PATH_STAGE_CONFIGS = [
+  {
+    id: 'wsclient_receive_to_cluster_offer',
+    prefix: 'hot-ws',
+    label: 'WS receive -> cluster offer',
+    empty: 'No wsclient ingress samples'
+  },
+  {
+    id: 'cluster_receive_to_tickerplant_publish',
+    prefix: 'hot-cluster',
+    label: 'Cluster receive -> tickerplant publish',
+    empty: 'No cluster leader samples'
+  },
+  {
+    id: 'ws_to_tickerplant_publish',
+    prefix: 'hot-ws-tickerplant',
+    label: 'WS receive -> tickerplant publish',
+    empty: 'No full hot-path samples'
+  },
+  {
+    id: 'featureplant_consumer_to_bbo_complete',
+    prefix: 'hot-feature',
+    label: 'FeaturePlant consumer -> BBO complete',
+    empty: 'No FeaturePlant consumer samples'
+  },
+  {
+    id: 'featureplant_bbo_module_processing',
+    prefix: 'hot-module',
+    label: 'FeaturePlant BBO processing',
+    empty: 'No BBO module samples'
+  }
+];
 
 const PROMETHEUS_ROWS = [
   ['frontend_adapter_symbols', 'Frontend symbols'],
@@ -262,32 +294,30 @@ function renderLatencyUnavailable(reason) {
 function renderHotPathLatency(hotPath) {
   const status = hotPath ? hotPath.status : 'unavailable';
   setPill('hot-path-status', status, statusClass(status));
-  const ws = hotPathStage(hotPath, 'wsclient_receive_to_cluster_offer');
-  const cluster = hotPathStage(hotPath, 'cluster_receive_to_tickerplant_publish');
-  const feature = hotPathStage(hotPath, 'featureplant_consumer_to_bbo_complete');
-  const module = hotPathStage(hotPath, 'featureplant_bbo_module_processing');
-  const wsBest = bestSeries(ws);
-  const clusterBest = bestSeries(cluster);
-  const featureBest = bestSeries(feature);
-  const moduleBest = bestSeries(module);
-  const best = clusterBest || wsBest || featureBest || moduleBest;
+  const stageViews = HOT_PATH_STAGE_CONFIGS.map((config) => {
+    const stage = hotPathStage(hotPath, config.id);
+    renderHotPathStage(config, stage);
+    return { config, stage, series: bestSeries(stage) };
+  });
+  const headline = preferredHotPathHeadline(stageViews);
+  const best = headline && headline.series;
   const bestTail = hotPathTailNs(best);
   setText('hot-path-latency', bestTail != null ? formatNs(bestTail) : status);
-  setText('hot-path-source', best ? 'recent p99.9' : (hotPath && hotPath.note) || 'missing hot-path samples');
-  setHotPathDistribution('hot-ws-p99', wsBest);
-  setHotPathDistribution('hot-cluster-p99', clusterBest);
-  setHotPathDistribution('hot-feature-p99', featureBest);
-  setHotPathDistribution('hot-module-p99', moduleBest);
+  setText(
+    'hot-path-source',
+    best
+      ? `${headline.config.label} p99.9 / ${hotPathSeriesDetail(best)}`
+      : (hotPath && hotPath.note) || 'missing hot-path samples'
+  );
 }
 
 function renderHotPathUnavailable(reason) {
   setPill('hot-path-status', reason || 'timeout', 'warn');
   setText('hot-path-latency', '--');
   setText('hot-path-source', 'hot-path metrics unavailable');
-  setHotPathBar('hot-ws-p99', null);
-  setHotPathBar('hot-cluster-p99', null);
-  setHotPathBar('hot-feature-p99', null);
-  setHotPathBar('hot-module-p99', null);
+  for (const config of HOT_PATH_STAGE_CONFIGS) {
+    renderHotPathStage(config, null);
+  }
 }
 
 function hotPathStage(hotPath, id) {
@@ -307,6 +337,23 @@ function bestSeries(stage) {
     }
     return (asNumber(right.recent_count) || 0) - (asNumber(left.recent_count) || 0);
   })[0];
+}
+
+function preferredHotPathHeadline(stageViews) {
+  const byId = new Map(stageViews.map((view) => [view.config.id, view]));
+  for (const id of [
+    'ws_to_tickerplant_publish',
+    'cluster_receive_to_tickerplant_publish',
+    'wsclient_receive_to_cluster_offer',
+    'featureplant_consumer_to_bbo_complete',
+    'featureplant_bbo_module_processing'
+  ]) {
+    const view = byId.get(id);
+    if (view && view.series) {
+      return view;
+    }
+  }
+  return null;
 }
 
 function hotPathEventRank(series) {
@@ -338,27 +385,72 @@ function setLatencyBar(prefix, value) {
   setText(`${prefix}-ms`, formatMs(value));
 }
 
-function setHotPathBar(prefix, value) {
-  const number = Math.max(0, asNumber(value) || 0);
-  const width = Math.min(100, (number / HOT_PATH_BAR_TARGET_NS) * 100);
-  const bar = byId(`${prefix}-bar`);
-  if (bar) {
-    bar.style.width = `${width}%`;
-    bar.classList.toggle('bad', number > HOT_PATH_BAR_TARGET_NS);
-  }
-  setText(`${prefix}-ms`, formatNs(value));
+function setHotPathDistribution(prefix, series) {
+  setText(`${prefix}-p50`, formatNs(series && series.p50_ns));
+  setText(`${prefix}-p95`, formatNs(series && series.p95_ns));
+  setText(`${prefix}-p99`, formatNs(series && series.p99_ns));
+  setText(`${prefix}-p999`, formatNs(series && (series.p999_ns ?? series.p99_ns)));
+  setText(`${prefix}-count`, series ? formatNumber(series.recent_count ?? series.count) : '--');
+  setText(`${prefix}-max`, formatNs(series && series.max_ns));
+  setText(`${prefix}-avg`, formatNs(series && series.avg_ns));
+  renderHotPathDistribution(prefix, series);
 }
 
-function setHotPathDistribution(prefix, series) {
-  setHotPathBar(prefix, hotPathTailNs(series));
-  if (!series) {
-    setText(`${prefix}-ms`, '--');
+function renderHotPathStage(config, stage) {
+  const series = bestSeries(stage);
+  const status = stage ? stage.status : 'missing';
+  setText(`${config.prefix}-label`, stage && stage.label ? stage.label : config.label);
+  setPill(`${config.prefix}-state`, status, statusClass(status));
+  setText(
+    `${config.prefix}-detail`,
+    series ? hotPathSeriesDetail(series) : (stage && stage.note) || config.empty
+  );
+  setHotPathDistribution(config.prefix, series);
+}
+
+function renderHotPathDistribution(prefix, series) {
+  const container = byId(`${prefix}-dist`);
+  if (!container) {
     return;
   }
-  setText(
-    `${prefix}-ms`,
-    `p50 ${formatNs(series.p50_ns)} / p95 ${formatNs(series.p95_ns)} / p99.9 ${formatNs(series.p999_ns ?? series.p99_ns)}`
-  );
+  container.innerHTML = '';
+  const rows = [
+    ['P50', series && series.p50_ns],
+    ['P95', series && series.p95_ns],
+    ['P99', series && series.p99_ns],
+    ['P99.9', series && (series.p999_ns ?? series.p99_ns)]
+  ];
+  const values = rows.map(([, value]) => asNumber(value)).filter((value) => value != null);
+  const denominator = Math.max(1, ...values);
+  for (const [label, value] of rows) {
+    const number = Math.max(0, asNumber(value) || 0);
+    const width = Math.min(100, (number / denominator) * 100);
+    const row = document.createElement('div');
+    row.className = 'hot-dist-row';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const track = document.createElement('div');
+    track.className = 'bar-track';
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    if (number > HOT_PATH_BAR_TARGET_NS) {
+      bar.classList.add('bad');
+    }
+    bar.style.width = `${width}%`;
+    track.appendChild(bar);
+    const stat = document.createElement('strong');
+    stat.textContent = value == null ? '--' : formatNs(value);
+    row.append(name, track, stat);
+    container.appendChild(row);
+  }
+}
+
+function hotPathSeriesDetail(series) {
+  const labels = series && series.labels ? series.labels : {};
+  const type = labels.event_type || labels.message_type || labels.module || 'sample';
+  const stream = labels.stream || labels.result || labels.source || '';
+  const count = asNumber(series && (series.recent_count ?? series.count));
+  return `${type}${stream ? ` / ${stream}` : ''}${count == null ? '' : ` / recent ${formatNumber(count)}`}`;
 }
 
 function renderPrometheus(text) {

@@ -95,11 +95,13 @@ class PrometheusHotPathLatencyReaderTest {
         assertEquals(1_200L, wsclientStage.series().get(0).p99Ns());
         HotPathLatencyStatus.Stage clusterStage = stage(status, "cluster_receive_to_tickerplant_publish");
         assertEquals("backend_hot_path_cluster_receive_to_tickerplant_publish_ns", clusterStage.metric());
+        assertEquals("Cluster receive -> tickerplant publish", clusterStage.label());
         assertEquals(4_000L, clusterStage.series().get(0).p99Ns());
         assertEquals(700L, stage(status, "canonical_parse").series().get(0).p99Ns());
         assertEquals(500L, stage(status, "tickerplant_publish_offer").series().get(0).p99Ns());
         HotPathLatencyStatus.Stage legacyBackendStage = stage(status, "ws_to_tickerplant_publish");
         assertEquals("backend_hot_path_ws_to_tickerplant_publish_ns", legacyBackendStage.metric());
+        assertEquals("WS receive -> tickerplant publish", legacyBackendStage.label());
         assertEquals(8_000L, legacyBackendStage.series().get(0).p95Ns());
         assertEquals(8_000L, legacyBackendStage.series().get(0).p99Ns());
         assertEquals(8_000L, legacyBackendStage.series().get(0).p999Ns());

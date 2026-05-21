@@ -188,7 +188,7 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         List<HotPathLatencyStatus.Stage> stages = new ArrayList<>();
         stages.add(HotPathLatencyStatus.Stage.ok(
             "wsclient_receive_to_cluster_offer",
-            "WS receive to cluster offer",
+            "WS receive -> cluster offer",
             "wsclient",
             WSCLIENT_RECEIVE_TO_CLUSTER_OFFER_METRIC,
             "Measured from wsclient receive_ts_ns to bounded cluster ingress offer return.",
@@ -196,10 +196,10 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         ));
         stages.add(HotPathLatencyStatus.Stage.ok(
             "cluster_receive_to_tickerplant_publish",
-            "Cluster receive to tickerplant publish",
+            "Cluster receive -> tickerplant publish",
             "backend",
             CLUSTER_RECEIVE_TO_TICKERPLANT_METRIC,
-            "Measured inside the leader from cluster message receive to canonical publisher offer completion.",
+            "Measured inside the leader from cluster message receive to canonical publisher offer completion; excludes wsclient and cluster ingress.",
             topSeries(parseDistributionSeries(backendPrometheus, CLUSTER_RECEIVE_TO_TICKERPLANT_METRIC), null)
         ));
         stages.add(HotPathLatencyStatus.Stage.ok(
@@ -220,10 +220,10 @@ final class PrometheusHotPathLatencyReader implements Supplier<HotPathLatencySta
         ));
         stages.add(HotPathLatencyStatus.Stage.ok(
             "ws_to_tickerplant_publish",
-            "Legacy WS receive to tickerplant publish",
+            "WS receive -> tickerplant publish",
             "backend",
             WS_TO_TICKERPLANT_METRIC,
-            "Continuity metric measured from wsclient receive_ts_ns to backend canonical publisher offer completion.",
+            "Full hot path measured from wsclient receive_ts_ns to backend canonical publisher offer completion.",
             topSeries(parseDistributionSeries(backendPrometheus, WS_TO_TICKERPLANT_METRIC), null)
         ));
         stages.add(HotPathLatencyStatus.Stage.ok(

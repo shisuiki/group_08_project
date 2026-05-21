@@ -584,13 +584,16 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/quotes/updates?symbols="));
         assertTrue(metricsHtml.body().contains("Kalshi Ops Metrics"));
         assertTrue(metricsHtml.body().contains("Hot-path p99"));
+        assertTrue(metricsHtml.body().contains("Backend Hot-Path Percentiles"));
+        assertTrue(metricsHtml.body().contains("WS receive -> tickerplant publish"));
         assertTrue(metricsHtml.body().contains("Read-Model Freshness"));
         assertTrue(metricsHtml.body().contains("metrics.js"));
         assertTrue(metricsJs.body().contains("/ops/pipeline"));
         assertTrue(metricsJs.body().contains("/ops/latency"));
         assertTrue(metricsJs.body().contains("/ops/hot-path-latency"));
         assertTrue(metricsJs.body().contains("/metrics?format=prometheus"));
-        assertTrue(metricsJs.body().contains("recent p99.9"));
+        assertTrue(metricsJs.body().contains("ws_to_tickerplant_publish"));
+        assertTrue(metricsJs.body().contains("P99.9"));
         assertTrue(metricsCss.body().contains(".metric-grid"));
         assertTrue(js.body().contains("const MARKET_CATALOG_LIMIT = 200;"));
         assertTrue(js.body().contains("marketCatalogGeneration"));

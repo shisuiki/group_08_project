@@ -200,12 +200,25 @@ main {
   padding: 16px;
 }
 
+.band > *,
+.panel > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .section-head {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
   margin-bottom: 14px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.section-head > * {
+  min-width: 0;
 }
 
 .compact {
@@ -229,11 +242,37 @@ main {
   color: var(--muted);
 }
 
+.mini-pill {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--green);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  max-width: 100%;
+  padding: 5px 7px;
+  text-transform: uppercase;
+}
+
+.mini-pill.warn {
+  color: var(--amber);
+}
+
+.mini-pill.bad {
+  color: var(--red);
+}
+
+.mini-pill.neutral {
+  color: var(--muted);
+}
+
 .latency-lanes {
   display: grid;
   gap: 12px;
   max-width: 100%;
   min-width: 0;
+  width: 100%;
 }
 
 .lane {
@@ -243,6 +282,7 @@ main {
   grid-template-columns: 210px minmax(120px, 1fr) minmax(210px, 260px);
   max-width: 100%;
   min-width: 0;
+  width: 100%;
 }
 
 .lane span,
@@ -255,14 +295,18 @@ main {
 .lane strong {
   overflow-wrap: anywhere;
   text-align: right;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .bar-track {
   background: #e6ebe6;
   border-radius: 999px;
   height: 12px;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .bar {
@@ -285,18 +329,124 @@ main {
   background: var(--red);
 }
 
+.hot-path-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 100%;
+  min-width: 0;
+}
+
+.hot-stage-card {
+  background: #fbfcfb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+}
+
+.hot-stage-card.priority {
+  border-color: #b8cabd;
+  box-shadow: inset 4px 0 0 var(--green);
+}
+
+.hot-stage-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.hot-stage-head strong {
+  font-size: 15px;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hot-stage-card small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hot-dist {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.hot-dist-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 46px minmax(0, 1fr) minmax(54px, auto);
+  min-width: 0;
+}
+
+.hot-dist-row span,
+.hot-dist-row strong {
+  font-size: 11px;
+  min-width: 0;
+}
+
+.hot-dist-row strong {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: right;
+}
+
+.hot-stat-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.hot-stat-grid > div {
+  background: #f1f4f1;
+  border-radius: 5px;
+  min-width: 0;
+  padding: 7px;
+}
+
+.hot-stat-grid dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  margin: 0 0 3px;
+  text-transform: uppercase;
+}
+
+.hot-stat-grid dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 900;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .split {
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
 }
 
 .metric-table {
   border-collapse: collapse;
+  table-layout: fixed;
   width: 100%;
 }
 
 .metric-table td {
   border-top: 1px solid var(--line);
   font-size: 13px;
+  overflow-wrap: anywhere;
   padding: 9px 0;
   vertical-align: top;
 }
@@ -369,6 +519,7 @@ pre {
 
   .status-strip,
   .metric-grid,
+  .hot-path-grid,
   .split {
     grid-template-columns: 1fr 1fr;
   }
@@ -392,6 +543,7 @@ pre {
 
   .status-strip,
   .metric-grid,
+  .hot-path-grid,
   .split {
     grid-template-columns: 1fr;
     max-width: calc(100vw - 24px);
@@ -405,6 +557,16 @@ pre {
     min-width: 0;
     max-width: 100%;
     width: 100%;
+  }
+
+  .band,
+  .panel {
+    overflow-x: clip;
+    padding: 12px;
+  }
+
+  .lane strong {
+    text-align: left;
   }
 
   h1 {
