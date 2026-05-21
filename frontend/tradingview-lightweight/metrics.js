@@ -178,8 +178,8 @@ function renderPipeline(pipeline) {
   setText('runtime-profile', 'live-product');
   setText('data-age', formatAge(body.latest_state_age_ms));
   setText('data-source', body.latest_market_state_commit_seq
-    ? `latest state commit ${body.latest_market_state_commit_seq}`
-    : 'latest state');
+    ? `read-model commit ${body.latest_market_state_commit_seq}`
+    : 'read model');
   setText('canonical-rate', formatRate(body.recent_canonical_events, windowSeconds));
   setText('canonical-total', `${formatNumber(body.recent_canonical_events)} events in ${formatNumber(windowSeconds)}s`);
   setText('feature-rate', formatRate(body.recent_feature_outputs, windowSeconds));
@@ -189,9 +189,9 @@ function renderPipeline(pipeline) {
   setText('cursor-lag', formatNumber(body.cursor_lag_events));
   setText('latest-state-age', `latest state ${formatAge(body.latest_state_age_ms)}`);
   if (!liveSnapshot.latency) {
-    setPill('latency-status', status === 'ok' ? 'pipeline proxy' : status, statusClass(status));
+    setPill('latency-status', status === 'ok' ? 'read-model proxy' : status, statusClass(status));
     setText('e2e-latency', formatAge(body.latest_state_age_ms));
-    setText('latency-source', 'latest-state age proxy');
+    setText('latency-source', 'not hot-path latency');
     setLatencyBar('canonical-state', body.latest_state_age_ms);
   }
 }
@@ -232,7 +232,7 @@ function renderLatencyUnavailable(reason) {
   const body = liveSnapshot.pipeline && liveSnapshot.pipeline.pipeline ? liveSnapshot.pipeline.pipeline : {};
   setPill('latency-status', reason || 'timeout', 'warn');
   setText('e2e-latency', formatAge(body.latest_state_age_ms));
-  setText('latency-source', 'latest-state age proxy');
+  setText('latency-source', 'not hot-path latency');
   setLatencyBar('canonical-feature', null);
   setLatencyBar('feature-state', null);
   setLatencyBar('canonical-state', body.latest_state_age_ms);

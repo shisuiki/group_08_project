@@ -62,14 +62,14 @@
         <small id="latest-state-age">latest-state age</small>
       </article>
       <article class="metric-tile latency">
-        <span class="label">End-to-end latency</span>
+        <span class="label">DB read-model freshness</span>
         <strong id="e2e-latency">--</strong>
-        <small id="latency-source">latest source event</small>
+        <small id="latency-source">projection freshness proxy</small>
       </article>
       <article class="metric-tile freshness">
-        <span class="label">Frontend data age</span>
+        <span class="label">Projected quote age</span>
         <strong id="data-age">--</strong>
-        <small id="data-source">latest rendered event</small>
+        <small id="data-source">latest projected BBO</small>
       </article>
       <article class="metric-tile clients">
         <span class="label">Distribution stream</span>
@@ -86,24 +86,24 @@
     <section class="band">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Latency path</p>
-          <h2>Ingest to Dashboard</h2>
+          <p class="eyebrow">DB projection path</p>
+          <h2>Canonical to Read Model</h2>
         </div>
         <span id="latency-status" class="pill">loading</span>
       </div>
       <div class="latency-lanes" aria-label="Latency breakdown">
         <div class="lane">
-          <span>Canonical to feature</span>
+          <span>Canonical DB to feature output</span>
           <div class="bar-track"><div id="canonical-feature-bar" class="bar"></div></div>
           <strong id="canonical-feature-ms">--</strong>
         </div>
         <div class="lane">
-          <span>Feature to latest state</span>
+          <span>Feature output to read model</span>
           <div class="bar-track"><div id="feature-state-bar" class="bar alt"></div></div>
           <strong id="feature-state-ms">--</strong>
         </div>
         <div class="lane">
-          <span>Canonical to latest state</span>
+          <span>Canonical DB to read model</span>
           <div class="bar-track"><div id="canonical-state-bar" class="bar warn"></div></div>
           <strong id="canonical-state-ms">--</strong>
         </div>
