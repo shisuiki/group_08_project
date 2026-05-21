@@ -54,6 +54,7 @@ class JdbcSemanticMarketMetadataReaderTest {
         assertTrue(sql.contains("mfs.history_bars_24h_count desc"));
         assertTrue(sql.contains("smm.tags::text as tags"));
         assertTrue(sql.contains("lms.last_canonical_commit_seq"));
+        assertTrue(sql.contains("open_interest_fp"));
         assertTrue(sql.contains("lms.last_canonical_commit_seq desc nulls last"));
         assertTrue(sql.contains("limit ?"));
         assertFalse(sql.contains("raw_response"));

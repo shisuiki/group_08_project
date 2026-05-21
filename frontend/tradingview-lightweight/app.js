@@ -11,9 +11,9 @@
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
     const MARKET_CATALOG_LIMIT = 200;
     const MARKET_QUOTE_PROBE_LIMIT = 200;
-    const SEMANTIC_MAP_DEFAULT_LIMIT = 200;
+    const SEMANTIC_MAP_DEFAULT_LIMIT = 500;
     const SEMANTIC_MAP_MAX_LIMIT = 500;
-    const SEMANTIC_RENDER_LEAF_LIMIT = 120;
+    const SEMANTIC_RENDER_LEAF_LIMIT = 500;
     const SEMANTIC_SEARCH_DEBOUNCE_MS = 300;
     const OPERATOR_LATENCY_BUDGET_MS = 30000;
     const FALLBACK_RESOLUTIONS = ['1S', '5S', '30S', '1', '5', '15', '60'];
@@ -1236,17 +1236,21 @@
             const displayLeaves = semanticRenderableLeaves(groups, SEMANTIC_RENDER_LEAF_LIMIT);
             const hiddenCount = Math.max(0, renderableLeaves.length - displayLeaves.length);
             dom.semanticMapState.textContent =
-                `${groups.length} segment(s) / ${displayLeaves.length} visible market tile(s)` +
+                `${displayLeaves.length} top market tile(s) across ${groups.length} segment(s)` +
                 `${hiddenCount > 0 ? ` / ${hiddenCount} hidden` : ''}` +
-                ` / grouped by ${groupBy} / color by recent quote activity` +
+                ` / weighted by open interest / color by recent quote activity` +
                 coverageSuffix;
-            renderSemanticGroupTiles(groups);
+            const fragment = document.createDocumentFragment();
+            for (const rect of layoutSemanticLeafTreemap(displayLeaves)) {
+                fragment.appendChild(createSemanticMarketTile(rect));
+            }
+            dom.semanticTreemap.appendChild(fragment);
             renderSemanticDetail(null);
             return;
         }
         const selectedGroups = activeGroup ? [activeGroup] : groups;
         const limit = mode === 'top_markets'
-            ? Math.min(60, SEMANTIC_RENDER_LEAF_LIMIT)
+            ? Math.min(500, SEMANTIC_RENDER_LEAF_LIMIT)
             : SEMANTIC_RENDER_LEAF_LIMIT;
         const renderableLeaves = semanticLeaves(selectedGroups).filter(leaf => leaf && leaf.market_ticker);
         const displayLeaves = semanticRenderableLeaves(selectedGroups, limit);

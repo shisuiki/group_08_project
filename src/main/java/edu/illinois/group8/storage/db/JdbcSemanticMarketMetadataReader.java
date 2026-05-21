@@ -65,7 +65,14 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             lms.best_bid_micros,
             lms.best_ask_micros,
             lms.midpoint_micros,
-            lms.open_interest,
+            coalesce(
+                lms.open_interest,
+                case
+                    when (mm.market_payload ->> 'open_interest_fp') ~ '^[0-9]+(\\.[0-9]+)?$'
+                        then round((mm.market_payload ->> 'open_interest_fp')::numeric)::bigint
+                    else null
+                end
+            ) as open_interest,
             lms.updated_at as latest_state_updated_at,
             case when lms.updated_at is null
                 then null
