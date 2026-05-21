@@ -1,3 +1,9 @@
+> **IE 421 Spring 2026 — Group 20.** This project builds on the Fall 2024
+> Group 08 Kalshi pipeline. Our team's final report is at
+> [docs/final_report.md](docs/final_report.md). The sections below are the
+> evolving technical README, updated for the current (Group 20) architecture.
+>
+> Group 20: Jakob Bachhausen · Xuanli Wang · Amish Prasad · Iven Guzel
 # Final Report
 
 ## Members
