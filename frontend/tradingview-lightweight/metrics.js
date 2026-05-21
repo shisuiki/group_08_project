@@ -1,0 +1,297 @@
+const REFRESH_MS = 3000;
+const REQUEST_TIMEOUT_MS = 5500;
+const LATENCY_BAR_MAX_MS = 1000;
+
+const PROMETHEUS_ROWS = [
+  ['frontend_adapter_symbols', 'Frontend symbols'],
+  ['frontend_adapter_features_total', 'Frontend feature rows'],
+  ['frontend_adapter_store_sequence', 'Frontend store sequence'],
+  ['frontend_adapter_quote_update_requests_total', 'Long-poll requests'],
+  ['frontend_adapter_quote_update_changed_total', 'Long-poll changed responses'],
+  ['frontend_adapter_quote_update_timeouts_total', 'Long-poll timeouts'],
+  ['frontend_adapter_quote_stream_requests_total', 'SSE stream requests'],
+  ['frontend_adapter_quote_stream_events_total', 'SSE events emitted'],
+  ['frontend_adapter_quote_stream_active', 'Active SSE streams']
+];
+
+function byId(id) {
+  return document.getElementById(id);
+}
+
+function setText(id, value) {
+  const element = byId(id);
+  if (element) {
+    element.textContent = value == null || value === '' ? '--' : String(value);
+  }
+}
+
+function setPill(id, value, status) {
+  const element = byId(id);
+  if (!element) {
+    return;
+  }
+  element.textContent = value == null || value === '' ? 'unknown' : String(value);
+  element.classList.remove('warn', 'bad', 'neutral');
+  if (status === 'bad') {
+    element.classList.add('bad');
+  } else if (status === 'warn') {
+    element.classList.add('warn');
+  } else if (status === 'neutral') {
+    element.classList.add('neutral');
+  }
+}
+
+function nested(source, path, fallback = null) {
+  let value = source;
+  for (const part of path) {
+    if (value == null || typeof value !== 'object' || !(part in value)) {
+      return fallback;
+    }
+    value = value[part];
+  }
+  return value == null ? fallback : value;
+}
+
+function asNumber(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatNumber(value, digits = 0) {
+  const number = asNumber(value);
+  if (number == null) {
+    return '--';
+  }
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits
+  }).format(number);
+}
+
+function formatRate(count, seconds) {
+  const value = asNumber(count);
+  const windowSeconds = Math.max(1, asNumber(seconds) || 1);
+  if (value == null) {
+    return '--/s';
+  }
+  const rate = value / windowSeconds;
+  return `${formatNumber(rate, rate >= 10 ? 0 : 1)}/s`;
+}
+
+function formatMs(value) {
+  const number = asNumber(value);
+  if (number == null) {
+    return '--';
+  }
+  if (number >= 1000) {
+    return `${formatNumber(number / 1000, 2)}s`;
+  }
+  return `${formatNumber(number, 0)}ms`;
+}
+
+function formatAge(value) {
+  const number = asNumber(value);
+  if (number == null) {
+    return '--';
+  }
+  if (number < 1000) {
+    return `${formatNumber(number, 0)}ms`;
+  }
+  if (number < 60000) {
+    return `${formatNumber(number / 1000, 1)}s`;
+  }
+  return `${formatNumber(number / 60000, 1)}m`;
+}
+
+function statusClass(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'ok' || normalized === 'ready' || normalized === 'healthy' || normalized === 'completed') {
+    return 'ok';
+  }
+  if (normalized === 'stale' || normalized === 'degraded' || normalized === 'running') {
+    return 'warn';
+  }
+  if (normalized === 'disabled' || normalized === 'unknown') {
+    return 'neutral';
+  }
+  return normalized ? 'bad' : 'neutral';
+}
+
+async function fetchWithTimeout(path, accept) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(path, {
+      cache: 'no-store',
+      headers: { Accept: accept },
+      signal: controller.signal
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${response.status} ${text.slice(0, 120)}`);
+    }
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchJson(path) {
+  return JSON.parse(await fetchWithTimeout(path, 'application/json'));
+}
+
+async function fetchPrometheus() {
+  return fetchWithTimeout('/metrics?format=prometheus', 'text/plain');
+}
+
+function parsePrometheus(text) {
+  const rows = new Map();
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+    const match = trimmed.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([-+0-9.eE]+)$/);
+    if (!match) {
+      continue;
+    }
+    const name = match[1];
+    const value = Number(match[3]);
+    if (!rows.has(name) || !match[2]) {
+      rows.set(name, value);
+    }
+  }
+  return rows;
+}
+
+function renderPipeline(pipeline) {
+  const body = pipeline && pipeline.pipeline ? pipeline.pipeline : pipeline || {};
+  const windowSeconds = nested(body, ['recent_window_seconds'], 1);
+  setText('canonical-rate', formatRate(body.recent_canonical_events, windowSeconds));
+  setText('canonical-total', `${formatNumber(body.recent_canonical_events)} events in ${formatNumber(windowSeconds)}s`);
+  setText('feature-rate', formatRate(body.recent_feature_outputs, windowSeconds));
+  setText('feature-total', `${formatNumber(body.recent_feature_outputs)} outputs in ${formatNumber(windowSeconds)}s`);
+  setText('state-rate', formatRate(body.recent_latest_market_states, windowSeconds));
+  setText('state-total', `${formatNumber(body.recent_latest_market_states)} latest states in ${formatNumber(windowSeconds)}s`);
+  setText('cursor-lag', formatNumber(body.cursor_lag_events));
+  setText('latest-state-age', `latest state ${formatAge(body.latest_state_age_ms)}`);
+}
+
+function renderHealth(health, operator) {
+  const readiness = nested(operator, ['product_readiness', 'status'], nested(health, ['product_readiness', 'status'], 'unknown'));
+  const releaseSha = nested(operator, ['release', 'sha'], nested(health, ['release', 'sha'], 'unknown'));
+  const runtimeProfile = nested(operator, ['release', 'profile'], nested(health, ['release', 'profile'], nested(health, ['source_mode'], 'unknown')));
+  setText('product-status', readiness);
+  setText('release-sha', String(releaseSha || 'unknown').slice(0, 12));
+  setText('runtime-profile', runtimeProfile);
+  const dataAge = nested(operator, ['data_freshness', 'age_ms'], nested(health, ['data_freshness', 'age_ms'], null));
+  setText('data-age', formatAge(dataAge));
+  setText('data-source', nested(operator, ['data_freshness', 'source_event_id'], nested(health, ['data_freshness', 'source_event_id'], 'latest rendered event')));
+  const streamEvents = nested(health, ['quote_streams', 'events'], nested(operator, ['quote_streams', 'events'], null));
+  const activeStreams = nested(health, ['quote_streams', 'active_streams'], nested(operator, ['quote_streams', 'active_streams'], null));
+  const updateRequests = nested(health, ['quote_updates', 'requests'], nested(operator, ['quote_updates', 'requests'], null));
+  setText('stream-events', formatNumber(streamEvents));
+  setText('stream-active', `${formatNumber(activeStreams)} SSE active, ${formatNumber(updateRequests)} long-poll requests`);
+  const semanticGenerated = nested(operator, ['semantic_metadata', 'generated'], nested(health, ['semantic_metadata', 'generated'], null));
+  const semanticEligible = nested(operator, ['semantic_metadata', 'eligible_generated'], nested(health, ['semantic_metadata', 'eligible_generated'], null));
+  const semanticRun = nested(operator, ['semantic_metadata_run', 'latest_run', 'state'], nested(operator, ['semantic_metadata', 'status'], 'semantic run'));
+  setText('semantic-generated', semanticGenerated == null ? '--' : `${formatNumber(semanticGenerated)} / ${formatNumber(semanticEligible)}`);
+  setText('semantic-run', semanticRun);
+}
+
+function renderLatency(latency) {
+  const status = latency ? latency.status : 'unavailable';
+  setPill('latency-status', status, statusClass(status));
+  setText('e2e-latency', formatMs(latency && latency.canonical_to_latest_state_ms));
+  setText('latency-source', latency && latency.source_event_id ? latency.source_event_id : 'latest source event');
+  setLatencyBar('canonical-feature', latency && latency.canonical_to_feature_ms);
+  setLatencyBar('feature-state', latency && latency.feature_to_latest_state_ms);
+  setLatencyBar('canonical-state', latency && latency.canonical_to_latest_state_ms);
+}
+
+function setLatencyBar(prefix, value) {
+  const number = Math.max(0, asNumber(value) || 0);
+  const width = Math.min(100, (number / LATENCY_BAR_MAX_MS) * 100);
+  const bar = byId(`${prefix}-bar`);
+  if (bar) {
+    bar.style.width = `${width}%`;
+  }
+  setText(`${prefix}-ms`, formatMs(value));
+}
+
+function renderPrometheus(text) {
+  const rows = parsePrometheus(text);
+  const table = byId('prometheus-table');
+  if (!table) {
+    return;
+  }
+  table.innerHTML = '';
+  for (const [name, label] of PROMETHEUS_ROWS) {
+    const tr = document.createElement('tr');
+    const key = document.createElement('td');
+    const value = document.createElement('td');
+    key.textContent = label;
+    value.textContent = formatNumber(rows.get(name));
+    tr.append(key, value);
+    table.append(tr);
+  }
+  setPill('prometheus-status', 'ready', 'ok');
+}
+
+function renderRaw(snapshot) {
+  setText('last-refresh', new Date().toLocaleTimeString());
+  setPill('raw-status', 'ready', 'ok');
+  const raw = byId('raw-json');
+  if (raw) {
+    raw.textContent = JSON.stringify(snapshot, null, 2);
+  }
+}
+
+function renderError(error) {
+  setPill('raw-status', 'partial', 'warn');
+  setText('last-refresh', new Date().toLocaleTimeString());
+  const raw = byId('raw-json');
+  if (raw) {
+    raw.textContent = error && error.stack ? error.stack : String(error);
+  }
+}
+
+async function refresh() {
+  const results = await Promise.allSettled([
+    fetchJson('/ops/pipeline'),
+    fetchJson('/ops/latency'),
+    fetchJson('/health'),
+    fetchJson('/operator/status'),
+    fetchPrometheus()
+  ]);
+  const [pipeline, latency, health, operator, prometheus] = results.map((result) =>
+    result.status === 'fulfilled' ? result.value : null
+  );
+  try {
+    renderPipeline(pipeline);
+    renderLatency(latency || {});
+    renderHealth(health || {}, operator || {});
+    if (prometheus) {
+      renderPrometheus(prometheus);
+    } else {
+      setPill('prometheus-status', 'unavailable', 'warn');
+    }
+    renderRaw({
+      pipeline: pipeline,
+      latency: latency,
+      health: health,
+      operator_status: operator,
+      errors: results
+        .map((result, index) => result.status === 'rejected' ? `${index}: ${result.reason}` : null)
+        .filter(Boolean)
+    });
+  } catch (error) {
+    renderError(error);
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);

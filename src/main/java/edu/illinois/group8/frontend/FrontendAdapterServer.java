@@ -78,6 +78,9 @@ public class FrontendAdapterServer {
     private static final int DB_HISTORY_MAX_ROWS = 10_000;
     private static final Set<String> STATIC_ASSETS = Set.of(
         "index.html",
+        "metrics.html",
+        "metrics.js",
+        "metrics.css",
         "app.js",
         "styles.css",
         "vendor/lightweight-charts-4.2.0.standalone.production.js"
@@ -586,6 +589,9 @@ public class FrontendAdapterServer {
         bind("/api/semantic-metadata/markets", this::handleSemanticMetadataMarkets);
         bind("/api/semantic-metadata/treemap", this::handleSemanticMetadataTreemap);
         bind("/health", this::handleHealth);
+        bind("/metrics.html", this::handleStaticAsset);
+        bind("/metrics.js", this::handleStaticAsset);
+        bind("/metrics.css", this::handleStaticAsset);
         bind("/metrics", this::handleMetrics);
         bind("/ops/pipeline", this::handleOpsPipeline);
         bind("/ops/latency", this::handleOpsLatency);
@@ -1548,6 +1554,10 @@ public class FrontendAdapterServer {
     }
 
     private void handleMetrics(HttpExchange exchange) throws IOException {
+        if (!wantsRawPrometheusMetrics(exchange) && wantsMetricsDashboard(exchange)) {
+            serveStaticAsset(exchange, "metrics.html");
+            return;
+        }
         metrics.setGauge("frontend_adapter_symbols", store.symbolCount());
         metrics.setGauge("frontend_adapter_features_total", store.totalAccepted());
         metrics.setGauge("frontend_adapter_store_sequence", store.sequence());
@@ -1613,6 +1623,27 @@ public class FrontendAdapterServer {
         write(exchange, 200, "text/plain; charset=utf-8", body.toString());
     }
 
+    private static boolean wantsMetricsDashboard(HttpExchange exchange) {
+        String accept = exchange.getRequestHeaders().getFirst("Accept");
+        if (accept == null || accept.isBlank()) {
+            return false;
+        }
+        String normalized = accept.toLowerCase(Locale.ROOT);
+        return normalized.contains("text/html")
+            && !normalized.contains("text/plain")
+            && !normalized.contains("openmetrics");
+    }
+
+    private static boolean wantsRawPrometheusMetrics(HttpExchange exchange) {
+        Map<String, String> params = parseQuery(exchange.getRequestURI());
+        String format = params.getOrDefault("format", "");
+        String raw = params.getOrDefault("raw", "");
+        return "prometheus".equalsIgnoreCase(format)
+            || "text".equalsIgnoreCase(format)
+            || "1".equals(raw)
+            || "true".equalsIgnoreCase(raw);
+    }
+
     private void handleStaticAsset(HttpExchange exchange) throws IOException {
         String rawPath = exchange.getRequestURI().getRawPath();
         String path;
@@ -1637,7 +1668,10 @@ public class FrontendAdapterServer {
             writeError(exchange, 404, "static asset not found");
             return;
         }
+        serveStaticAsset(exchange, assetName);
+    }
 
+    private void serveStaticAsset(HttpExchange exchange, String assetName) throws IOException {
         Path root = config.staticRoot().toAbsolutePath().normalize();
         Path file = root.resolve(assetName).normalize();
         if (!file.startsWith(root) || !Files.isRegularFile(file)) {

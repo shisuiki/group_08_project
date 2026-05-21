@@ -564,14 +564,29 @@ class UdfEndpointsTest {
         HttpResponse<String> js = get("/app.js");
         HttpResponse<String> css = get("/styles.css");
         HttpResponse<String> chart = get("/vendor/lightweight-charts-4.2.0.standalone.production.js");
+        HttpResponse<String> metricsHtml = get("/metrics.html");
+        HttpResponse<String> metricsJs = get("/metrics.js");
+        HttpResponse<String> metricsCss = get("/metrics.css");
 
         assertEquals(200, js.statusCode());
         assertEquals(200, css.statusCode());
         assertEquals(200, chart.statusCode());
+        assertEquals(200, metricsHtml.statusCode());
+        assertEquals(200, metricsJs.statusCode());
+        assertEquals(200, metricsCss.statusCode());
         assertTrue(js.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(css.headers().firstValue("content-type").orElse("").contains("text/css"));
         assertTrue(chart.headers().firstValue("content-type").orElse("").contains("text/javascript"));
+        assertTrue(metricsHtml.headers().firstValue("content-type").orElse("").contains("text/html"));
+        assertTrue(metricsJs.headers().firstValue("content-type").orElse("").contains("text/javascript"));
+        assertTrue(metricsCss.headers().firstValue("content-type").orElse("").contains("text/css"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
+        assertTrue(metricsHtml.body().contains("Kalshi Ops Metrics"));
+        assertTrue(metricsHtml.body().contains("metrics.js"));
+        assertTrue(metricsJs.body().contains("/ops/pipeline"));
+        assertTrue(metricsJs.body().contains("/ops/latency"));
+        assertTrue(metricsJs.body().contains("/metrics?format=prometheus"));
+        assertTrue(metricsCss.body().contains(".metric-grid"));
         assertTrue(js.body().contains("const MARKET_CATALOG_LIMIT = 200;"));
         assertTrue(js.body().contains("marketCatalogGeneration"));
         assertTrue(js.body().contains("marketCatalogAbortController"));
@@ -2583,6 +2598,32 @@ class UdfEndpointsTest {
         assertTrue(body.contains("frontend_adapter_http_requests_total{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_sum{path=\"/symbols\"}"));
         assertTrue(body.contains("frontend_adapter_http_request_duration_seconds_count{path=\"/symbols\"}"));
+    }
+
+    @Test
+    void metricsServesDashboardForBrowserAcceptAndRawPrometheusForFormat() throws Exception {
+        HttpResponse<String> dashboard = client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + "/metrics"))
+                .header("Accept", "text/html")
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+        assertEquals(200, dashboard.statusCode());
+        assertTrue(dashboard.headers().firstValue("content-type").orElse("").contains("text/html"));
+        assertTrue(dashboard.body().contains("Kalshi Ops Metrics"));
+        assertTrue(dashboard.body().contains("metrics.js"));
+
+        HttpResponse<String> raw = client.send(
+            HttpRequest.newBuilder(URI.create(baseUrl + "/metrics?format=prometheus"))
+                .header("Accept", "text/html")
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+        assertEquals(200, raw.statusCode());
+        assertTrue(raw.headers().firstValue("content-type").orElse("").contains("text/plain"));
+        assertTrue(raw.body().contains("frontend_adapter_symbols"));
     }
 
     @Test
