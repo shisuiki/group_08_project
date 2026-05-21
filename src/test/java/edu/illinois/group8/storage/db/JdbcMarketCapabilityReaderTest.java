@@ -132,11 +132,60 @@ class JdbcMarketCapabilityReaderTest {
 
     @Test
     void supportsQuoteAndSemanticCapabilityFilters() {
+        assertSqlFilter("chart_ready", "and chartable");
         assertSqlFilter("quote_available", "and has_quote");
+        assertSqlFilter("quote_only", "and has_quote and not chartable");
         assertSqlFilter("quote_stale", "quote_status = 'stale_quote'");
         assertSqlFilter("metadata_only", "and not chartable");
         assertSqlFilter("semantic_tagged", "semantic_status <> 'missing'");
         assertSqlFilter("unclassified", "semantic_status = 'missing'");
+    }
+
+    @Test
+    void capabilityFiltersDoNotJoinPredicateTokensWithOrderBy() {
+        for (String filter : List.of(
+            "chart_ready",
+            "quote_available",
+            "quote_only",
+            "quote_stale",
+            "metadata_only",
+            "semantic_tagged",
+            "unclassified"
+        )) {
+            List<Object> bindings = new ArrayList<>();
+            String sql = JdbcMarketCapabilityReader.pageSql(new MarketCapabilityReadRequest(
+                null,
+                null,
+                filter,
+                5,
+                0,
+                "v1",
+                false
+            ), bindings).toLowerCase(Locale.ROOT);
+            String normalizedSql = sql.replaceAll("\\s+", " ");
+
+            assertTrue(sql.contains("order by"), filter + " SQL must include ordering");
+            assertTrue(normalizedSql.contains(expectedPredicate(filter) + " order by"), filter);
+            assertEquals(-1, sql.indexOf("chartableorder"), filter);
+            assertEquals(-1, sql.indexOf("has_quoteorder"), filter);
+            assertEquals(-1, sql.indexOf("semantic_statusorder"), filter);
+            assertEquals(-1, sql.indexOf("'missing'order"), filter);
+            assertEquals(-1, sql.indexOf("'stale_quote'order"), filter);
+        }
+    }
+
+    private static String expectedPredicate(String filter) {
+        return switch (filter) {
+            case "chart_ready" -> "and chartable";
+            case "quote_available" -> "and has_quote";
+            case "quote_only" -> "and has_quote and not chartable";
+            case "quote_stale" -> "and quote_status = 'stale_quote'";
+            case "metadata_only" -> "and catalog_source = 'market_metadata' and not has_quote "
+                + "and not chartable and feature_count = 0";
+            case "semantic_tagged" -> "and semantic_status <> 'missing'";
+            case "unclassified" -> "and semantic_status = 'missing'";
+            default -> throw new IllegalArgumentException(filter);
+        };
     }
 
     @Test

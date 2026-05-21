@@ -366,18 +366,18 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
         switch (request.capabilityFilter()) {
             case "all" -> {
             }
-            case "chart_ready" -> sql.append(" and chartable");
-            case "quote_available" -> sql.append(" and has_quote");
-            case "quote_only" -> sql.append(" and has_quote and not chartable");
-            case "quote_stale" -> sql.append(" and quote_status = 'stale_quote'");
+            case "chart_ready" -> sql.append(" and chartable\n");
+            case "quote_available" -> sql.append(" and has_quote\n");
+            case "quote_only" -> sql.append(" and has_quote and not chartable\n");
+            case "quote_stale" -> sql.append(" and quote_status = 'stale_quote'\n");
             case "metadata_only" -> sql.append("""
                  and catalog_source = 'market_metadata'
                  and not has_quote
                  and not chartable
                  and feature_count = 0
                 """);
-            case "semantic_tagged" -> sql.append(" and semantic_status <> 'missing'");
-            case "unclassified" -> sql.append(" and semantic_status = 'missing'");
+            case "semantic_tagged" -> sql.append(" and semantic_status <> 'missing'\n");
+            case "unclassified" -> sql.append(" and semantic_status = 'missing'\n");
             default -> throw new IllegalArgumentException("Unsupported capability filter: " + request.capabilityFilter());
         }
     }
