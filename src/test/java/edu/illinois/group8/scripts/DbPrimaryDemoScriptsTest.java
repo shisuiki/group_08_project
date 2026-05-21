@@ -297,6 +297,71 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void liveProductRehearsalLauncherStartsIsolatedLocalDbStackAndRedactsEvidence() throws Exception {
+        String script = read("scripts/live-product-rehearsal-up.sh");
+
+        assertTrue(script.contains("PROJECT_PREFIX=\"${LIVE_PRODUCT_REHEARSAL_PROJECT_PREFIX:-kalshi_live_product_rehearsal}\""));
+        assertTrue(script.contains("LIVE_PRODUCT_REHEARSAL_PROJECT_NAME"));
+        assertTrue(script.contains("compose_profile=\"${COMPOSE_PROFILE:-live-product-local-db}\""));
+        assertTrue(script.contains("live rehearsal requires COMPOSE_PROFILE=live-product-local-db"));
+        assertTrue(script.contains("choose_free_port()"));
+        assertTrue(script.contains("choose_free_port_range()"));
+        assertTrue(script.contains("choose_cluster_subnet()"));
+        assertTrue(script.contains("derive_cluster_ip_range()"));
+        assertTrue(script.contains("cluster_ips_from_subnet()"));
+        assertTrue(script.contains("COMPOSE_HOST_BIND_IP=127.0.0.1"));
+        assertTrue(script.contains("CLUSTER_ADDRESSES=\"$CLUSTER_ADDRESSES\""));
+        assertTrue(script.contains("CLUSTER_NODE0_IP=\"$CLUSTER_NODE0_IP\""));
+        assertTrue(script.contains("WSCLIENT_IP=\"$WSCLIENT_IP\""));
+        assertTrue(script.contains("POSTGRES_HOST_PORT=\"$postgres_port\""));
+        assertTrue(script.contains("DB_PRIMARY_PRODUCT_FRONTEND_HOST_PORT=\"$frontend_port\""));
+        assertTrue(script.contains("FEATUREPLANT_METRICS_HOST_PORT=\"$featureplant_port\""));
+        assertTrue(script.contains("WSCLIENT_METRICS_HOST_PORT=\"$wsclient_port\""));
+        assertTrue(script.contains("STREAM_TAP_HOST_PORT=\"$streamtap_port\""));
+        assertTrue(script.contains("KALSHI_KEY_HOST_PATH"));
+        assertTrue(script.contains("require_readable_file KALSHI_KEY_HOST_PATH"));
+        assertTrue(script.contains("KALSHI_MARKET_DISCOVERY_MAX_MARKETS:-3"));
+        assertTrue(script.contains("KALSHI_MARKET_DISCOVERY_LIMIT:-50"));
+        assertTrue(script.contains("market_selection_mode=\"${KALSHI_MARKET_SELECTION_MODE:-open}\""));
+        assertTrue(script.contains("DB_WRITER_ENABLED=\"${DB_WRITER_ENABLED:-true}\""));
+        assertTrue(script.contains("FRONTEND_ADAPTER_FEATURE_SOURCE=\"${FRONTEND_ADAPTER_FEATURE_SOURCE:-latest_market_state}\""));
+        assertTrue(script.contains("FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED=\"${FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED:-true}\""));
+        assertTrue(script.contains("BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_ENABLED=\"${BACKEND_ORDERBOOK_RECOVERY_GAP_CONSUMER_ENABLED:-false}\""));
+        assertTrue(script.contains("docker_compose --profile \"$compose_profile\" up -d --build"));
+        assertTrue(script.contains("scripts/product-demo-live-preflight-smoke.sh"));
+        assertTrue(script.contains("PRODUCT_DEMO_LIVE_PREFLIGHT_SMOKE=\"${PRODUCT_DEMO_LIVE_PREFLIGHT_SMOKE:-true}\""));
+        assertTrue(script.contains("PRODUCT_DEMO_LIVE_PREFLIGHT_S3_SMOKE=\"${PRODUCT_DEMO_LIVE_PREFLIGHT_S3_SMOKE:-false}\""));
+        assertTrue(script.contains("scripts/live-product-smoke.sh"));
+        assertTrue(script.contains("LIVE_PRODUCT_SMOKE_REQUIRE_LIVE_DATA=true"));
+        assertTrue(script.contains("FRONTEND_BROWSER_SMOKE_EVIDENCE_FILE=\"$browser_evidence_file\""));
+        assertTrue(script.contains("FRONTEND_BROWSER_SMOKE_DOM_FILE=\"$browser_dom_file\""));
+        assertTrue(script.contains("FRONTEND_BROWSER_SMOKE_SCREENSHOT_FILE=\"$browser_screenshot_file\""));
+        assertTrue(script.contains("raw_log_dir=\"$(mktemp -d"));
+        assertTrue(script.contains("redact_log()"));
+        assertTrue(script.contains("common_env scripts/live-product-smoke.sh > \"$raw_smoke_stdout\" 2> \"$raw_smoke_stderr\""));
+        assertTrue(script.contains("redact_log \"$raw_smoke_stdout\" \"$smoke_stdout\""));
+        assertTrue(script.contains("\"evidence_type\": \"live_product_rehearsal\""));
+        assertTrue(script.contains("\"compose_profile\": compose_profile"));
+        assertTrue(script.contains("\"dashboard_url\": dashboard_url"));
+        assertTrue(script.contains("\"health_urls\""));
+        assertTrue(script.contains("\"market_selection\""));
+        assertTrue(script.contains("\"key_path\": \"<redacted>\""));
+        assertTrue(script.contains("\"live_data_observed\": live_data_observed"));
+        assertTrue(script.contains("\"require_live_data\": require_live_data"));
+        assertTrue(script.contains("\"smoke_stdout_path\": smoke_log"));
+        assertTrue(script.contains("\"cleanup_command\": f\"scripts/live-product-rehearsal-up.sh --down {final_evidence_path}\""));
+        assertTrue(script.contains("print_redacted_log()"));
+        assertTrue(script.contains("\"PRIVATE KEY\""));
+        assertTrue(script.contains("COMPOSE_PROJECT_NAME=\"$project\" docker_compose --profile \"$compose_profile\" down --remove-orphans -v"));
+        assertTrue(script.contains("PASS live_product_rehearsal project=%s dashboard_url=%s evidence=%s live_data_required=true"));
+        assertTrue(script.contains("PASS live_product_rehearsal_down project=%s profile=%s"));
+        assertFalse(script.contains("\"KALSHI_KEY_ID\":"));
+        assertFalse(script.contains("\"KALSHI_KEY_HOST_PATH\":"));
+        assertFalse(script.contains("\"DB_WRITER_DATABASE_PASSWORD\":"));
+        assertFalse(script.contains("\"FRONTEND_ADAPTER_DB_PASSWORD\":"));
+    }
+
+    @Test
     void liveProductSmokeAssumesRunningStackAndChecksFeatureOutputsPath() throws Exception {
         String script = read("scripts/live-product-smoke.sh");
         String probe = read("src/main/java/edu/illinois/group8/storage/db/LiveProductSmokeDbProbe.java");
