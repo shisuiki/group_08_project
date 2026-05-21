@@ -8,7 +8,8 @@
     const QUOTES_UPDATE_RETRY_MS = 500;
     const HEALTH_POLL_MS = 5000;
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
-    const MARKET_CATALOG_LIMIT = 200;
+    const MARKET_CATALOG_LIMIT = 5000;
+    const MARKET_QUOTE_PROBE_LIMIT = 200;
     const SEMANTIC_MAP_DEFAULT_LIMIT = 200;
     const SEMANTIC_MAP_MAX_LIMIT = 500;
     const SEMANTIC_RENDER_LEAF_LIMIT = 120;
@@ -283,6 +284,7 @@
     let quoteSequence = null;
     let quoteUpdateErrors = 0;
     let marketEntries = [];
+    let marketCatalogTotal = 0;
     let marketSearchTimer = null;
     let semanticSearchTimer = null;
     let semanticMapGeneration = 0;
@@ -413,6 +415,7 @@
             const markets = await fetchJson('/markets?' + params.join('&'));
             if (markets && Array.isArray(markets.markets) && markets.markets.length > 0) {
                 const entries = markets.markets.map(mapCatalogMarketRow).filter(row => row.symbol);
+                marketCatalogTotal = Number(markets.total_count || markets.count || entries.length) || entries.length;
                 return prioritizeQuotedMarkets(await mergeLatestStateMarkets(entries, query, status));
             }
             if (filtered) {
@@ -431,6 +434,7 @@
         }
         const symbols = await fetchJson('/symbols');
         const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
+        marketCatalogTotal = rows.length;
         return sortMarketEntries(rows.map(mapLatestStateSymbolRow).filter(row => row.symbol));
     }
 
@@ -445,6 +449,7 @@
             quoteEventTsMs: null,
             hasQuote: false,
             sourceKind: row.source_kind || '-',
+            catalogSource: row.catalog_source || 'catalog',
             synthetic: row.synthetic === true
         };
     }
@@ -462,6 +467,7 @@
             quoteEventTsMs: hasQuote ? eventTsMs : null,
             hasQuote,
             sourceKind: row.source_kind || '-',
+            catalogSource: 'latest_state',
             synthetic: row.synthetic === true
         };
     }
@@ -490,6 +496,7 @@
                 current.quoteEventTsMs = latest.quoteEventTsMs;
                 current.hasQuote = latest.hasQuote;
                 current.sourceKind = latest.sourceKind;
+                current.catalogSource = current.catalogSource || latest.catalogSource;
                 current.synthetic = latest.synthetic;
             }
             return sortMarketEntries(Array.from(merged.values()));
@@ -520,7 +527,7 @@
             return entries;
         }
         const base = adapterBase();
-        const symbols = entries.slice(0, MARKET_CATALOG_LIMIT).map(entry => entry.symbol);
+        const symbols = entries.slice(0, MARKET_QUOTE_PROBE_LIMIT).map(entry => entry.symbol);
         try {
             const body = await fetchJsonFromBase(
                 base,
@@ -574,7 +581,9 @@
     }
 
     function renderMarketCatalog(entries) {
-        dom.marketCount.textContent = String(entries.length);
+        dom.marketCount.textContent = marketCatalogTotal > entries.length
+            ? `${entries.length}/${marketCatalogTotal}`
+            : String(entries.length);
         dom.marketList.innerHTML = '';
         if (entries.length === 0) {
             dom.marketState.textContent = hasMarketFilter()
@@ -593,7 +602,9 @@
         }
         dom.marketState.textContent = filters.length
             ? `${entries.length} market(s) for ${filters.join(' / ')}`
-            : `${entries.length} market(s)`;
+            : marketCatalogTotal > entries.length
+                ? `${entries.length} of ${marketCatalogTotal} asset(s)`
+                : `${entries.length} asset(s)`;
         for (const entry of entries) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -613,7 +624,7 @@
     function marketCatalogStatusText(entry) {
         const status = entry.status || '-';
         if (!entry.hasQuote) {
-            return status;
+            return entry.catalogSource ? `${status} / ${entry.catalogSource}` : status;
         }
         const age = entry.quoteEventTsMs == null ? '' : ` / ${formatAge(Date.now() - entry.quoteEventTsMs)}`;
         return `${status} / live quote${age}`;

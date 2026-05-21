@@ -69,6 +69,19 @@ public final class FrontendMarketMetadataCatalog {
         return byTicker.size();
     }
 
+    public int count(String query, String status, boolean includeSmoke) {
+        String normalizedQuery = normalize(query);
+        String normalizedStatus = normalize(status);
+        int count = 0;
+        for (MarketMetadata row : byTicker.values()) {
+            if (!matches(row, normalizedQuery, normalizedStatus, includeSmoke)) {
+                continue;
+            }
+            count++;
+        }
+        return count;
+    }
+
     public Optional<MarketMetadata> find(String marketTicker) {
         if (marketTicker == null || marketTicker.isBlank()) {
             return Optional.empty();
@@ -89,13 +102,7 @@ public final class FrontendMarketMetadataCatalog {
             .sorted(Comparator.comparing(MarketMetadata::marketTicker))
             .toList();
         for (MarketMetadata row : rows) {
-            if (!includeSmoke && FrontendSyntheticData.isSmoke(row)) {
-                continue;
-            }
-            if (normalizedStatus != null && !normalizedStatus.equalsIgnoreCase(nullToEmpty(row.status()))) {
-                continue;
-            }
-            if (normalizedQuery != null && !matchesQuery(row, normalizedQuery)) {
+            if (!matches(row, normalizedQuery, normalizedStatus, includeSmoke)) {
                 continue;
             }
             matches.add(row);
@@ -104,6 +111,21 @@ public final class FrontendMarketMetadataCatalog {
             }
         }
         return List.copyOf(matches);
+    }
+
+    private static boolean matches(
+        MarketMetadata row,
+        String normalizedQuery,
+        String normalizedStatus,
+        boolean includeSmoke
+    ) {
+        if (!includeSmoke && FrontendSyntheticData.isSmoke(row)) {
+            return false;
+        }
+        if (normalizedStatus != null && !normalizedStatus.equalsIgnoreCase(nullToEmpty(row.status()))) {
+            return false;
+        }
+        return normalizedQuery == null || matchesQuery(row, normalizedQuery);
     }
 
     private static boolean matchesQuery(MarketMetadata row, String query) {

@@ -19,7 +19,7 @@ import edu.illinois.group8.storage.db.JdbcCanonicalEventReader;
 import edu.illinois.group8.storage.db.JdbcConnectionFactories;
 import edu.illinois.group8.storage.db.JdbcFeatureOutputReader;
 import edu.illinois.group8.storage.db.JdbcLatestMarketStateReader;
-import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcMarketAssetCatalogReader;
 import edu.illinois.group8.storage.db.JdbcOperatorLatencyReader;
 import edu.illinois.group8.storage.db.JdbcOperatorPipelineStatusReader;
 import edu.illinois.group8.storage.db.JdbcOperatorSemanticMetadataStatusReader;
@@ -332,7 +332,7 @@ public final class FrontendAdapterMain {
                     + "FRONTEND_ADAPTER_METADATA_SOURCE=db"
             );
         }
-        return JdbcMarketMetadataReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+        return JdbcMarketAssetCatalogReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
     }
 
     private static void feedLoop(FeaturePlantService service, FrontendAdapterConfig config, AtomicBoolean running) {

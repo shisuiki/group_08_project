@@ -8,7 +8,7 @@ import com.sun.net.httpserver.HttpServer;
 import edu.illinois.group8.canonical.JsonCanonicalSerializer;
 import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.metrics.BackendMetrics;
-import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcMarketAssetCatalogReader;
 import edu.illinois.group8.storage.db.JdbcReplayDemoStatusReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
@@ -52,7 +52,7 @@ public class FrontendAdapterServer {
     private static final int DEFAULT_FEATURE_LIMIT = 100;
     private static final int MAX_FEATURE_LIMIT = 500;
     private static final int DEFAULT_MARKET_LIMIT = 100;
-    private static final int MAX_MARKET_LIMIT = 500;
+    private static final int MAX_MARKET_LIMIT = 20_000;
     private static final int DEFAULT_SEMANTIC_MARKET_LIMIT = 200;
     private static final int MAX_SEMANTIC_MARKET_LIMIT = 500;
     private static final List<String> SEMANTIC_METADATA_ENDPOINTS = List.of(
@@ -939,6 +939,8 @@ public class FrontendAdapterServer {
             .toList();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("count", markets.size());
+        body.put("total_count", metadataCatalog.count(query, status, includeSmoke));
+        body.put("catalog_source", metadataCatalog.source());
         body.put("markets", markets);
         writeJson(exchange, 200, body);
     }
@@ -1310,8 +1312,8 @@ public class FrontendAdapterServer {
             return;
         }
         try {
-            JdbcMarketMetadataReader reader =
-                JdbcMarketMetadataReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
+            JdbcMarketAssetCatalogReader reader =
+                JdbcMarketAssetCatalogReader.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
             List<MarketMetadata> rows =
                 reader.read(MarketMetadataReadRequest.search(null, null, config.metadataMaxRows()));
             metadataCatalog = FrontendMarketMetadataCatalog.loaded("db", rows);
@@ -1943,8 +1945,16 @@ public class FrontendAdapterServer {
         body.put("settlement_time", metadata.settlementTime() == null ? null : metadata.settlementTime().toString());
         String sourceKind = FrontendSyntheticData.sourceKind(metadata);
         body.put("source_kind", sourceKind);
+        body.put("catalog_source", isFeatureOnlyCatalogEntry(metadata) ? "feature_outputs" : "market_metadata");
         body.put("synthetic", FrontendSyntheticData.isSynthetic(sourceKind));
         return body;
+    }
+
+    private static boolean isFeatureOnlyCatalogEntry(MarketMetadata metadata) {
+        return metadata != null
+            && "indexed".equalsIgnoreCase(metadata.status())
+            && metadata.eventTicker() == null
+            && metadata.seriesTicker() == null;
     }
 
     private static Map<String, Object> searchEntry(MarketMetadata metadata) {

@@ -156,6 +156,7 @@ class UdfEndpointsTest {
         JsonNode body = getJson("/markets?status=closed&limit=10");
 
         assertEquals(1, body.path("count").asInt());
+        assertEquals(1, body.path("total_count").asInt());
         JsonNode market = body.path("markets").get(0);
         assertEquals("MKT-META", market.path("market_ticker").asText());
         assertEquals("EVENT-META", market.path("event_ticker").asText());

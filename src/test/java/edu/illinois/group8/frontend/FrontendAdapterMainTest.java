@@ -6,7 +6,7 @@ import edu.illinois.group8.feature.FeatureOutput;
 import edu.illinois.group8.feature.RecordingCanonicalEnvelopeSource;
 import edu.illinois.group8.storage.db.FeatureOutputReadRequest;
 import edu.illinois.group8.storage.db.FeatureOutputRow;
-import edu.illinois.group8.storage.db.JdbcMarketMetadataReader;
+import edu.illinois.group8.storage.db.JdbcMarketAssetCatalogReader;
 import edu.illinois.group8.storage.db.JdbcSemanticMarketMetadataReader;
 import edu.illinois.group8.storage.db.MarketMetadata;
 import edu.illinois.group8.storage.db.MarketMetadataReadRequest;
@@ -363,7 +363,7 @@ class FrontendAdapterMainTest {
             "FRONTEND_ADAPTER_DB_URL", "jdbc:postgresql://unused/kalshi"
         ));
 
-        assertInstanceOf(JdbcMarketMetadataReader.class, FrontendAdapterMain.buildMarketMetadataReader(config));
+        assertInstanceOf(JdbcMarketAssetCatalogReader.class, FrontendAdapterMain.buildMarketMetadataReader(config));
     }
 
     @Test

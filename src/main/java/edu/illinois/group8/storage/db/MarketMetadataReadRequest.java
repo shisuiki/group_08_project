@@ -8,7 +8,7 @@ public record MarketMetadataReadRequest(
     String excludeGeneratedTaxonomyVersion
 ) {
     public static final int DEFAULT_MAX_ROWS = 100;
-    public static final int MAX_ROWS = 1_000;
+    public static final int MAX_ROWS = 200_000;
 
     public MarketMetadataReadRequest {
         marketTicker = normalize(marketTicker);

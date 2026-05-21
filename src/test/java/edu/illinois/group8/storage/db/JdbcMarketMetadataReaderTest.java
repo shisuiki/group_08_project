@@ -95,7 +95,7 @@ class JdbcMarketMetadataReaderTest {
         RecordingJdbc jdbc = new RecordingJdbc(List.of());
         JdbcMarketMetadataReader reader = new JdbcMarketMetadataReader(jdbc::openConnection);
 
-        reader.read(MarketMetadataReadRequest.search("SERIES-1", "open", 50_000));
+        reader.read(MarketMetadataReadRequest.search("SERIES-1", "open", 500_000));
 
         String sql = jdbc.preparedSql.toLowerCase(Locale.ROOT);
         assertTrue(sql.contains("series_ticker = ?"));
