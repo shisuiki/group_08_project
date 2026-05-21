@@ -1320,11 +1320,13 @@
             targetGroup.value += Math.max(1, Number(leaf.value || 0));
         }
         const sourceGroups = Array.from(sourceGroupsByKey.values()).filter(group => group.count > 0);
+        const groupBounds = semanticLayoutBounds(4 / 3);
         const groupRects = squarifiedTreemap(
             sourceGroups.map(group => ({ item: group, value: group.value })),
-            { x: 0, y: 0, width: 100, height: 100 },
+            groupBounds,
         );
-        for (const groupRect of groupRects) {
+        for (const rawGroupRect of groupRects) {
+            const groupRect = semanticPercentRect(rawGroupRect, groupBounds);
             const group = groupRect.item;
             const region = document.createElement('section');
             region.className = 'semantic-group-region';
@@ -1346,7 +1348,8 @@
             region.appendChild(label);
             const leafLayer = document.createElement('div');
             leafLayer.className = 'semantic-group-leaves';
-            for (const childRect of layoutSemanticLeafTreemap(group.leaves)) {
+            const leafAspect = Math.max(0.25, Math.min(4, rawGroupRect.width / Math.max(1, rawGroupRect.height)));
+            for (const childRect of layoutSemanticLeafTreemap(group.leaves, leafAspect)) {
                 leafLayer.appendChild(createSemanticMarketTile(childRect));
             }
             region.appendChild(leafLayer);
@@ -1398,19 +1401,31 @@
         return leaves.slice(0, limit);
     }
 
-    function layoutSemanticLeafTreemap(leaves) {
+    function layoutSemanticLeafTreemap(leaves, aspectRatio = 4 / 3) {
+        const bounds = semanticLayoutBounds(aspectRatio);
         const rects = squarifiedTreemap(
             leaves.map(leaf => ({ item: leaf, value: Math.max(1, Number(leaf.value || 0)) })),
-            { x: 0, y: 0, width: 100, height: 100 },
-        ).map(rect => ({
+            bounds,
+        ).map(rect => Object.assign(semanticPercentRect(rect, bounds), {
             groupKey: rect.item.group_key || 'unknown',
-            leaf: rect.item,
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height
+            leaf: rect.item
         }));
         return rects;
+    }
+
+    function semanticLayoutBounds(aspectRatio) {
+        const ratio = Math.max(0.25, Math.min(4, Number(aspectRatio) || 1));
+        return { x: 0, y: 0, width: 100, height: 100 / ratio };
+    }
+
+    function semanticPercentRect(rect, bounds) {
+        return {
+            item: rect.item,
+            x: (rect.x - bounds.x) / bounds.width * 100,
+            y: (rect.y - bounds.y) / bounds.height * 100,
+            width: rect.width / bounds.width * 100,
+            height: rect.height / bounds.height * 100
+        };
     }
 
     function semanticGroupTileColor(group) {
@@ -1429,56 +1444,92 @@
         if (items.length === 0) {
             return [];
         }
+        const area = Math.max(0, rect.width * rect.height);
+        const total = items.reduce((sum, item) => sum + Math.max(0, Number(item.value || 0)), 0);
+        if (area <= 0 || total <= 0) {
+            return [];
+        }
         const sorted = items
             .map(item => ({
                 item: item.item,
-                value: Math.max(1, Number(item.value || 0))
+                value: Math.max(0, Number(item.value || 0)) / total * area
             }))
+            .filter(item => item.value > 0)
             .sort((a, b) => b.value - a.value);
-        return binaryTreemap(sorted, rect);
-    }
-
-    function binaryTreemap(items, rect) {
-        if (items.length === 0 || rect.width <= 0 || rect.height <= 0) {
-            return [];
-        }
-        if (items.length === 1) {
-            return [{ item: items[0].item, x: rect.x, y: rect.y, width: rect.width, height: rect.height }];
-        }
-        const total = items.reduce((sum, item) => sum + item.value, 0);
-        let running = 0;
-        let split = 1;
-        for (let index = 0; index < items.length - 1; index++) {
-            const next = running + items[index].value;
-            if (Math.abs(total / 2 - next) <= Math.abs(total / 2 - running)) {
-                running = next;
-                split = index + 1;
-            } else if (index > 0) {
-                break;
+        const output = [];
+        const row = [];
+        const remaining = Object.assign({}, rect);
+        while (sorted.length > 0) {
+            const next = sorted[0];
+            const side = Math.max(1, Math.min(remaining.width, remaining.height));
+            if (row.length === 0 || treemapWorst(row.concat(next), side) <= treemapWorst(row, side)) {
+                row.push(next);
+                sorted.shift();
+            } else {
+                layoutTreemapRow(row.splice(0, row.length), remaining, output);
             }
         }
-        const first = items.slice(0, split);
-        const second = items.slice(split);
-        const firstValue = first.reduce((sum, item) => sum + item.value, 0);
-        const ratio = Math.max(0.05, Math.min(0.95, firstValue / Math.max(1, total)));
-        if (rect.width >= rect.height) {
-            const firstWidth = rect.width * ratio;
-            return binaryTreemap(first, { x: rect.x, y: rect.y, width: firstWidth, height: rect.height })
-                .concat(binaryTreemap(second, {
-                    x: rect.x + firstWidth,
-                    y: rect.y,
-                    width: Math.max(0, rect.width - firstWidth),
-                    height: rect.height
-                }));
+        if (row.length > 0) {
+            layoutTreemapRow(row, remaining, output);
         }
-        const firstHeight = rect.height * ratio;
-        return binaryTreemap(first, { x: rect.x, y: rect.y, width: rect.width, height: firstHeight })
-            .concat(binaryTreemap(second, {
-                x: rect.x,
-                y: rect.y + firstHeight,
-                width: rect.width,
-                height: Math.max(0, rect.height - firstHeight)
-            }));
+        return output;
+    }
+
+    function treemapWorst(row, side) {
+        if (row.length === 0) {
+            return Infinity;
+        }
+        const values = row.map(item => item.value);
+        const sum = values.reduce((total, value) => total + value, 0);
+        const min = Math.max(0.0001, Math.min(...values));
+        const max = Math.max(...values);
+        const sideSquared = side * side;
+        const sumSquared = sum * sum;
+        return Math.max(sideSquared * max / sumSquared, sumSquared / (sideSquared * min));
+    }
+
+    function layoutTreemapRow(row, rect, output) {
+        if (row.length === 0 || rect.width <= 0 || rect.height <= 0) {
+            return;
+        }
+        const rowArea = row.reduce((sum, item) => sum + item.value, 0);
+        if (rect.width >= rect.height) {
+            const rowHeight = Math.min(rect.height, rowArea / Math.max(1, rect.width));
+            let x = rect.x;
+            for (const item of row) {
+                const width = item === row[row.length - 1]
+                    ? rect.x + rect.width - x
+                    : item.value / Math.max(0.0001, rowHeight);
+                output.push({
+                    item: item.item,
+                    x,
+                    y: rect.y,
+                    width: Math.max(0, width),
+                    height: Math.max(0, rowHeight)
+                });
+                x += width;
+            }
+            rect.y += rowHeight;
+            rect.height = Math.max(0, rect.height - rowHeight);
+        } else {
+            const rowWidth = Math.min(rect.width, rowArea / Math.max(1, rect.height));
+            let y = rect.y;
+            for (const item of row) {
+                const height = item === row[row.length - 1]
+                    ? rect.y + rect.height - y
+                    : item.value / Math.max(0.0001, rowWidth);
+                output.push({
+                    item: item.item,
+                    x: rect.x,
+                    y,
+                    width: Math.max(0, rowWidth),
+                    height: Math.max(0, height)
+                });
+                y += height;
+            }
+            rect.x += rowWidth;
+            rect.width = Math.max(0, rect.width - rowWidth);
+        }
     }
 
     async function selectSemanticMarket(marketTicker, groupKey) {

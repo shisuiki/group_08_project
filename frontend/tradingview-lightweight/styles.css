@@ -114,6 +114,8 @@ header h1 {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    max-width: 100%;
     min-height: 26px;
     padding: 4px 8px;
     border: 1px solid #364047;
@@ -937,6 +939,8 @@ main[data-active-role="semantic"] #semantic-map-panel {
     display: grid;
     grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
     min-height: 100%;
+    min-width: 0;
+    overflow: hidden;
 }
 
 main[data-active-role="semantic"] .semantic-controls {
@@ -1221,6 +1225,21 @@ footer.ok { color: #2fbf71; }
 
     .research-controls {
         grid-template-columns: 1fr;
+    }
+
+    .demo-signal-strip {
+        align-items: stretch;
+    }
+
+    .signal-pill {
+        flex: 1 1 min(100%, 170px);
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .signal-pill strong {
+        min-width: 0;
+        overflow-wrap: anywhere;
     }
 
     .semantic-controls,
