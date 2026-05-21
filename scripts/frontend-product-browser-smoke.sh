@@ -396,12 +396,18 @@ for fragment, label in (
     ('id="operator-data-source"', "operator data source"),
     ('id="operator-e2e-latency"', "operator e2e latency"),
     ('id="operator-pipeline-counts"', "operator pipeline counts"),
-    ('/ops/pipeline', "ops pipeline API"),
-    ('/ops/latency', "ops latency API"),
     ('id="operator-generate-plan"', "operator plan generator"),
     ('id="operator-env-plan"', "operator plan output"),
 ):
     require(fragment, label)
+
+for key, label in (
+    ("runtimePipelineStatus", "ops pipeline API"),
+    ("operatorE2eLatency", "ops latency API"),
+):
+    value = str(cdp_state.get(key) or "").strip()
+    if value in ("", "-"):
+        raise SystemExit(f"browser dashboard missing {label}: {key}")
 
 if "<canvas" not in html.lower():
     raise SystemExit("browser dashboard did not create chart canvas")

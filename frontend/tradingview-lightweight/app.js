@@ -411,17 +411,16 @@
         try {
             const markets = await fetchJson('/markets?' + params.join('&'));
             if (markets && Array.isArray(markets.markets) && markets.markets.length > 0) {
-                return markets.markets.map(row => ({
-                    symbol: row.market_ticker,
-                    eventTicker: row.event_ticker || '-',
-                    seriesTicker: row.series_ticker || '-',
-                    status: row.status || '-',
-                    openTime: row.open_time || null,
-                    closeTime: row.close_time || null
-                })).filter(row => row.symbol);
+                const entries = markets.markets.map(mapCatalogMarketRow).filter(row => row.symbol);
+                return prioritizeQuotedMarkets(await mergeLatestStateMarkets(entries, query, status));
             }
             if (filtered) {
-                return [];
+                const symbols = await fetchJson('/symbols');
+                const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
+                const entries = rows
+                    .map(mapLatestStateSymbolRow)
+                    .filter(row => row.symbol && latestStateMatchesFilters(row, query, status));
+                return prioritizeQuotedMarkets(sortMarketEntries(entries));
             }
         } catch (err) {
             if (filtered) {
@@ -431,14 +430,126 @@
         }
         const symbols = await fetchJson('/symbols');
         const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
-        return rows.map(row => ({
+        return sortMarketEntries(rows.map(mapLatestStateSymbolRow).filter(row => row.symbol));
+    }
+
+    function mapCatalogMarketRow(row) {
+        return {
+            symbol: row.market_ticker,
+            eventTicker: row.event_ticker || '-',
+            seriesTicker: row.series_ticker || '-',
+            status: row.status || '-',
+            openTime: row.open_time || null,
+            closeTime: row.close_time || null,
+            quoteEventTsMs: null,
+            hasQuote: false,
+            sourceKind: row.source_kind || '-',
+            synthetic: row.synthetic === true
+        };
+    }
+
+    function mapLatestStateSymbolRow(row) {
+        const eventTsMs = row.latest_event_ts_ms == null ? null : Number(row.latest_event_ts_ms);
+        const hasQuote = Number.isFinite(eventTsMs);
+        return {
             symbol: row.symbol,
             eventTicker: '-',
             seriesTicker: '-',
-            status: row.latest_event_ts_ms == null ? 'waiting' : 'indexed',
+            status: hasQuote ? 'indexed' : 'waiting',
             openTime: null,
-            closeTime: null
-        })).filter(row => row.symbol);
+            closeTime: null,
+            quoteEventTsMs: hasQuote ? eventTsMs : null,
+            hasQuote,
+            sourceKind: row.source_kind || '-',
+            synthetic: row.synthetic === true
+        };
+    }
+
+    async function mergeLatestStateMarkets(entries, query, status) {
+        try {
+            const symbols = await fetchJson('/symbols');
+            const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
+            if (rows.length === 0) {
+                return entries;
+            }
+            const merged = new Map(entries.map(entry => [entry.symbol, { ...entry }]));
+            for (const row of rows) {
+                const latest = mapLatestStateSymbolRow(row);
+                if (!latest.symbol) {
+                    continue;
+                }
+                const current = merged.get(latest.symbol);
+                if (!current) {
+                    if (!latestStateMatchesFilters(latest, query, status)) {
+                        continue;
+                    }
+                    merged.set(latest.symbol, latest);
+                    continue;
+                }
+                current.quoteEventTsMs = latest.quoteEventTsMs;
+                current.hasQuote = latest.hasQuote;
+                current.sourceKind = latest.sourceKind;
+                current.synthetic = latest.synthetic;
+            }
+            return sortMarketEntries(Array.from(merged.values()));
+        } catch (err) {
+            console.warn('Failed to merge latest-state markets into catalog', err);
+            return entries;
+        }
+    }
+
+    function latestStateMatchesFilters(entry, query, status) {
+        if (status && entry.status !== status) {
+            return false;
+        }
+        if (!query) {
+            return true;
+        }
+        const needle = query.toLowerCase();
+        return [
+            entry.symbol,
+            entry.eventTicker,
+            entry.seriesTicker,
+            entry.status
+        ].some(value => String(value || '').toLowerCase().includes(needle));
+    }
+
+    async function prioritizeQuotedMarkets(entries) {
+        if (entries.length === 0) {
+            return entries;
+        }
+        const base = adapterBase();
+        const symbols = entries.slice(0, MARKET_CATALOG_LIMIT).map(entry => entry.symbol);
+        try {
+            const body = await fetchJsonFromBase(
+                base,
+                `/quotes?symbols=${encodeURIComponent(symbols.join(','))}`
+            );
+            const quotes = new Map((body.quotes || []).map(quote => [quote.symbol, quote]));
+            for (const entry of entries) {
+                const quote = quotes.get(entry.symbol);
+                const eventTsMs = quote?.event_ts_ms == null ? null : Number(quote.event_ts_ms);
+                entry.quoteEventTsMs = Number.isFinite(eventTsMs) ? eventTsMs : null;
+                entry.hasQuote = entry.quoteEventTsMs != null && quote?.midpoint_micros != null;
+            }
+            return sortMarketEntries(entries);
+        } catch (err) {
+            console.warn('Failed to prioritize markets by latest quote', err);
+            return sortMarketEntries(entries);
+        }
+    }
+
+    function sortMarketEntries(entries) {
+        return entries.slice().sort((left, right) => {
+            if (left.hasQuote !== right.hasQuote) {
+                return left.hasQuote ? -1 : 1;
+            }
+            const timeDiff = Number(right.quoteEventTsMs || 0) - Number(left.quoteEventTsMs || 0);
+            if (timeDiff !== 0) {
+                return timeDiff;
+            }
+            return String(left.symbol || '').localeCompare(String(right.symbol || ''));
+        });
     }
 
     function populateSymbolDropdown(entries, preferredSymbol) {
@@ -489,13 +600,22 @@
             button.title = `${entry.symbol} / ${entry.status || '-'}`;
             button.setAttribute('aria-label', button.title);
             button.innerHTML = `<strong class="ticker-text">${escapeHtml(entry.symbol)}</strong>` +
-                `<span>${escapeHtml(entry.status || '-')}</span>`;
+                `<span>${escapeHtml(marketCatalogStatusText(entry))}</span>`;
             button.addEventListener('click', () => {
                 dom.symbolSelect.value = entry.symbol;
                 onSelectedSymbolChanged();
             });
             dom.marketList.appendChild(button);
         }
+    }
+
+    function marketCatalogStatusText(entry) {
+        const status = entry.status || '-';
+        if (!entry.hasQuote) {
+            return status;
+        }
+        const age = entry.quoteEventTsMs == null ? '' : ` / ${formatAge(Date.now() - entry.quoteEventTsMs)}`;
+        return `${status} / live quote${age}`;
     }
 
     function renderMarketCatalogError(message) {
