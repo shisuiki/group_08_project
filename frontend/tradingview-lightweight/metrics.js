@@ -399,7 +399,7 @@ function setHotPathDistribution(prefix, series) {
 function renderHotPathStage(config, stage) {
   const series = bestSeries(stage);
   const status = stage ? stage.status : 'missing';
-  setText(`${config.prefix}-label`, stage && stage.label ? stage.label : config.label);
+  setText(`${config.prefix}-label`, config.label);
   setPill(`${config.prefix}-state`, status, statusClass(status));
   setText(
     `${config.prefix}-detail`,
