@@ -238,6 +238,42 @@ class DbPrimaryDemoScriptsTest {
     }
 
     @Test
+    void parallelSemanticMetadataBackfillIsEligibleBoundedAndRedacted() throws Exception {
+        String script = read("scripts/semantic-metadata-backfill-parallel.sh");
+        String lower = script.toLowerCase(Locale.ROOT);
+
+        assertTrue(script.contains("SEMANTIC_METADATA_BACKFILL_CONCURRENCY:-8"));
+        assertTrue(script.contains("SEMANTIC_METADATA_BACKFILL_MAX_CONCURRENCY:-32"));
+        assertTrue(script.contains("SEMANTIC_METADATA_BACKFILL_MIN_BARS_24H:-10"));
+        assertTrue(script.contains("target/semantic-metadata-backfill"));
+        assertTrue(script.contains("validate_int_range \"SEMANTIC_METADATA_BACKFILL_CONCURRENCY\""));
+        assertTrue(script.contains("market_feature_stats mfs"));
+        assertTrue(script.contains("mfs.display_eligible"));
+        assertTrue(script.contains("coalesce(mfs.history_bars_24h_count, 0) >= :min_bars_24h"));
+        assertTrue(script.contains("smm.status = 'generated'"));
+        assertTrue(script.contains("job.status = 'running'"));
+        assertTrue(script.contains("smm.market_ticker is null"));
+        assertTrue(script.contains("job.market_ticker is null"));
+        assertTrue(script.contains("sql_ticker="));
+        assertTrue(script.contains("set -eu"));
+        assertTrue(script.contains("skipped_existing_or_running reason=%s"));
+        assertTrue(script.contains("semantic_metadata_counts label="));
+        assertTrue(script.contains("semantic_metadata_models label="));
+        assertTrue(script.contains("semantic_metadata_failure label="));
+        assertTrue(script.contains("OPENROUTER_API_KEY or readable OPENROUTER_API_KEY_FILE is required"));
+        assertTrue(script.contains("Bearer [redacted]"));
+        assertTrue(script.contains("OPENROUTER_API_KEY=[redacted]"));
+        assertTrue(script.contains("nohup env"));
+        assertTrue(script.contains("sh \"$0\" \"$@\""));
+        assertFalse(script.contains("cat \"$OPENROUTER_API_KEY_FILE\""));
+        assertFalse(lower.contains("docker"));
+        assertFalse(lower.contains("browser"));
+        assertFalse(lower.contains("s3"));
+        assertFalse(lower.contains("ec2"));
+        assertFalse(lower.contains("aws "));
+    }
+
+    @Test
     void productDemoLauncherCreatesIsolatedStackEvidenceAndCleanup() throws Exception {
         String up = read("scripts/product-demo-up.sh");
         String down = read("scripts/product-demo-down.sh");

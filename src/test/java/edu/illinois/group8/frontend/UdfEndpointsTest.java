@@ -1262,6 +1262,25 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void semanticTreemapEndpointNormalizesGroupKeysAndLabels() throws Exception {
+        restartWithSemanticReader(List.of(
+            semanticRow("MKT-SPORTS-A", "Sports Betting", "Live Event", List.of("Hot Market", "hot market"), 100L),
+            semanticRow("MKT-SPORTS-B", "sports betting", "live event", List.of("HOT MARKET"), 200L)
+        ));
+
+        JsonNode sectorBody = getJson("/api/semantic-metadata/treemap?group_by=sector&limit=10");
+        JsonNode tagBody = getJson("/api/semantic-metadata/treemap?group_by=tag&limit=10");
+
+        JsonNode sector = group(sectorBody.path("groups"), "sports betting");
+        assertEquals("Sports Betting", sector.path("label").asText());
+        assertEquals(2, sector.path("count").asInt());
+        assertEquals(300L, sector.path("value").asLong());
+        JsonNode tag = group(tagBody.path("groups"), "hot market");
+        assertEquals("Hot Market", tag.path("label").asText());
+        assertEquals(2, tag.path("count").asInt());
+    }
+
+    @Test
     void semanticEndpointsReturnDisabledWhenSourceDisabled() throws Exception {
         server.stop();
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of(

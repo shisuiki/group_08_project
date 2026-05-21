@@ -1965,19 +1965,39 @@ public class FrontendAdapterServer {
 
     private static List<String> semanticGroupKeys(SemanticMarketMetadataRow row, String groupBy) {
         return switch (groupBy) {
-            case "subsector" -> List.of(fallbackGroup(row.subsector()));
-            case "event_type" -> List.of(fallbackGroup(row.eventType()));
+            case "subsector" -> List.of(canonicalGroupKey(row.subsector()));
+            case "event_type" -> List.of(canonicalGroupKey(row.eventType()));
             case "tag" -> row.tags().isEmpty()
                 ? List.of("untagged")
-                : row.tags().stream().map(FrontendAdapterServer::fallbackGroup).distinct().toList();
-            case "sector" -> List.of(fallbackGroup(row.sector()));
+                : row.tags().stream().map(FrontendAdapterServer::canonicalGroupKey).distinct().toList();
+            case "sector" -> List.of(canonicalGroupKey(row.sector()));
             default -> List.of("unknown");
         };
     }
 
-    private static String fallbackGroup(String value) {
+    private static String canonicalGroupKey(String value) {
         String normalized = normalize(value);
-        return normalized == null ? "unknown" : normalized;
+        return normalized == null ? "unknown" : normalized.toLowerCase(Locale.ROOT);
+    }
+
+    private static String semanticGroupLabel(String key) {
+        if (key == null || key.isBlank()) {
+            return "Unknown";
+        }
+        String[] words = key.replace('_', ' ').replace('-', ' ').split("\\s+");
+        List<String> titled = new ArrayList<>();
+        for (String word : words) {
+            if (word.isBlank()) {
+                continue;
+            }
+            if (word.length() <= 3 && word.equals(word.toUpperCase(Locale.ROOT))) {
+                titled.add(word);
+                continue;
+            }
+            titled.add(word.substring(0, 1).toUpperCase(Locale.ROOT)
+                + word.substring(1).toLowerCase(Locale.ROOT));
+        }
+        return titled.isEmpty() ? "Unknown" : String.join(" ", titled);
     }
 
     private static long semanticTreemapValue(SemanticMarketMetadataRow row) {
@@ -2078,7 +2098,7 @@ public class FrontendAdapterServer {
         private Map<String, Object> body() {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("key", key);
-            body.put("label", key);
+            body.put("label", semanticGroupLabel(key));
             body.put("group_by", groupBy);
             body.put("value", value);
             body.put("count", leaves.size());
