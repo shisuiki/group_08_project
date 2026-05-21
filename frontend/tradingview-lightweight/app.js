@@ -11,6 +11,9 @@
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
     const MARKET_CATALOG_LIMIT = 200;
     const MARKET_QUOTE_PROBE_LIMIT = 200;
+    const DEMO_MARKET_HISTORY_PROBE_LIMIT = 12;
+    const DEMO_DEFAULT_RESOLUTION = '1S';
+    const DEMO_DEFAULT_LOOKBACK_SECONDS = 900;
     const SEMANTIC_MAP_DEFAULT_LIMIT = 500;
     const SEMANTIC_MAP_MAX_LIMIT = 500;
     const SEMANTIC_RENDER_LEAF_LIMIT = 500;
@@ -401,7 +404,14 @@
             opt.textContent = labelForResolution(res);
             dom.resolutionSelect.appendChild(opt);
         }
-        dom.resolutionSelect.value = resolutions.includes('1') ? '1' : resolutions[0];
+        dom.resolutionSelect.value = resolutions.includes(DEMO_DEFAULT_RESOLUTION)
+            ? DEMO_DEFAULT_RESOLUTION
+            : resolutions.includes('1')
+                ? '1'
+                : resolutions[0];
+        if (dom.lookbackSelect && Array.from(dom.lookbackSelect.options).some(option => option.value === String(DEMO_DEFAULT_LOOKBACK_SECONDS))) {
+            dom.lookbackSelect.value = String(DEMO_DEFAULT_LOOKBACK_SECONDS);
+        }
     }
 
     function labelForResolution(res) {
@@ -433,7 +443,9 @@
             const loadedEntries = await loadMarketEntries(requestContext);
             ensureActiveMarketCatalogRequest(requestContext);
             marketEntries = loadedEntries;
-            populateSymbolDropdown(marketEntries, previousSymbol);
+            const preferredSymbol = previousSymbol || await chooseDemoDefaultSymbol(marketEntries, requestContext);
+            ensureActiveMarketCatalogRequest(requestContext);
+            populateSymbolDropdown(marketEntries, preferredSymbol);
             renderMarketCatalog(marketEntries);
             if (marketEntries.length === 0) {
                 quotesLoopGeneration += 1;
@@ -752,6 +764,57 @@
             }
             return String(left.symbol || '').localeCompare(String(right.symbol || ''));
         });
+    }
+
+    async function chooseDemoDefaultSymbol(entries, requestContext) {
+        const candidates = sortMarketEntries(entries)
+            .filter(entry => entry.symbol && entry.hasQuote && entry.chartable)
+            .slice(0, DEMO_MARKET_HISTORY_PROBE_LIMIT);
+        if (candidates.length === 0) {
+            return sortMarketEntries(entries)
+                .filter(entry => entry.symbol)
+                .sort((left, right) => demoFallbackScore(right) - demoFallbackScore(left))[0]?.symbol || '';
+        }
+        const base = adapterBase();
+        const nowSec = Math.floor(Date.now() / 1000);
+        const fromSec = nowSec - DEMO_DEFAULT_LOOKBACK_SECONDS;
+        const scored = await Promise.all(candidates.map(async entry => {
+            let barCount = 0;
+            try {
+                const data = await fetchJsonFromBase(
+                    base,
+                    `/datafeed/history?symbol=${encodeURIComponent(entry.symbol)}` +
+                    `&resolution=${encodeURIComponent(DEMO_DEFAULT_RESOLUTION)}` +
+                    `&from=${fromSec}&to=${nowSec}`,
+                    { signal: requestContext.signal }
+                );
+                barCount = data?.s === 'ok' && Array.isArray(data.t) ? data.t.length : 0;
+            } catch (err) {
+                if (isStaleMarketCatalogError(err)) {
+                    throw err;
+                }
+            }
+            return {
+                entry,
+                score: barCount * 100000 + demoFallbackScore(entry),
+                barCount
+            };
+        }));
+        scored.sort((left, right) => right.score - left.score || String(left.entry.symbol).localeCompare(right.entry.symbol));
+        return scored[0]?.entry.symbol || candidates[0].symbol;
+    }
+
+    function demoFallbackScore(entry) {
+        const quoteAgeMs = Number(entry.quoteAgeMs);
+        const freshnessBonus = Number.isFinite(quoteAgeMs)
+            ? Math.max(0, 60000 - quoteAgeMs) / 100
+            : 0;
+        return Number(entry.bars24hCount || 0) * 1000
+            + Number(entry.quote24hCount || 0)
+            + Number(entry.trade24hCount || 0) * 25
+            + (entry.chartableFromBbo ? 5000 : 0)
+            + (entry.hasQuote ? 2500 : 0)
+            + freshnessBonus;
     }
 
     function populateSymbolDropdown(entries, preferredSymbol) {
