@@ -93,6 +93,7 @@ final class CatalogSyncOperatorService implements AutoCloseable {
         body.put("kalshi_base_url_configured", !baseEnv.getOrDefault("KALSHI_BASE_URL", "").isBlank());
         body.put("kalshi_key_id_configured", !baseEnv.getOrDefault("KALSHI_KEY_ID", "").isBlank());
         body.put("kalshi_private_key_path_configured", !baseEnv.getOrDefault("KALSHI_KEY_PATH", "").isBlank());
+        body.put("kalshi_private_key_pem_configured", !baseEnv.getOrDefault("KALSHI_PRIVATE_KEY", "").isBlank());
         body.put("latest_run", snapshot == null ? null : snapshot.toBody());
         return body;
     }
@@ -141,6 +142,7 @@ final class CatalogSyncOperatorService implements AutoCloseable {
             env.getOrDefault("KALSHI_BASE_URL", DEFAULT_KALSHI_BASE_URL),
             env.getOrDefault("KALSHI_KEY_ID", ""),
             env.getOrDefault("KALSHI_KEY_PATH", ""),
+            env.getOrDefault("KALSHI_PRIVATE_KEY", ""),
             env.getOrDefault("CATALOG_SYNC_DB_URL", ""),
             env.getOrDefault("CATALOG_SYNC_DB_USER", ""),
             env.getOrDefault("CATALOG_SYNC_DB_PASSWORD", "")
@@ -160,6 +162,7 @@ final class CatalogSyncOperatorService implements AutoCloseable {
         body.put("kalshi_base_url", OperatorRedactor.redact(runConfig.kalshiBaseUrl()));
         body.put("kalshi_key_id_configured", !runConfig.kalshiKeyId().isBlank());
         body.put("kalshi_private_key_path_configured", !runConfig.kalshiKeyPath().isBlank());
+        body.put("kalshi_private_key_pem_configured", !runConfig.kalshiPrivateKeyPem().isBlank());
         body.put("db_configured", !runConfig.dbUrl().isBlank());
         return body;
     }
@@ -172,6 +175,9 @@ final class CatalogSyncOperatorService implements AutoCloseable {
         if (!runConfig.kalshiKeyPath().isBlank()) {
             redacted = redacted.replace(runConfig.kalshiKeyPath(), "[redacted]");
         }
+        if (!runConfig.kalshiPrivateKeyPem().isBlank()) {
+            redacted = redacted.replace(runConfig.kalshiPrivateKeyPem(), "[redacted]");
+        }
         if (!runConfig.dbPassword().isBlank()) {
             redacted = redacted.replace(runConfig.dbPassword(), "[redacted]");
         }
@@ -179,7 +185,12 @@ final class CatalogSyncOperatorService implements AutoCloseable {
     }
 
     private static CatalogSyncSummary runSync(CatalogSyncRunConfig config) {
-        KalshiWrapper wrapper = new KalshiWrapper(config.kalshiBaseUrl(), config.kalshiKeyId(), config.kalshiKeyPath());
+        KalshiWrapper wrapper = new KalshiWrapper(
+            config.kalshiBaseUrl(),
+            config.kalshiKeyId(),
+            config.kalshiKeyPath(),
+            config.kalshiPrivateKeyPem()
+        );
         MarketMetadataStore store = config.request().dryRun()
             ? null
             : JdbcMarketMetadataStore.fromDriverManager(config.dbUrl(), config.dbUser(), config.dbPassword());
@@ -290,6 +301,7 @@ final class CatalogSyncOperatorService implements AutoCloseable {
         String kalshiBaseUrl,
         String kalshiKeyId,
         String kalshiKeyPath,
+        String kalshiPrivateKeyPem,
         String dbUrl,
         String dbUser,
         String dbPassword
@@ -299,6 +311,7 @@ final class CatalogSyncOperatorService implements AutoCloseable {
             kalshiBaseUrl = kalshiBaseUrl == null ? "" : kalshiBaseUrl.trim();
             kalshiKeyId = kalshiKeyId == null ? "" : kalshiKeyId.trim();
             kalshiKeyPath = kalshiKeyPath == null ? "" : kalshiKeyPath.trim();
+            kalshiPrivateKeyPem = kalshiPrivateKeyPem == null ? "" : kalshiPrivateKeyPem.trim();
             dbUrl = dbUrl == null ? "" : dbUrl.trim();
             dbUser = dbUser == null ? "" : dbUser.trim();
             dbPassword = dbPassword == null ? "" : dbPassword;

@@ -93,6 +93,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("FEATUREPLANT_METRICS_HOST_PORT=\"$FEATUREPLANT_METRICS_HOST_PORT\""));
         assertTrue(script.contains("PRODUCT_DEMO_SEMANTIC_FIXTURE=\"${PRODUCT_DEMO_SEMANTIC_FIXTURE:-false}\""));
         assertTrue(script.contains("PRODUCT_DEMO_ORCHESTRATOR_SMOKE=\"${PRODUCT_DEMO_ORCHESTRATOR_SMOKE:-false}\""));
+        assertTrue(script.contains("PRODUCT_DEMO_LIVE_PREFLIGHT_SMOKE=\"${PRODUCT_DEMO_LIVE_PREFLIGHT_SMOKE:-false}\""));
+        assertTrue(script.contains("product-demo-live-preflight-smoke.sh"));
         assertTrue(script.contains("FRONTEND_ADAPTER_OPERATOR_CONTROL_ENABLED"));
         assertTrue(script.contains("PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS=\"${PRODUCT_DEMO_SEMANTIC_FIXTURE_ROWS:-120}\""));
         assertTrue(script.contains("EXPECTED_SEMANTIC_METADATA_MIN_ROWS=\"${EXPECTED_SEMANTIC_METADATA_MIN_ROWS:-80}\""));
@@ -182,6 +184,27 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("if len(value) < 8:"));
         assertFalse(script.contains("docker compose up"));
         assertFalse(script.contains("db-primary-product-smoke.sh"));
+    }
+
+    @Test
+    void productDemoLivePreflightSmokeIsOptionalRedactedAndOperatorOnly() throws Exception {
+        String script = read("scripts/product-demo-live-preflight-smoke.sh");
+
+        assertTrue(script.contains("PRODUCT_DEMO_LIVE_PREFLIGHT_SMOKE=\"${PRODUCT_DEMO_LIVE_PREFLIGHT_SMOKE:-false}\""));
+        assertTrue(script.contains("skip_or_fail \"disabled\""));
+        assertTrue(script.contains("live_credential_check"));
+        assertTrue(script.contains("\"confirm_live\":true"));
+        assertTrue(script.contains("/operator/demo-orchestrator/run"));
+        assertTrue(script.contains("/operator/demo-orchestrator/run-status"));
+        assertTrue(script.contains("KALSHI_KEY_ID"));
+        assertTrue(script.contains("KALSHI_KEY_PATH"));
+        assertTrue(script.contains("KALSHI_PRIVATE_KEY"));
+        assertTrue(script.contains("s3_preflight_check"));
+        assertTrue(script.contains("PASS product_demo_live_preflight_smoke"));
+        assertTrue(script.contains("reason=secret_leaked"));
+        assertTrue(script.contains("raw_response"));
+        assertFalse(script.contains("docker compose up"));
+        assertFalse(script.contains("OPENROUTER_API_KEY"));
     }
 
     @Test
@@ -798,6 +821,10 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"catalog-sync-dry-run\""));
         assertTrue(index.contains("id=\"demo-orchestrator-panel\""));
         assertTrue(index.contains("id=\"demo-run-action\""));
+        assertTrue(index.contains("id=\"demo-run-live-credentials\""));
+        assertTrue(index.contains("value=\"live_credential_check\""));
+        assertTrue(index.contains("value=\"live_catalog_sync_bounded\""));
+        assertTrue(index.contains("value=\"s3_preflight_check\""));
         assertTrue(index.contains("id=\"demo-run-start\""));
         assertTrue(index.contains("data-role-panel=\"operator\""));
         assertTrue(app.contains("body.release"));
@@ -822,6 +849,9 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("/operator/catalog/sync"));
         assertTrue(app.contains("/operator/demo-orchestrator/run"));
         assertTrue(app.contains("buildDemoRunRequest"));
+        assertTrue(app.contains("demoActionRequiresConfirm"));
+        assertTrue(app.contains("live_catalog_sync_bounded"));
+        assertTrue(app.contains("s3PreflightText"));
         assertTrue(app.contains("applyRoleVisibility"));
         assertTrue(app.contains("dataFreshnessBadgeText"));
         assertTrue(app.contains("layoutSemanticLeafTreemap"));

@@ -154,10 +154,16 @@
         demoRunMode: document.getElementById('demo-run-mode'),
         demoRunRelease: document.getElementById('demo-run-release'),
         demoRunDataSource: document.getElementById('demo-run-data-source'),
+        demoRunDashboardSource: document.getElementById('demo-run-dashboard-source'),
+        demoRunLiveSource: document.getElementById('demo-run-live-source'),
+        demoRunLiveCredentials: document.getElementById('demo-run-live-credentials'),
+        demoRunCatalogBounds: document.getElementById('demo-run-catalog-bounds'),
+        demoRunS3Preflight: document.getElementById('demo-run-s3-preflight'),
         demoRunFreshness: document.getElementById('demo-run-freshness'),
         demoRunEvidence: document.getElementById('demo-run-evidence'),
         demoRunError: document.getElementById('demo-run-error'),
         demoRunAction: document.getElementById('demo-run-action'),
+        demoRunConfirmRow: document.getElementById('demo-run-confirm-row'),
         demoRunConfirmLive: document.getElementById('demo-run-confirm-live'),
         demoRunStart: document.getElementById('demo-run-start'),
         demoRunRefresh: document.getElementById('demo-run-refresh'),
@@ -1659,6 +1665,11 @@
             `${dataSource.source_mode || healthBody?.source_mode || 'unknown'}` +
             ` / ${dataSource.feature_source || healthBody?.feature_source || 'unknown'}` +
             ` / db ${yesNo(dataSource.db_configured)}`;
+        dom.demoRunDashboardSource.textContent = dashboardSourceText(dataSource, healthBody);
+        dom.demoRunLiveSource.textContent = liveSourceText(summary);
+        dom.demoRunLiveCredentials.textContent = credentialStatusText(summary.live_credential_preflight);
+        dom.demoRunCatalogBounds.textContent = catalogBoundsText(summary.catalog_bounds);
+        dom.demoRunS3Preflight.textContent = s3PreflightText(summary.s3_preflight);
         dom.demoRunFreshness.textContent = dataFreshnessBadgeText(freshness);
         dom.demoRunFreshness.className = dataFreshnessClass(freshness);
         const evidence = latest?.evidence_url || summary?.evidence_url || '-';
@@ -1689,6 +1700,51 @@
         } else {
             clearDemoRunStatusTimer();
         }
+        updateDemoRunConfirmState();
+    }
+
+    function dashboardSourceText(dataSource, healthBody) {
+        const sourceMode = dataSource.source_mode || healthBody?.source_mode || 'unknown';
+        const featureSource = dataSource.feature_source || healthBody?.feature_source || 'unknown';
+        const metadataSource = dataSource.metadata_source || healthBody?.market_metadata?.source || 'unknown';
+        return `${sourceMode} / ${featureSource} / metadata ${metadataSource}`;
+    }
+
+    function liveSourceText(summary) {
+        const credential = summary?.live_credential_preflight || {};
+        if (credential.source === 'live') {
+            return `live / auth ${credential.auth_ok === true ? 'ok' : 'not ok'}`;
+        }
+        return '-';
+    }
+
+    function credentialStatusText(credential) {
+        if (!credential) {
+            return '-';
+        }
+        if (credential.auth_ok === true) {
+            const ticker = credential.sample_ticker ? ` / ${credential.sample_ticker}` : '';
+            return `ok / HTTP ${credential.http_status || '-'} / markets ${credential.market_count || 0}${ticker}`;
+        }
+        if (credential.configured === false) {
+            return 'missing credentials';
+        }
+        return `${credential.failure_category || 'not ok'} / HTTP ${credential.http_status || '-'}`;
+    }
+
+    function catalogBoundsText(bounds) {
+        if (!bounds) {
+            return '-';
+        }
+        return `${bounds.dry_run === false ? 'write' : 'dry-run'} / limit ${bounds.limit}` +
+            ` / pages ${bounds.max_pages} / tickers ${bounds.max_tickers}`;
+    }
+
+    function s3PreflightText(preflight) {
+        if (!preflight) {
+            return '-';
+        }
+        return `${preflight.status || 'unknown'} / verified ${yesNo(preflight.verified)}`;
     }
 
     function renderProductReadiness(body) {
@@ -2012,11 +2068,13 @@
     }
 
     function buildDemoRunRequest() {
+        const action = dom.demoRunAction.value || 'product_readiness_check';
+        const liveCatalog = action === 'live_catalog_sync_bounded';
         return {
-            action: dom.demoRunAction.value || 'product_readiness_check',
+            action,
             confirm_live: dom.demoRunConfirmLive.checked,
             catalog: {
-                dry_run: true,
+                dry_run: liveCatalog ? dom.catalogSyncDryRun.checked !== false : true,
                 limit: Number(dom.catalogSyncLimit.value || 20) || 20,
                 max_pages: Number(dom.catalogSyncMaxPages.value || 1) || 1,
                 max_tickers: Number(dom.catalogSyncMaxTickers.value || 5) || 5,
@@ -2041,6 +2099,24 @@
                 estimated_paid_request_cost_usd: dom.semanticRunEstimatedCost.value.trim() || '0.01'
             }
         };
+    }
+
+    function demoActionRequiresConfirm(action) {
+        return [
+            'live_product_check',
+            'live_credential_check',
+            'live_catalog_sync_bounded',
+            's3_preflight_check'
+        ].includes(action || '');
+    }
+
+    function updateDemoRunConfirmState() {
+        const requiresConfirm = demoActionRequiresConfirm(dom.demoRunAction.value || '');
+        dom.demoRunConfirmRow.classList.toggle('requires-confirm', requiresConfirm);
+        dom.demoRunConfirmLive.disabled = !requiresConfirm;
+        if (!requiresConfirm) {
+            dom.demoRunConfirmLive.checked = false;
+        }
     }
 
     async function startCatalogSync() {
@@ -2472,6 +2548,7 @@
     dom.semanticRunRefresh.addEventListener('click', loadSemanticRunStatus);
     dom.demoRunStart.addEventListener('click', startDemoOrchestratorRun);
     dom.demoRunRefresh.addEventListener('click', loadDemoOrchestratorStatus);
+    dom.demoRunAction.addEventListener('change', updateDemoRunConfirmState);
     dom.operatorGeneratePlan.addEventListener('click', generateOperatorPlan);
     for (const button of document.querySelectorAll('#view-tabs [data-role]')) {
         button.addEventListener('click', () => setActiveRole(button.dataset.role));
@@ -2490,6 +2567,7 @@
         loadDemoOrchestratorStatus();
     });
 
+    updateDemoRunConfirmState();
     applyRoleVisibility('viewer');
     setInterval(() => {
         loadHealth();

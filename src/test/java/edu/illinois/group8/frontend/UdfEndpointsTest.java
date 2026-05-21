@@ -349,6 +349,10 @@ class UdfEndpointsTest {
         assertTrue(root.body().contains("id=\"demo-orchestrator-panel\""));
         assertTrue(root.body().contains("id=\"demo-run-action\""));
         assertTrue(root.body().contains("id=\"demo-run-confirm-live\""));
+        assertTrue(root.body().contains("id=\"demo-run-live-credentials\""));
+        assertTrue(root.body().contains("value=\"live_credential_check\""));
+        assertTrue(root.body().contains("value=\"live_catalog_sync_bounded\""));
+        assertTrue(root.body().contains("value=\"s3_preflight_check\""));
         assertTrue(root.body().contains("id=\"demo-run-start\""));
         assertTrue(root.body().contains("Demo Orchestrator / Runbook"));
         assertTrue(root.body().contains("id=\"semantic-operator-panel\""));
@@ -414,6 +418,10 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("document.getElementById('operator-env-plan')"));
         assertTrue(js.body().contains("document.getElementById('demo-run-action')"));
         assertTrue(js.body().contains("document.getElementById('demo-run-start')"));
+        assertTrue(js.body().contains("document.getElementById('demo-run-live-credentials')"));
+        assertTrue(js.body().contains("demoActionRequiresConfirm"));
+        assertTrue(js.body().contains("live_catalog_sync_bounded"));
+        assertTrue(js.body().contains("s3PreflightText"));
         assertTrue(js.body().contains("document.getElementById('operator-control-enabled')"));
         assertTrue(js.body().contains("document.getElementById('operator-command-plan')"));
         assertTrue(js.body().contains("document.getElementById('semantic-run-start')"));
@@ -1710,6 +1718,196 @@ class UdfEndpointsTest {
     }
 
     @Test
+    void operatorDemoOrchestratorLiveCredentialCheckRequiresConfirmAndRedactsMissingCredentials() throws Exception {
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> summary(0, 0, 0, 0, 0, 0),
+            Map.of(),
+            config -> catalogSummary(0, 0, 0, 0, 0),
+            Map.of(),
+            config -> KalshiLiveCredentialPreflight.LiveCredentialCheckResult.failure(
+                config.configured(),
+                "credentials_missing",
+                null,
+                "missing key"
+            )
+        );
+
+        HttpResponse<String> withoutConfirm = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"live_credential_check\"}",
+            "operator",
+            "secret"
+        );
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"live_credential_check\",\"confirm_live\":true}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(400, withoutConfirm.statusCode());
+        assertTrue(withoutConfirm.body().contains("confirm_live=true"));
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        JsonNode preflight = completed.path("latest_run").path("summary").path("live_credential_preflight");
+        assertEquals("live_credential_check", completed.path("latest_run").path("action").asText());
+        assertEquals("credentials_missing", preflight.path("failure_category").asText());
+        assertFalse(preflight.path("auth_ok").asBoolean());
+        assertFalse(preflight.path("configured").asBoolean());
+    }
+
+    @Test
+    void operatorDemoOrchestratorLiveCredentialCheckReportsAuthOkWithoutSecrets() throws Exception {
+        String keyId = "live-check-key-000000000000000000000000";
+        String keyPath = "/run/secrets/live-check-key.pem";
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> summary(0, 0, 0, 0, 0, 0),
+            Map.of(),
+            config -> catalogSummary(0, 0, 0, 0, 0),
+            Map.of("KALSHI_KEY_ID", keyId, "KALSHI_KEY_PATH", keyPath, "KALSHI_BASE_URL", "https://kalshi.example"),
+            config -> KalshiLiveCredentialPreflight.LiveCredentialCheckResult.success(200, 1, "KXDEMO-YES")
+        );
+
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"live_credential_check\",\"confirm_live\":true}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        JsonNode preflight = completed.path("latest_run").path("summary").path("live_credential_preflight");
+        assertTrue(preflight.path("auth_ok").asBoolean());
+        assertEquals(200, preflight.path("http_status").asInt());
+        assertEquals(1, preflight.path("market_count").asInt());
+        assertEquals("KXDEMO-YES", preflight.path("sample_ticker").asText());
+        String raw = completed.toString() + response.body();
+        assertFalse(raw.contains(keyId));
+        assertFalse(raw.contains(keyPath));
+    }
+
+    @Test
+    void operatorDemoOrchestratorLiveCatalogSyncBoundedRequiresConfirmCapsAndKeepsDryRunExplicit()
+        throws Exception {
+        AtomicReference<CatalogSyncOperatorService.CatalogSyncRunConfig> observed = new AtomicReference<>();
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> summary(0, 0, 0, 0, 0, 0),
+            Map.of("KALSHI_KEY_ID", "catalog-live-key", "KALSHI_KEY_PATH", "/run/secrets/catalog-live.pem"),
+            config -> {
+                observed.set(config);
+                return catalogSummary(1, 2, 2, 2, 0);
+            },
+            Map.of("KALSHI_KEY_ID", "catalog-live-key", "KALSHI_KEY_PATH", "/run/secrets/catalog-live.pem"),
+            config -> KalshiLiveCredentialPreflight.LiveCredentialCheckResult.success(200, 1, "KXCAT")
+        );
+
+        HttpResponse<String> withoutConfirm = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"live_catalog_sync_bounded\"}",
+            "operator",
+            "secret"
+        );
+        HttpResponse<String> overCap = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            """
+                {
+                  "action": "live_catalog_sync_bounded",
+                  "confirm_live": true,
+                  "catalog": {"limit": 101}
+                }
+                """,
+            "operator",
+            "secret"
+        );
+        HttpResponse<String> valid = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            """
+                {
+                  "action": "live_catalog_sync_bounded",
+                  "confirm_live": true,
+                  "catalog": {"dry_run": false, "limit": 10, "max_pages": 2, "max_tickers": 7}
+                }
+                """,
+            "operator",
+            "secret"
+        );
+
+        assertEquals(400, withoutConfirm.statusCode());
+        assertEquals(400, overCap.statusCode());
+        assertTrue(overCap.body().contains("limit must be <= 100"));
+        assertEquals(202, valid.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        waitForCatalogSyncRunState("completed");
+        assertEquals("live_catalog_sync_bounded", completed.path("latest_run").path("action").asText());
+        assertFalse(completed.path("latest_run").path("config").path("catalog_dry_run").asBoolean());
+        assertEquals(10, completed.path("latest_run").path("summary").path("catalog_bounds").path("limit").asInt());
+        assertEquals(7, observed.get().request().maxTickers());
+        assertFalse(observed.get().request().dryRun());
+    }
+
+    @Test
+    void operatorDemoOrchestratorS3PreflightRequiresConfirmAndRedactsConfig() throws Exception {
+        String bucket = "kalshi-private-recording-bucket";
+        String prefix = "capture/live/private-prefix";
+        restartWithDemoOperators(
+            Map.of("OPENROUTER_API_KEY", ""),
+            config -> summary(0, 0, 0, 0, 0, 0),
+            Map.of(),
+            config -> catalogSummary(0, 0, 0, 0, 0),
+            Map.of("S3_RECORDING_BUCKET", bucket, "AWS_REGION", "us-east-1", "S3_RECORDING_PREFIX", prefix),
+            config -> KalshiLiveCredentialPreflight.LiveCredentialCheckResult.failure(false, "credentials_missing", null, "")
+        );
+
+        HttpResponse<String> withoutConfirm = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"s3_preflight_check\"}",
+            "operator",
+            "secret"
+        );
+        HttpResponse<String> response = postJsonWithBasicAuth(
+            "/operator/demo-orchestrator/run",
+            "{\"action\":\"s3_preflight_check\",\"confirm_live\":true}",
+            "operator",
+            "secret"
+        );
+
+        assertEquals(400, withoutConfirm.statusCode());
+        assertEquals(202, response.statusCode());
+        JsonNode completed = waitForDemoRunState("completed");
+        JsonNode s3 = completed.path("latest_run").path("summary").path("s3_preflight");
+        assertEquals("configured_but_unverified", s3.path("status").asText());
+        assertFalse(s3.path("verified").asBoolean());
+        assertTrue(s3.path("bucket_configured").asBoolean());
+        String raw = completed.toString() + response.body();
+        assertFalse(raw.contains(bucket));
+        assertFalse(raw.contains(prefix));
+    }
+
+    @Test
+    void operatorControlPlaneS3StatusIsDisplaySafeAndUnverified() {
+        String bucket = "kalshi-sensitive-bucket";
+        String prefix = "live/capture/private";
+        FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
+        OperatorControlPlane controlPlane = new OperatorControlPlane(
+            config,
+            FrontendReleaseInfo.empty(),
+            Map.of("S3_RECORDING_BUCKET", bucket, "AWS_REGION", "us-east-1", "S3_RECORDING_PREFIX", prefix)
+        );
+
+        JsonNode s3 = MAPPER.valueToTree(controlPlane.configurationStatus()).path("s3");
+
+        assertTrue(s3.path("bucket_configured").asBoolean());
+        assertEquals("configured_but_unverified", s3.path("status").asText());
+        assertFalse(s3.path("verified").asBoolean());
+        assertFalse(s3.toString().contains(bucket));
+        assertFalse(s3.toString().contains(prefix));
+    }
+
+    @Test
     void healthReportsReleaseIdentityAndDataFreshness() throws Exception {
         server.stop();
         FrontendAdapterConfig config = FrontendAdapterConfig.from(Map.of("FRONTEND_ADAPTER_PORT", "0"));
@@ -2344,6 +2542,29 @@ class UdfEndpointsTest {
         Map<String, String> catalogEnv,
         Function<CatalogSyncOperatorService.CatalogSyncRunConfig, CatalogSyncSummary> catalogRunner
     ) throws Exception {
+        restartWithDemoOperators(
+            semanticEnv,
+            semanticRunner,
+            catalogEnv,
+            catalogRunner,
+            Map.of(),
+            config -> KalshiLiveCredentialPreflight.LiveCredentialCheckResult.failure(
+                config.configured(),
+                "credentials_missing",
+                null,
+                "test credentials are not configured"
+            )
+        );
+    }
+
+    private void restartWithDemoOperators(
+        Map<String, String> semanticEnv,
+        Function<SemanticMetadataConfig, SemanticMetadataBatchSummary> semanticRunner,
+        Map<String, String> catalogEnv,
+        Function<CatalogSyncOperatorService.CatalogSyncRunConfig, CatalogSyncSummary> catalogRunner,
+        Map<String, String> liveEnv,
+        KalshiLiveCredentialPreflight.LiveCredentialChecker liveCredentialChecker
+    ) throws Exception {
         server.stop();
         FrontendFeatureStore store = new FrontendFeatureStore(100, 100);
         seed(store);
@@ -2360,6 +2581,16 @@ class UdfEndpointsTest {
             new SemanticMetadataOperatorService(config, semanticEnv, Executors.newSingleThreadExecutor(), semanticRunner);
         CatalogSyncOperatorService catalogService =
             new CatalogSyncOperatorService(config, catalogEnv, Executors.newSingleThreadExecutor(), catalogRunner);
+        DemoOrchestratorService demoOrchestrator = new DemoOrchestratorService(
+            config,
+            new FrontendReleaseInfo("demo-sha", "kalshi-project:demo", "db-primary-product", "1", "1"),
+            catalogService,
+            semanticService,
+            () -> Map.of(),
+            Executors.newSingleThreadExecutor(),
+            liveEnv,
+            liveCredentialChecker
+        );
         server = new FrontendAdapterServer(
             config,
             store,
@@ -2372,7 +2603,8 @@ class UdfEndpointsTest {
             request -> List.of(),
             new FrontendReleaseInfo("demo-sha", "kalshi-project:demo", "db-primary-product", "1", "1"),
             semanticService,
-            catalogService
+            catalogService,
+            demoOrchestrator
         );
         server.start();
         baseUrl = "http://127.0.0.1:" + server.boundPort();

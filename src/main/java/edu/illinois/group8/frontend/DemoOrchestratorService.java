@@ -30,6 +30,10 @@ final class DemoOrchestratorService implements AutoCloseable {
     private static final int DEFAULT_CATALOG_LIMIT = 20;
     private static final int DEFAULT_CATALOG_MAX_PAGES = 1;
     private static final int DEFAULT_CATALOG_MAX_TICKERS = 5;
+    private static final int DEFAULT_LIVE_CATALOG_MAX_TICKERS = 20;
+    private static final int LIVE_CATALOG_LIMIT_CAP = 100;
+    private static final int LIVE_CATALOG_MAX_PAGES_CAP = 2;
+    private static final int LIVE_CATALOG_MAX_TICKERS_CAP = 100;
     private static final int DEFAULT_SEMANTIC_MAX_MARKETS = 5;
     private static final int DEFAULT_SEMANTIC_MAX_TOKENS = 2200;
     private static final int DEFAULT_SEMANTIC_MAX_RETRIES = 2;
@@ -52,6 +56,8 @@ final class DemoOrchestratorService implements AutoCloseable {
     private final SemanticMetadataOperatorService semanticMetadataOperator;
     private final Supplier<Map<String, Object>> productStatusSnapshot;
     private final ExecutorService executor;
+    private final Map<String, String> env;
+    private final KalshiLiveCredentialPreflight.LiveCredentialChecker liveCredentialChecker;
     private final AtomicBoolean active = new AtomicBoolean();
     private final AtomicLong runIds = new AtomicLong();
     private final ObjectMapper mapper = new JsonCanonicalSerializer().mapper();
@@ -71,7 +77,9 @@ final class DemoOrchestratorService implements AutoCloseable {
             catalogSyncOperator,
             semanticMetadataOperator,
             productStatusSnapshot,
-            executor
+            executor,
+            System.getenv(),
+            new KalshiLiveCredentialPreflight()::check
         );
     }
 
@@ -83,12 +91,36 @@ final class DemoOrchestratorService implements AutoCloseable {
         Supplier<Map<String, Object>> productStatusSnapshot,
         ExecutorService executor
     ) {
+        this(
+            config,
+            releaseInfo,
+            catalogSyncOperator,
+            semanticMetadataOperator,
+            productStatusSnapshot,
+            executor,
+            System.getenv(),
+            new KalshiLiveCredentialPreflight()::check
+        );
+    }
+
+    DemoOrchestratorService(
+        FrontendAdapterConfig config,
+        FrontendReleaseInfo releaseInfo,
+        CatalogSyncOperatorService catalogSyncOperator,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        Supplier<Map<String, Object>> productStatusSnapshot,
+        ExecutorService executor,
+        Map<String, String> env,
+        KalshiLiveCredentialPreflight.LiveCredentialChecker liveCredentialChecker
+    ) {
         this.config = Objects.requireNonNull(config, "config");
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.catalogSyncOperator = Objects.requireNonNull(catalogSyncOperator, "catalogSyncOperator");
         this.semanticMetadataOperator = Objects.requireNonNull(semanticMetadataOperator, "semanticMetadataOperator");
         this.productStatusSnapshot = Objects.requireNonNull(productStatusSnapshot, "productStatusSnapshot");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.env = env == null ? Map.of() : Map.copyOf(env);
+        this.liveCredentialChecker = Objects.requireNonNull(liveCredentialChecker, "liveCredentialChecker");
     }
 
     Map<String, Object> start(JsonNode request) {
@@ -157,6 +189,9 @@ final class DemoOrchestratorService implements AutoCloseable {
         return switch (runConfig.action()) {
             case PRODUCT_READINESS_CHECK, REPLAY_DEMO_CHECK -> productReadinessSummary(runConfig);
             case LIVE_PRODUCT_CHECK -> liveProductSummary(runConfig);
+            case LIVE_CREDENTIAL_CHECK -> liveCredentialSummary(runConfig);
+            case LIVE_CATALOG_SYNC_BOUNDED -> liveCatalogSyncBoundedSummary(runConfig);
+            case S3_PREFLIGHT_CHECK -> s3PreflightSummary(runConfig);
             case CATALOG_STATUS -> catalogStatusSummary(runConfig);
             case CATALOG_SYNC_DRY_RUN -> catalogDryRunSummary(runConfig);
             case SEMANTIC_METADATA_DRY_RUN -> semanticDryRunSummary(runConfig);
@@ -177,6 +212,44 @@ final class DemoOrchestratorService implements AutoCloseable {
         }
         Map<String, Object> body = productReadinessSummary(runConfig);
         body.put("stdout_summary", "confirmed live-product readiness check; no live mutation executed");
+        return body;
+    }
+
+    private Map<String, Object> liveCredentialSummary(RunConfig runConfig) {
+        KalshiLiveCredentialPreflight.LiveCredentialCheckConfig checkConfig = liveCredentialCheckConfig();
+        KalshiLiveCredentialPreflight.LiveCredentialCheckResult result = checkedLiveCredentials(checkConfig);
+        Map<String, Object> body = baseSummary(runConfig, result.authOk()
+            ? "validated live Kalshi credentials with bounded read-only market check"
+            : "live Kalshi credential check failed without mutation");
+        body.put("live_credential_preflight", merge(checkConfig.redactedBody(), result.toBody()));
+        return body;
+    }
+
+    private Map<String, Object> liveCatalogSyncBoundedSummary(RunConfig runConfig) {
+        KalshiLiveCredentialPreflight.LiveCredentialCheckConfig checkConfig = liveCredentialCheckConfig();
+        KalshiLiveCredentialPreflight.LiveCredentialCheckResult credentialResult = checkedLiveCredentials(checkConfig);
+        if (!credentialResult.authOk()) {
+            throw new IllegalArgumentException(
+                "live catalog sync requires successful live credential check: "
+                    + credentialResult.failureCategory()
+            );
+        }
+        if (!runConfig.catalogRequest().path("dry_run").asBoolean(true) && !dbConfigured()) {
+            throw new IllegalArgumentException("live catalog sync with dry_run=false requires DB URL, user, and password");
+        }
+        Map<String, Object> started = catalogSyncOperator.start(runConfig.catalogRequest());
+        Map<String, Object> body = baseSummary(runConfig, runConfig.catalogRequest().path("dry_run").asBoolean(true)
+            ? "scheduled bounded live catalog dry-run"
+            : "scheduled bounded live catalog DB upsert");
+        body.put("live_credential_preflight", merge(checkConfig.redactedBody(), credentialResult.toBody()));
+        body.put("catalog_sync", started);
+        body.put("catalog_bounds", catalogBoundsBody(runConfig.catalogRequest()));
+        return body;
+    }
+
+    private Map<String, Object> s3PreflightSummary(RunConfig runConfig) {
+        Map<String, Object> body = baseSummary(runConfig, "reported S3 capture configuration; no S3 write executed");
+        body.put("s3_preflight", s3PreflightBody());
         return body;
     }
 
@@ -225,11 +298,14 @@ final class DemoOrchestratorService implements AutoCloseable {
         Action action = Action.from(request.path("action").asText(""));
         boolean confirmLive = booleanField(request, "confirm_live", false)
             || booleanField(request, "confirm", false);
-        if (action == Action.LIVE_PRODUCT_CHECK && !confirmLive) {
-            throw new IllegalArgumentException("live product demo action requires confirm_live=true");
+        if (action.requiresLiveConfirm() && !confirmLive) {
+            throw new IllegalArgumentException(action.publicName() + " requires confirm_live=true");
         }
-        Map<String, Object> redacted = redactedConfig(action, confirmLive);
-        return new RunConfig(action, action.mode(), confirmLive, catalogRequest(request), semanticRequest(request), redacted);
+        ObjectNode catalogRequest = action == Action.LIVE_CATALOG_SYNC_BOUNDED
+            ? boundedLiveCatalogRequest(request)
+            : catalogRequest(request);
+        Map<String, Object> redacted = redactedConfig(action, confirmLive, catalogRequest);
+        return new RunConfig(action, action.mode(), confirmLive, catalogRequest, semanticRequest(request), redacted);
     }
 
     private ObjectNode catalogRequest(JsonNode request) {
@@ -239,6 +315,24 @@ final class DemoOrchestratorService implements AutoCloseable {
         body.put("limit", positiveInt(catalog, "limit", DEFAULT_CATALOG_LIMIT));
         body.put("max_pages", positiveInt(catalog, "max_pages", DEFAULT_CATALOG_MAX_PAGES));
         body.put("max_tickers", nonNegativeInt(catalog, "max_tickers", DEFAULT_CATALOG_MAX_TICKERS));
+        putText(body, catalog, "series_ticker");
+        putText(body, catalog, "market_status");
+        if (!catalog.hasNonNull("market_status")) {
+            putText(body, catalog, "status", "market_status");
+        }
+        putText(body, catalog, "mve_filter");
+        return body;
+    }
+
+    private ObjectNode boundedLiveCatalogRequest(JsonNode request) {
+        JsonNode catalog = objectField(request, "catalog");
+        ObjectNode body = mapper.createObjectNode();
+        body.put("dry_run", booleanField(catalog, "dry_run", true));
+        body.put("limit", cappedPositiveInt(catalog, "limit", DEFAULT_CATALOG_LIMIT, LIVE_CATALOG_LIMIT_CAP));
+        body.put("max_pages", cappedPositiveInt(catalog, "max_pages", DEFAULT_CATALOG_MAX_PAGES,
+            LIVE_CATALOG_MAX_PAGES_CAP));
+        body.put("max_tickers", cappedPositiveInt(catalog, "max_tickers", DEFAULT_LIVE_CATALOG_MAX_TICKERS,
+            LIVE_CATALOG_MAX_TICKERS_CAP));
         putText(body, catalog, "series_ticker");
         putText(body, catalog, "market_status");
         if (!catalog.hasNonNull("market_status")) {
@@ -268,17 +362,20 @@ final class DemoOrchestratorService implements AutoCloseable {
         return body;
     }
 
-    private Map<String, Object> redactedConfig(Action action, boolean confirmLive) {
+    private Map<String, Object> redactedConfig(Action action, boolean confirmLive, JsonNode catalogRequest) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("action", action.publicName());
         body.put("mode", action.mode());
         body.put("confirm_live", confirmLive);
         body.put("llm_dry_run", true);
-        body.put("catalog_dry_run", true);
+        body.put("catalog_dry_run", catalogRequest == null || catalogRequest.path("dry_run").asBoolean(true));
         body.put("allow_paid_fallback", false);
         body.put("release_sha", emptyToNull(releaseInfo.sha()));
         body.put("release_profile", emptyToNull(releaseInfo.profile()));
         body.put("data_source", dataSourceBody());
+        if (action == Action.LIVE_CATALOG_SYNC_BOUNDED && catalogRequest != null) {
+            body.put("catalog_bounds", catalogBoundsBody(catalogRequest));
+        }
         return body;
     }
 
@@ -295,7 +392,12 @@ final class DemoOrchestratorService implements AutoCloseable {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("llm_dry_run_default", true);
         body.put("catalog_dry_run_default", true);
+        body.put("live_catalog_dry_run_default", true);
+        body.put("live_catalog_limit_cap", LIVE_CATALOG_LIMIT_CAP);
+        body.put("live_catalog_max_pages_cap", LIVE_CATALOG_MAX_PAGES_CAP);
+        body.put("live_catalog_max_tickers_cap", LIVE_CATALOG_MAX_TICKERS_CAP);
         body.put("live_action_requires_confirm", true);
+        body.put("s3_preflight_default", "configured_but_unverified");
         body.put("shell_execution_allowed", false);
         body.put("semantic_max_markets", DEFAULT_SEMANTIC_MAX_MARKETS);
         body.put("catalog_max_pages", DEFAULT_CATALOG_MAX_PAGES);
@@ -308,6 +410,19 @@ final class DemoOrchestratorService implements AutoCloseable {
 
     private List<String> evidenceUrls(Action action) {
         return switch (action) {
+            case LIVE_CREDENTIAL_CHECK -> List.of(
+                "/operator/demo-orchestrator/run-status",
+                "/operator/status"
+            );
+            case LIVE_CATALOG_SYNC_BOUNDED -> List.of(
+                "/operator/catalog/sync-status",
+                "/operator/demo-orchestrator/run-status",
+                "/markets?limit=20"
+            );
+            case S3_PREFLIGHT_CHECK -> List.of(
+                "/operator/status",
+                "/operator/demo-orchestrator/run-status"
+            );
             case CATALOG_STATUS, CATALOG_SYNC_DRY_RUN -> List.of(
                 "/operator/catalog/sync-status",
                 "/markets?limit=20"
@@ -330,6 +445,97 @@ final class DemoOrchestratorService implements AutoCloseable {
                 "/ops/latency"
             );
         };
+    }
+
+    private KalshiLiveCredentialPreflight.LiveCredentialCheckConfig liveCredentialCheckConfig() {
+        return new KalshiLiveCredentialPreflight.LiveCredentialCheckConfig(
+            firstEnv("KALSHI_BASE_URL"),
+            firstEnv("KALSHI_KEY_ID"),
+            firstEnv("KALSHI_KEY_PATH"),
+            firstEnv("KALSHI_PRIVATE_KEY")
+        );
+    }
+
+    private KalshiLiveCredentialPreflight.LiveCredentialCheckResult checkedLiveCredentials(
+        KalshiLiveCredentialPreflight.LiveCredentialCheckConfig checkConfig
+    ) {
+        try {
+            return liveCredentialChecker.check(checkConfig);
+        } catch (RuntimeException e) {
+            return KalshiLiveCredentialPreflight.LiveCredentialCheckResult.failure(
+                checkConfig.configured(),
+                "network",
+                null,
+                e.getMessage()
+            );
+        }
+    }
+
+    private Map<String, Object> s3PreflightBody() {
+        String bucket = firstEnv("S3_RECORDING_BUCKET");
+        String region = firstEnv("AWS_REGION", "AWS_DEFAULT_REGION");
+        String prefix = firstEnv("S3_RECORDING_PREFIX");
+        boolean configured = !bucket.isBlank();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("source", "s3");
+        body.put("bucket_configured", configured);
+        body.put("bucket_redacted", redactedIdentifier(bucket));
+        body.put("region_configured", !region.isBlank());
+        body.put("region", region.isBlank() ? null : region);
+        body.put("prefix_configured", !prefix.isBlank());
+        body.put("prefix_redacted", redactedIdentifier(prefix));
+        body.put("status", configured ? "configured_but_unverified" : "credentials_missing");
+        body.put("verified", false);
+        body.put("verification", configured ? "not_performed" : "missing_bucket");
+        body.put("write_attempted", false);
+        return body;
+    }
+
+    private Map<String, Object> catalogBoundsBody(JsonNode catalogRequest) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("dry_run", catalogRequest.path("dry_run").asBoolean(true));
+        body.put("limit", catalogRequest.path("limit").asInt(DEFAULT_CATALOG_LIMIT));
+        body.put("max_pages", catalogRequest.path("max_pages").asInt(DEFAULT_CATALOG_MAX_PAGES));
+        body.put("max_tickers", catalogRequest.path("max_tickers").asInt(DEFAULT_LIVE_CATALOG_MAX_TICKERS));
+        body.put("limit_cap", LIVE_CATALOG_LIMIT_CAP);
+        body.put("max_pages_cap", LIVE_CATALOG_MAX_PAGES_CAP);
+        body.put("max_tickers_cap", LIVE_CATALOG_MAX_TICKERS_CAP);
+        return body;
+    }
+
+    private boolean dbConfigured() {
+        return !config.dbUrl().isBlank() && !config.dbUser().isBlank() && !config.dbPassword().isBlank();
+    }
+
+    private String firstEnv(String... keys) {
+        for (String key : keys) {
+            String value = env.get(key);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
+    private static Map<String, Object> merge(Map<String, Object> first, Map<String, Object> second) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.putAll(first);
+        body.putAll(second);
+        return body;
+    }
+
+    private static String redactedIdentifier(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String trimmed = OperatorRedactor.redact(value.trim());
+        if (trimmed == null || trimmed.isBlank() || trimmed.startsWith("[redacted")) {
+            return trimmed;
+        }
+        if (trimmed.length() <= 6) {
+            return "<configured>";
+        }
+        return trimmed.substring(0, 3) + "..." + trimmed.substring(trimmed.length() - 2);
     }
 
     private void rejectCommandPayload(JsonNode node) {
@@ -379,6 +585,14 @@ final class DemoOrchestratorService implements AutoCloseable {
         int value = intValue(node, field, defaultValue);
         if (value < 0) {
             throw new IllegalArgumentException(field + " must be zero or positive");
+        }
+        return value;
+    }
+
+    private static int cappedPositiveInt(JsonNode node, String field, int defaultValue, int cap) {
+        int value = positiveInt(node, field, defaultValue);
+        if (value > cap) {
+            throw new IllegalArgumentException(field + " must be <= " + cap);
         }
         return value;
     }
@@ -440,6 +654,9 @@ final class DemoOrchestratorService implements AutoCloseable {
         PRODUCT_READINESS_CHECK("product_readiness_check", "product"),
         REPLAY_DEMO_CHECK("replay_demo_check", "replay_demo"),
         LIVE_PRODUCT_CHECK("live_product_check", "live_product"),
+        LIVE_CREDENTIAL_CHECK("live_credential_check", "live_product"),
+        LIVE_CATALOG_SYNC_BOUNDED("live_catalog_sync_bounded", "catalog"),
+        S3_PREFLIGHT_CHECK("s3_preflight_check", "storage"),
         CATALOG_STATUS("catalog_status", "catalog"),
         CATALOG_SYNC_DRY_RUN("catalog_sync_dry_run", "catalog"),
         SEMANTIC_METADATA_DRY_RUN("semantic_metadata_dry_run", "semantic_metadata"),
@@ -459,6 +676,13 @@ final class DemoOrchestratorService implements AutoCloseable {
 
         private String mode() {
             return mode;
+        }
+
+        private boolean requiresLiveConfirm() {
+            return switch (this) {
+                case LIVE_PRODUCT_CHECK, LIVE_CREDENTIAL_CHECK, LIVE_CATALOG_SYNC_BOUNDED, S3_PREFLIGHT_CHECK -> true;
+                default -> false;
+            };
         }
 
         private static Action from(String raw) {

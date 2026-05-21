@@ -401,6 +401,11 @@
                     <dt>Mode</dt><dd id="demo-run-mode">-</dd>
                     <dt>Release</dt><dd id="demo-run-release">-</dd>
                     <dt>Data source</dt><dd id="demo-run-data-source">-</dd>
+                    <dt>Dashboard source</dt><dd id="demo-run-dashboard-source">-</dd>
+                    <dt>Live source</dt><dd id="demo-run-live-source">-</dd>
+                    <dt>Live credentials</dt><dd id="demo-run-live-credentials">-</dd>
+                    <dt>Catalog bounds</dt><dd id="demo-run-catalog-bounds">-</dd>
+                    <dt>S3 preflight</dt><dd id="demo-run-s3-preflight">-</dd>
                     <dt>Freshness</dt><dd id="demo-run-freshness">-</dd>
                     <dt>Evidence</dt><dd id="demo-run-evidence">-</dd>
                     <dt>Error</dt><dd id="demo-run-error">-</dd>
@@ -415,11 +420,14 @@
                             <option value="semantic_metadata_dry_run">Semantic dry-run</option>
                             <option value="catalog_and_semantic_dry_run">Catalog + semantic dry-run</option>
                             <option value="live_product_check">Live product check</option>
+                            <option value="live_credential_check">Live credential check</option>
+                            <option value="live_catalog_sync_bounded">Live catalog sync bounded</option>
+                            <option value="s3_preflight_check">S3 preflight check</option>
                         </select>
                     </label>
-                    <label class="checkbox-row">
+                    <label id="demo-run-confirm-row" class="checkbox-row operator-confirm-row">
                         <input id="demo-run-confirm-live" type="checkbox" />
-                        Confirm live check
+                        Confirm live/preflight action
                     </label>
                 </div>
                 <div class="operator-actions">

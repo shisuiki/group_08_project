@@ -26,6 +26,10 @@ public class KalshiWrapper {
     private String keyId;
 
     public KalshiWrapper(String baseUrl, String keyId, String keyPath) {
+        this(baseUrl, keyId, keyPath, "");
+    }
+
+    public KalshiWrapper(String baseUrl, String keyId, String keyPath, String keyPem) {
         this.baseUrl = baseUrl;
         this.keyId = keyId;
         this.httpClient = HttpClient.newHttpClient();
@@ -34,6 +38,12 @@ public class KalshiWrapper {
                 this.privateKey = Cryptography.loadPrivateKey(keyPath);
             } catch (Exception e) {
                 System.err.println("Loading private key from configured filepath failed");
+            }
+        } else if (keyPem != null && !keyPem.isBlank()) {
+            try {
+                this.privateKey = Cryptography.loadPrivateKeyFromPem(keyPem);
+            } catch (Exception e) {
+                System.err.println("Loading private key from configured PEM failed");
             }
         }
     }

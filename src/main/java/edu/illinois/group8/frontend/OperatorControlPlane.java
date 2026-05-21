@@ -189,10 +189,21 @@ final class OperatorControlPlane {
     }
 
     private Map<String, Object> s3Status() {
+        String bucket = firstEnv("S3_RECORDING_BUCKET");
+        String region = firstEnv("AWS_REGION", "AWS_DEFAULT_REGION");
+        String prefix = firstEnv("S3_RECORDING_PREFIX");
+        boolean configured = configured(bucket);
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("bucket_configured", configured(firstEnv("S3_RECORDING_BUCKET")));
-        body.put("region", firstEnv("AWS_REGION", "AWS_DEFAULT_REGION"));
-        body.put("prefix", firstEnv("S3_RECORDING_PREFIX"));
+        body.put("bucket_configured", configured);
+        body.put("bucket_redacted", redactedIdentifier(bucket));
+        body.put("region_configured", configured(region));
+        body.put("region", configured(region) ? region : null);
+        body.put("prefix_configured", configured(prefix));
+        body.put("prefix_redacted", redactedIdentifier(prefix));
+        body.put("status", configured ? "configured_but_unverified" : "credentials_missing");
+        body.put("verified", false);
+        body.put("verification", configured ? "not_performed" : "missing_bucket");
+        body.put("write_attempted", false);
         return body;
     }
 
@@ -238,12 +249,14 @@ final class OperatorControlPlane {
         );
         boolean keyId = configured(firstEnv("KALSHI_KEY_ID"));
         boolean keyPath = configured(firstEnv("KALSHI_KEY_PATH"));
+        boolean privateKeyPem = configured(firstEnv("KALSHI_PRIVATE_KEY"));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("execution_mode", "operator_async_catalog_only");
         body.put("db_configured", configured(dbUrl) && configured(dbUser) && configured(dbPassword));
         body.put("kalshi_key_id_configured", keyId);
         body.put("kalshi_private_key_path_configured", keyPath);
-        body.put("kalshi_credentials_configured", keyId && keyPath);
+        body.put("kalshi_private_key_pem_configured", privateKeyPem);
+        body.put("kalshi_credentials_configured", keyId && (keyPath || privateKeyPem));
         body.put("kalshi_base_url", OperatorRedactor.redact(firstEnv("KALSHI_BASE_URL")));
         body.put("writes", "market_metadata");
         body.put("raw_rest_recording", false);
@@ -264,9 +277,9 @@ final class OperatorControlPlane {
             OperatorRedactor.configuredValue(input.basicAuthUserConfigured()));
         envPlan.put("FRONTEND_ADAPTER_BASIC_AUTH_PASSWORD",
             OperatorRedactor.secretPresence(input.basicAuthPasswordPresent()));
-        envPlan.put("S3_RECORDING_BUCKET", input.s3Bucket());
+        envPlan.put("S3_RECORDING_BUCKET", redactedIdentifier(input.s3Bucket()));
         envPlan.put("AWS_REGION", input.s3Region());
-        envPlan.put("S3_RECORDING_PREFIX", input.s3Prefix());
+        envPlan.put("S3_RECORDING_PREFIX", redactedIdentifier(input.s3Prefix()));
         envPlan.put("OPENROUTER_API_KEY", OperatorRedactor.secretPresence(input.openRouterApiKeyPresent()));
         envPlan.put("OPENROUTER_API_KEY_FILE", input.openRouterApiKeyFile());
         envPlan.put("LLM_METADATA_MODEL", input.semanticModel());
@@ -337,6 +350,20 @@ final class OperatorControlPlane {
 
     private static boolean configured(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static String redactedIdentifier(String value) {
+        if (!configured(value)) {
+            return "";
+        }
+        String trimmed = OperatorRedactor.redact(value.trim());
+        if (trimmed == null || trimmed.isBlank() || trimmed.startsWith("[redacted")) {
+            return trimmed;
+        }
+        if (trimmed.length() <= 6) {
+            return "<configured>";
+        }
+        return trimmed.substring(0, 3) + "..." + trimmed.substring(trimmed.length() - 2);
     }
 
     private record PlanInput(

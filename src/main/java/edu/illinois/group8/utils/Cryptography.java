@@ -24,8 +24,12 @@ public class Cryptography {
     }
 
     public static PrivateKey loadPrivateKey(String path) throws Exception {
-        Security.addProvider(new BouncyCastleProvider());
         String pem = new String(Files.readAllBytes(Paths.get(path)));
+        return loadPrivateKeyFromPem(pem);
+    }
+
+    public static PrivateKey loadPrivateKeyFromPem(String pem) throws Exception {
+        Security.addProvider(new BouncyCastleProvider());
         pem = pem.replaceAll("-----\\w+ RSA PRIVATE KEY-----", "").replaceAll("\\s", "");
 
         byte[] bytes1 = Base64.getDecoder().decode(pem);

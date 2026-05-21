@@ -602,6 +602,17 @@ main {
     width: auto;
 }
 
+.operator-confirm-row {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 6px;
+}
+
+.operator-confirm-row.requires-confirm {
+    border-color: #b58b2b;
+    background: #2a2418;
+}
+
 #operator-generate-plan,
 .operator-actions button {
     width: 100%;

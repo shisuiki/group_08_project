@@ -290,6 +290,38 @@ public class FrontendAdapterServer {
         SemanticMetadataOperatorService semanticMetadataOperator,
         CatalogSyncOperatorService catalogSyncOperator
     ) {
+        this(
+            config,
+            store,
+            metadataCatalog,
+            featurePlantStats,
+            featureOutputRefreshStatus,
+            operatorPipelineStatus,
+            operatorLatencyStatus,
+            operatorSemanticMetadataStatus,
+            semanticMarketMetadataReader,
+            releaseInfo,
+            semanticMetadataOperator,
+            catalogSyncOperator,
+            null
+        );
+    }
+
+    FrontendAdapterServer(
+        FrontendAdapterConfig config,
+        FrontendFeatureStore store,
+        FrontendMarketMetadataCatalog metadataCatalog,
+        Supplier<FeaturePlantStats> featurePlantStats,
+        Supplier<FeatureOutputRefreshStatus> featureOutputRefreshStatus,
+        Supplier<OperatorPipelineStatus> operatorPipelineStatus,
+        Function<String, OperatorLatencyStatus> operatorLatencyStatus,
+        Supplier<OperatorSemanticMetadataStatus> operatorSemanticMetadataStatus,
+        SemanticMarketMetadataReader semanticMarketMetadataReader,
+        FrontendReleaseInfo releaseInfo,
+        SemanticMetadataOperatorService semanticMetadataOperator,
+        CatalogSyncOperatorService catalogSyncOperator,
+        DemoOrchestratorService demoOrchestrator
+    ) {
         this.config = config;
         this.store = store;
         this.metadataCatalog = metadataCatalog == null
@@ -319,13 +351,13 @@ public class FrontendAdapterServer {
             : catalogSyncOperator;
         this.releaseInfo = releaseInfo == null ? FrontendReleaseInfo.empty() : releaseInfo;
         this.operatorControlPlane = new OperatorControlPlane(this.config, this.releaseInfo);
-        this.demoOrchestrator = DemoOrchestratorService.create(
+        this.demoOrchestrator = demoOrchestrator == null ? DemoOrchestratorService.create(
             this.config,
             this.releaseInfo,
             this.catalogSyncOperator,
             this.semanticMetadataOperator,
             this::demoProductStatusSnapshot
-        );
+        ) : demoOrchestrator;
     }
 
     public void start() throws IOException {
