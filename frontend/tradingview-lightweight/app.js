@@ -6,6 +6,7 @@
     const QUOTES_UPDATE_ERROR_LIMIT = 3;
     const QUOTES_STREAM_ERROR_LIMIT = 2;
     const QUOTES_UPDATE_RETRY_MS = 500;
+    const CHART_AUTO_REFRESH_MS = 15000;
     const HEALTH_POLL_MS = 5000;
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
     const MARKET_CATALOG_LIMIT = 200;
@@ -57,6 +58,19 @@
         traderMidpoint: document.getElementById('trader-midpoint'),
         traderSseStatus: document.getElementById('trader-sse-status'),
         traderSourceEvent: document.getElementById('trader-source-event'),
+        demoSignalLive: document.getElementById('demo-signal-live'),
+        demoSignalLatency: document.getElementById('demo-signal-latency'),
+        demoSignalThroughput: document.getElementById('demo-signal-throughput'),
+        demoSignalDistribution: document.getElementById('demo-signal-distribution'),
+        demoSignalReplay: document.getElementById('demo-signal-replay'),
+        distributionConnectionStatus: document.getElementById('distribution-connection-status'),
+        distributionProtocols: document.getElementById('distribution-protocols'),
+        distributionEndpoints: document.getElementById('distribution-endpoints'),
+        distributionUpdateCount: document.getElementById('distribution-update-count'),
+        distributionUpdateRate: document.getElementById('distribution-update-rate'),
+        distributionStreamStatus: document.getElementById('distribution-stream-status'),
+        distributionLastEvent: document.getElementById('distribution-last-event'),
+        distributionSamplePayload: document.getElementById('distribution-sample-payload'),
         productReadinessState: document.getElementById('product-readiness-state'),
         productReadinessReasons: document.getElementById('product-readiness-reasons'),
         marketSourceKind: document.getElementById('market-source-kind'),
@@ -125,6 +139,9 @@
         runtimeCursorLag: document.getElementById('runtime-cursor-lag'),
         runtimeQuoteStreams: document.getElementById('runtime-quote-streams'),
         runtimeQuoteWaits: document.getElementById('runtime-quote-waits'),
+        latencyThroughput: document.getElementById('latency-throughput'),
+        latencyWsSubscribed: document.getElementById('latency-ws-subscribed'),
+        latencyDbQueueDepth: document.getElementById('latency-db-queue-depth'),
         operatorReleaseProfile: document.getElementById('operator-release-profile'),
         operatorProductReadiness: document.getElementById('operator-product-readiness'),
         operatorDataSourceSummary: document.getElementById('operator-data-source-summary'),
@@ -184,6 +201,13 @@
         demoRunFreshness: document.getElementById('demo-run-freshness'),
         demoRunEvidence: document.getElementById('demo-run-evidence'),
         demoRunError: document.getElementById('demo-run-error'),
+        replayStatusState: document.getElementById('replay-status-state'),
+        replayStatusId: document.getElementById('replay-status-id'),
+        replayStatusDataset: document.getElementById('replay-status-dataset'),
+        replayStatusProjection: document.getElementById('replay-status-projection'),
+        replayStatusWindow: document.getElementById('replay-status-window'),
+        replayStatusSymbols: document.getElementById('replay-status-symbols'),
+        replayStatusError: document.getElementById('replay-status-error'),
         demoRunAction: document.getElementById('demo-run-action'),
         demoRunConfirmRow: document.getElementById('demo-run-confirm-row'),
         demoRunConfirmLive: document.getElementById('demo-run-confirm-live'),
@@ -290,6 +314,12 @@
     let quotesLoopGeneration = 0;
     let quoteSequence = null;
     let quoteUpdateErrors = 0;
+    let distributionUpdateCount = 0;
+    let distributionFirstUpdateAtMs = null;
+    let distributionLastUpdateAtMs = null;
+    let distributionLastPayload = null;
+    let distributionConnectionState = 'idle';
+    let lastHistoryRefreshMs = 0;
     let marketEntries = [];
     let marketCatalogTotal = 0;
     let marketCatalogOffset = 0;
@@ -303,7 +333,7 @@
     let semanticMapDirty = true;
     let lastSemanticMapBody = null;
     let semanticActiveGroupKey = '';
-    let activeRole = 'markets';
+    let activeRole = 'live';
     let catalogSyncStatusTimer = null;
     let semanticRunStatusTimer = null;
     let demoRunStatusTimer = null;
@@ -1757,6 +1787,7 @@
             candleSeries.setData(candles);
             volumeSeries.setData(volumes);
             chart.timeScale().fitContent();
+            lastHistoryRefreshMs = Date.now();
             const source = data.source || capability?.bestChartSource || 'chart';
             const rendered = `Rendered ${candles.length} ${chartSourceLabel(source)} bar(s) for ${symbol}`;
             renderChartState(rendered, 'fresh');
@@ -1876,8 +1907,60 @@
         }
         const quote = (data.quotes || []).find(q => q.symbol === symbol);
         renderQuote(symbol, quote, data.server_ts_ms);
+        recordDistributionUpdate(data, symbol, quote);
         loadRecentFeatures(symbol);
+        if (data.changed === true && Date.now() - lastHistoryRefreshMs >= CHART_AUTO_REFRESH_MS) {
+            loadHistory();
+        }
         return true;
+    }
+
+    function recordDistributionUpdate(data, symbol, quote) {
+        distributionUpdateCount += 1;
+        const now = Date.now();
+        if (distributionFirstUpdateAtMs == null) {
+            distributionFirstUpdateAtMs = now;
+        }
+        distributionLastUpdateAtMs = now;
+        distributionLastPayload = {
+            endpoint: distributionEndpointName(distributionConnectionState),
+            protocol: distributionProtocolName(distributionConnectionState),
+            symbol,
+            changed: data.changed === true,
+            sequence: data.sequence ?? null,
+            server_ts_ms: data.server_ts_ms ?? null,
+            quote: quote ? {
+                symbol: quote.symbol,
+                bid_micros: quote.bid_micros ?? null,
+                ask_micros: quote.ask_micros ?? null,
+                midpoint_micros: quote.midpoint_micros ?? null,
+                event_ts_ms: quote.event_ts_ms ?? null,
+                source_event_id: quote.source_event_id || null
+            } : null
+        };
+        renderDistributionStatus(lastHealthBody);
+    }
+
+    function distributionProtocolName(state) {
+        const text = String(state || '').toLowerCase();
+        if (text.includes('sse')) {
+            return 'server-sent events';
+        }
+        if (text.includes('long-poll')) {
+            return 'long-poll';
+        }
+        return 'snapshot REST';
+    }
+
+    function distributionEndpointName(state) {
+        const text = String(state || '').toLowerCase();
+        if (text.includes('sse')) {
+            return '/quotes/stream';
+        }
+        if (text.includes('long-poll')) {
+            return '/quotes/updates';
+        }
+        return '/quotes';
     }
 
     async function pollQuotes(generation, symbol, base) {
@@ -1924,6 +2007,9 @@
             renderLatencyFreshness(body);
             renderOpsTelemetry();
             renderProductModeSurface(body);
+            renderDistributionStatus(body);
+            renderReplayStatus({ replay_demo: body.replay_demo || {} });
+            renderDemoSignal(body);
         } catch (err) {
             dom.adapterHealth.textContent = 'unavailable';
             dom.adapterHealth.className = 'stale';
@@ -2243,6 +2329,137 @@
         updateDemoRunConfirmState();
     }
 
+    async function loadReplayStatus() {
+        try {
+            const body = await fetchJson('/api/demo/replay/status');
+            renderReplayStatus(body);
+        } catch (err) {
+            renderReplayStatus({ replay_demo: { status: 'unavailable', error: err.message } });
+        }
+    }
+
+    function renderReplayStatus(body) {
+        if (!dom.replayStatusState) {
+            return;
+        }
+        const replay = body?.replay_demo || body || {};
+        const state = replay.status || body?.status || 'unknown';
+        dom.replayStatusState.textContent = state;
+        dom.replayStatusState.className = replay.dataset_ready === true || state === 'projected' ? 'fresh'
+            : state === 'empty' || state === 'disabled' ? ''
+            : 'stale';
+        dom.replayStatusId.textContent = replay.replay_id || '-';
+        dom.replayStatusDataset.textContent =
+            `markets ${replay.market_count || 0} / canonical ${replay.canonical_event_count || 0}`;
+        dom.replayStatusProjection.textContent =
+            `features ${replay.feature_output_count || 0} / latest ${replay.latest_market_state_count || 0}` +
+            ` / projected ${yesNo(replay.featureplant_projected)}`;
+        const first = replay.first_event_ts_ms == null ? '-' : formatEventTs(replay.first_event_ts_ms);
+        const last = replay.last_event_ts_ms == null ? '-' : formatEventTs(replay.last_event_ts_ms);
+        dom.replayStatusWindow.textContent =
+            `${first} -> ${last} / commit ` +
+            `${replay.first_canonical_commit_seq ?? '-'}-${replay.last_canonical_commit_seq ?? '-'}`;
+        const symbols = Array.isArray(replay.available_symbols) ? replay.available_symbols : [];
+        dom.replayStatusSymbols.textContent = symbols.length
+            ? `${symbols.length}: ${symbols.slice(0, 5).join(', ')}${symbols.length > 5 ? ', ...' : ''}`
+            : '-';
+        dom.replayStatusError.textContent = replay.error || '-';
+    }
+
+    function renderDistributionStatus(body) {
+        if (!dom.distributionConnectionStatus) {
+            return;
+        }
+        const streams = body?.quote_streams || {};
+        const updates = body?.quote_updates || {};
+        const state = distributionConnectionState || 'idle';
+        dom.distributionConnectionStatus.textContent = state;
+        dom.distributionConnectionStatus.className = String(state).toLowerCase().includes('error') ? 'stale' : 'fresh';
+        dom.distributionProtocols.textContent = 'SSE / long-poll / snapshot REST';
+        dom.distributionEndpoints.textContent = '/quotes/stream, /quotes/updates, /quotes';
+        dom.distributionUpdateCount.textContent =
+            `${distributionUpdateCount} local / SSE ${streams.events || 0} / long-poll ${updates.changed || 0}`;
+        const elapsedSeconds = distributionFirstUpdateAtMs == null
+            ? 0
+            : Math.max(1, (Date.now() - distributionFirstUpdateAtMs) / 1000);
+        dom.distributionUpdateRate.textContent = elapsedSeconds > 0
+            ? `${(distributionUpdateCount / elapsedSeconds).toFixed(2)} update/s`
+            : '-';
+        dom.distributionStreamStatus.textContent =
+            `${streams.active_streams || 0}/${streams.max_streams || 0} SSE active` +
+            ` / ${updates.active_waits || 0}/${updates.max_waits || 0} long-poll waits`;
+        dom.distributionLastEvent.textContent = distributionLastUpdateAtMs == null
+            ? '-'
+            : new Date(distributionLastUpdateAtMs).toLocaleTimeString();
+        dom.distributionSamplePayload.textContent = distributionLastPayload
+            ? JSON.stringify(distributionLastPayload, null, 2)
+            : JSON.stringify({
+                endpoints: ['/quotes/stream', '/quotes/updates', '/quotes'],
+                selected_symbol: dom.symbolSelect.value || null,
+                waiting_for: 'quote update'
+            }, null, 2);
+    }
+
+    function throughputText(pipeline) {
+        if (!pipeline) {
+            return '-';
+        }
+        const windowSeconds = Number(pipeline.recent_window_seconds || 0);
+        const canonical = Number(pipeline.recent_canonical_events || 0);
+        const features = Number(pipeline.recent_feature_outputs || 0);
+        const latest = Number(pipeline.recent_latest_market_states || 0);
+        if (windowSeconds <= 0) {
+            return `canonical ${canonical} / features ${features} / latest ${latest}`;
+        }
+        return `${((canonical + features + latest) / windowSeconds).toFixed(2)} event/s` +
+            ` / canonical ${canonical} / features ${features} / latest ${latest}`;
+    }
+
+    function wsSubscribedText(body) {
+        const streams = body?.quote_streams || {};
+        const updates = body?.quote_updates || {};
+        return `${streams.active_streams || 0}/${streams.max_streams || 0} SSE` +
+            ` / ${updates.active_waits || 0}/${updates.max_waits || 0} waits`;
+    }
+
+    function dbQueueDepthText(body) {
+        const db = body?.db_writer || body?.database_writer || body?.db || {};
+        const raw = db.raw_queue_depth ?? db.queue_depth ?? db.pending_rows ?? db.pending_events;
+        const canonical = db.canonical_queue_depth ?? db.canonical_pending_rows ?? null;
+        if (raw == null && canonical == null) {
+            return 'unavailable';
+        }
+        return canonical == null ? String(raw) : `raw ${raw ?? '-'} / canonical ${canonical}`;
+    }
+
+    function renderDemoSignal(healthBody) {
+        if (!dom.demoSignalLive) {
+            return;
+        }
+        const health = healthBody || lastHealthBody || {};
+        const freshness = health.data_freshness || {};
+        const replay = health.replay_demo || {};
+        const pipeline = lastOpsPipeline?.pipeline || health.operator_pipeline || {};
+        const latency = lastOpsLatency || {};
+        const ageText = typeof freshness.latest_event_age_ms === 'number'
+            ? formatAge(Math.max(0, freshness.latest_event_age_ms))
+            : '-';
+        const latestSymbol = freshness.symbol ? ` / ${freshness.symbol}` : '';
+        const liveText = freshness.live_data_observed === true ? 'LIVE' : 'not live';
+        dom.demoSignalLive.textContent = `${liveText} age ${ageText}${latestSymbol}`;
+        dom.demoSignalLive.parentElement.classList.toggle('stale', freshness.live_data_observed !== true);
+        dom.demoSignalLatency.textContent = latency.canonical_to_latest_state_ms == null
+            ? ageText
+            : `${latency.canonical_to_latest_state_ms} ms e2e`;
+        dom.demoSignalThroughput.textContent = throughputText(pipeline);
+        dom.demoSignalDistribution.textContent =
+            `${distributionUpdateCount} browser / ${health.quote_streams?.events || 0} SSE / ` +
+            `${health.quote_updates?.changed || 0} long-poll`;
+        dom.demoSignalReplay.textContent = replay.status
+            ? `${replay.status} / ${replay.feature_output_count || 0} features`
+            : '-';
+    }
+
     function dashboardSourceText(dataSource, healthBody) {
         const sourceMode = dataSource.source_mode || healthBody?.source_mode || 'unknown';
         const featureSource = dataSource.feature_source || healthBody?.feature_source || 'unknown';
@@ -2323,6 +2540,10 @@
             `${streams.active_streams || 0}/${streams.max_streams || 0} active, ${streams.events || 0} events`;
         dom.runtimeQuoteWaits.textContent =
             `${updates.active_waits || 0}/${updates.max_waits || 0} active, ${updates.timeouts || 0} timeout`;
+        dom.latencyThroughput.textContent = throughputText(pipeline);
+        dom.latencyWsSubscribed.textContent = wsSubscribedText(body);
+        dom.latencyDbQueueDepth.textContent = dbQueueDepthText(body);
+        renderDemoSignal(lastHealthBody);
         dom.traderQuoteMode.textContent = streams.active_streams > 0 ? 'SSE' : 'long-poll';
         dom.traderSseStatus.textContent =
             `${streams.active_streams || 0}/${streams.max_streams || 0} active, ${streams.events || 0} events`;
@@ -2379,6 +2600,10 @@
             ? `${OPERATOR_LATENCY_BUDGET_MS} ms / missing`
             : `${OPERATOR_LATENCY_BUDGET_MS} ms / ${e2e <= OPERATOR_LATENCY_BUDGET_MS ? 'within' : 'over'}`;
         dom.operatorLatencyBudget.className = e2e != null && e2e <= OPERATOR_LATENCY_BUDGET_MS ? 'fresh' : 'stale';
+        dom.latencyThroughput.textContent = throughputText(pipeline);
+        dom.latencyWsSubscribed.textContent = wsSubscribedText(lastHealthBody);
+        dom.latencyDbQueueDepth.textContent = dbQueueDepthText(lastHealthBody);
+        renderDemoSignal(lastHealthBody);
         renderProductModeSurface(lastHealthBody);
     }
 
@@ -2395,10 +2620,10 @@
             + (semantic.review_required_count || 0)
             + (semantic.failed_count || 0)
             + (semantic.rate_limited_count || 0);
-        const mode = replayReady && (freshness.source_kind === 'demo' || health.source_mode === 'db')
-            ? 'Replay Demo'
-            : freshness.live_data_observed === true
-                ? 'Live Product'
+        const mode = freshness.live_data_observed === true
+            ? 'Live Product'
+            : replayReady && freshness.source_kind === 'demo'
+                ? 'Replay Demo'
                 : semanticRows > 0
                     ? 'Semantic Metadata'
                     : 'Ops/Latency';
@@ -2887,6 +3112,8 @@
     }
 
     function renderQuoteUpdateState(message, tone) {
+        distributionConnectionState = message || 'idle';
+        renderDistributionStatus(lastHealthBody);
         dom.quoteUpdateHealth.textContent = message;
         dom.quoteUpdateHealth.className = tone || '';
         dom.traderQuoteMode.textContent = message || '-';
@@ -3112,7 +3339,8 @@
     }
 
     function setActiveRole(role) {
-        activeRole = role || 'markets';
+        role = role || 'live';
+        activeRole = role;
         if (dom.dashboardShell) {
             dom.dashboardShell.dataset.activeRole = role;
         }
@@ -3136,6 +3364,16 @@
             if (semanticMapDirty || !lastSemanticMapBody) {
                 loadSemanticMap();
             }
+        }
+        if (role === 'replay') {
+            loadReplayStatus();
+            loadDemoOrchestratorStatus();
+        }
+        if (role === 'distribution') {
+            renderDistributionStatus(lastHealthBody);
+        }
+        if (role === 'live') {
+            loadHistory();
         }
     }
 
@@ -3220,14 +3458,21 @@
         loadCatalogSyncStatus();
         loadSemanticRunStatus();
         loadDemoOrchestratorStatus();
+        loadReplayStatus();
     });
 
     updateDemoRunConfirmState();
-    applyRoleVisibility('markets');
+    applyRoleVisibility('live');
+    renderDistributionStatus(null);
+    renderReplayStatus(null);
+    renderDemoSignal(null);
     setInterval(() => {
         loadHealth();
         loadOpsTelemetry();
         loadOperatorStatus();
+        if (activeRole === 'replay') {
+            loadReplayStatus();
+        }
     }, HEALTH_POLL_MS);
     loadConfig().then(loadSymbols).then(() => {
         loadHealth();
@@ -3236,5 +3481,6 @@
         loadCatalogSyncStatus();
         loadSemanticRunStatus();
         loadDemoOrchestratorStatus();
+        loadReplayStatus();
     });
 })();

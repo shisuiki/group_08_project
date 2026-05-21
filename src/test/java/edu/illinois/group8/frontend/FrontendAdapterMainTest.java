@@ -440,6 +440,7 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/operator/semantic-metadata/run-status"));
         assertTrue(app.contains("/operator/demo-orchestrator/run"));
         assertTrue(app.contains("/operator/demo-orchestrator/run-status"));
+        assertTrue(app.contains("/api/demo/replay/status"));
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/api/semantic-metadata/markets?"));
         assertTrue(app.contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
@@ -453,6 +454,10 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("Eligible generated"));
         assertTrue(app.contains("buildDemoRunRequest"));
         assertTrue(app.contains("applyRoleVisibility"));
+        assertTrue(app.contains("renderDistributionStatus"));
+        assertTrue(app.contains("renderDemoSignal"));
+        assertTrue(app.contains("loadReplayStatus"));
+        assertTrue(app.contains("CHART_AUTO_REFRESH_MS"));
         assertTrue(app.contains("dataFreshnessBadgeText"));
     }
 

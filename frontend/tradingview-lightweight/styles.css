@@ -100,28 +100,112 @@ header h1 {
     color: #f4f7f9;
 }
 
+.demo-signal-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.signal-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 4px 8px;
+    border: 1px solid #364047;
+    border-radius: 4px;
+    background: #151719;
+    color: #cbd4da;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.signal-pill strong {
+    color: #f4f7f9;
+    font-weight: 650;
+}
+
+.signal-live {
+    border-color: #2fbf71;
+    color: #f4f7f9;
+}
+
+.signal-live.stale {
+    border-color: #9b3f45;
+}
+
+.signal-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2fbf71;
+    box-shadow: 0 0 0 0 rgba(47, 191, 113, 0.55);
+    animation: signal-pulse 1.4s infinite;
+}
+
+.signal-live.stale .signal-dot {
+    background: #c74e57;
+    animation: none;
+}
+
+@keyframes signal-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(47, 191, 113, 0.55); }
+    70% { box-shadow: 0 0 0 8px rgba(47, 191, 113, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(47, 191, 113, 0); }
+}
+
 main {
     display: grid;
-    grid-template-columns: 230px minmax(360px, 1fr) 320px;
-    height: calc(100vh - 174px);
+    grid-template-columns: minmax(260px, 330px) minmax(480px, 1fr) minmax(340px, 420px);
+    height: calc(100vh - 210px);
     min-height: 540px;
 }
 
-main[data-active-role]:not([data-active-role="chart"]) {
-    grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
+main[data-active-role="assets"] {
+    grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
 }
 
-main[data-active-role]:not([data-active-role="chart"]) #chart-panel {
+main[data-active-role="assets"] #chart-panel,
+main[data-active-role="semantic"] #market-panel,
+main[data-active-role="semantic"] #chart-panel,
+main[data-active-role="distribution"] #market-panel,
+main[data-active-role="distribution"] #chart-panel,
+main[data-active-role="replay"] #market-panel,
+main[data-active-role="replay"] #chart-panel,
+main[data-active-role="operator"] #market-panel,
+main[data-active-role="operator"] #chart-panel {
     display: none;
 }
 
-main[data-active-role]:not([data-active-role="chart"]) #live-panel {
+main[data-active-role="assets"] #live-panel {
     grid-column: 2;
     min-width: 0;
     border-left: 1px solid #30373c;
 }
 
-main[data-active-role]:not([data-active-role="chart"]) #live-panel > .panel {
+main[data-active-role="semantic"],
+main[data-active-role="distribution"],
+main[data-active-role="replay"],
+main[data-active-role="operator"] {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-active-role="semantic"] #live-panel,
+main[data-active-role="distribution"] #live-panel,
+main[data-active-role="replay"] #live-panel,
+main[data-active-role="operator"] #live-panel {
+    grid-column: 1;
+    min-width: 0;
+    border-left: 0;
+}
+
+main[data-active-role="assets"] #live-panel > .panel,
+main[data-active-role="semantic"] #live-panel > .panel,
+main[data-active-role="distribution"] #live-panel > .panel,
+main[data-active-role="replay"] #live-panel > .panel,
+main[data-active-role="operator"] #live-panel > .panel {
     padding: 16px 18px;
 }
 
@@ -823,17 +907,22 @@ main[data-active-role="semantic"] .semantic-market-detail dd {
     grid-template-columns: 1fr;
 }
 
-main[data-active-role="research"] .research-controls {
+main[data-active-role="assets"] .research-controls {
     grid-template-columns: repeat(3, minmax(120px, 1fr));
 }
 
-main[data-active-role="research"] .feature-list {
+main[data-active-role="assets"] .feature-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px 14px;
 }
 
-main[data-active-role="trader"] #trader-monitor-panel dl,
+main[data-active-role="distribution"] #trader-monitor-panel dl,
+main[data-active-role="distribution"] #distribution-panel dl,
+main[data-active-role="replay"] #replay-status-panel dl,
+main[data-active-role="replay"] #demo-orchestrator-panel dl,
+main[data-active-role="live"] #runtime-operator-panel dl,
+main[data-active-role="live"] #latency-freshness-panel dl,
 main[data-active-role="operator"] #runtime-operator-panel dl,
 main[data-active-role="operator"] #latency-freshness-panel dl,
 main[data-active-role="operator"] #demo-orchestrator-panel dl,
@@ -943,11 +1032,11 @@ footer.ok { color: #2fbf71; }
         min-height: 0;
     }
 
-    main[data-active-role]:not([data-active-role="viewer"]) {
+    main[data-active-role] {
         grid-template-columns: 1fr;
     }
 
-    main[data-active-role]:not([data-active-role="viewer"]) #live-panel {
+    main[data-active-role] #live-panel {
         grid-column: auto;
     }
 
@@ -980,8 +1069,13 @@ footer.ok { color: #2fbf71; }
     main[data-active-role="semantic"] .semantic-controls,
     main[data-active-role="semantic"] .semantic-group-summary,
     main[data-active-role="semantic"] .semantic-market-detail,
-    main[data-active-role="research"] .feature-list,
-    main[data-active-role="trader"] #trader-monitor-panel dl,
+    main[data-active-role="assets"] .feature-list,
+    main[data-active-role="distribution"] #trader-monitor-panel dl,
+    main[data-active-role="distribution"] #distribution-panel dl,
+    main[data-active-role="replay"] #replay-status-panel dl,
+    main[data-active-role="replay"] #demo-orchestrator-panel dl,
+    main[data-active-role="live"] #runtime-operator-panel dl,
+    main[data-active-role="live"] #latency-freshness-panel dl,
     main[data-active-role="operator"] #runtime-operator-panel dl,
     main[data-active-role="operator"] #latency-freshness-panel dl,
     main[data-active-role="operator"] #demo-orchestrator-panel dl,

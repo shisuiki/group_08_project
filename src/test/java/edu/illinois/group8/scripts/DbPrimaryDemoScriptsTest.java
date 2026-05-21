@@ -393,6 +393,16 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(script.contains("latest_event_ts_ms"));
         assertTrue(script.contains("latest_event_age_ms"));
         assertProductStaticSmokeContract(script);
+        assertTrue(script.contains("distribution-panel"));
+        assertTrue(script.contains("distribution-sample-payload"));
+        assertTrue(script.contains("latency-throughput"));
+        assertTrue(script.contains("demo-signal-strip"));
+        assertTrue(script.contains("demo-signal-throughput"));
+        assertTrue(script.contains("replay-status-panel"));
+        assertTrue(script.contains("/api/demo/replay/status"));
+        assertTrue(script.contains("renderDistributionStatus"));
+        assertTrue(script.contains("renderDemoSignal"));
+        assertTrue(script.contains("loadReplayStatus"));
         assertTrue(script.contains("LIVE_PRODUCT_SMOKE_DB_URL"));
         assertTrue(script.contains("DB_WRITER_DATABASE_URL"));
         assertTrue(script.contains("FEATUREPLANT_DB_URL"));
@@ -552,6 +562,30 @@ class DbPrimaryDemoScriptsTest {
         assertFalse(script.contains("docker compose run"));
         assertFalse(script.contains("psql_scalar()"));
         assertFalse(script.contains("compose exec -T -e PGPASSWORD"));
+    }
+
+    @Test
+    void productDemoVisibilitySmokeIsLightweightHttpOnly() throws Exception {
+        String script = read("scripts/product-demo-visibility-smoke.sh");
+
+        assertTrue(script.contains("/health"));
+        assertTrue(script.contains("/api/markets/capabilities?limit=$TOP_N&capability=$CAPABILITY"));
+        assertTrue(script.contains("/datafeed/history?symbol=$ENCODED_SYMBOL&resolution=1"));
+        assertTrue(script.contains("/quotes?symbols=$ENCODED_SYMBOL"));
+        assertTrue(script.contains("/quotes/updates?symbols=$ENCODED_SYMBOL"));
+        assertTrue(script.contains("/api/demo/replay/status"));
+        assertTrue(script.contains("live_data_observed"));
+        assertTrue(script.contains("bars < 10"));
+        assertTrue(script.contains("PASS product_demo_health"));
+        assertTrue(script.contains("PASS product_demo_chart_bars"));
+        assertTrue(script.contains("PASS product_demo_distribution"));
+        assertTrue(script.contains("PASS product_demo_replay"));
+        assertTrue(script.contains("PASS product_demo_visibility_smoke"));
+        assertTrue(script.contains("--noproxy \"$NO_PROXY_TARGETS\""));
+        assertFalse(script.toLowerCase(Locale.ROOT).contains("docker"));
+        assertFalse(script.toLowerCase(Locale.ROOT).contains("browser"));
+        assertFalse(script.toLowerCase(Locale.ROOT).contains("s3"));
+        assertFalse(script.toLowerCase(Locale.ROOT).contains("ec2"));
     }
 
     @Test
@@ -890,9 +924,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"market-page-state\""));
         assertTrue(index.contains("id=\"chart-state\""));
         assertTrue(index.contains("id=\"market-state\""));
+        assertTrue(index.contains("id=\"live-dashboard-tab\""));
+        assertTrue(index.contains("id=\"asset-explorer-tab\""));
         assertTrue(index.contains("id=\"semantic-tab\""));
-        assertTrue(index.contains("id=\"markets-tab\""));
-        assertTrue(index.contains("id=\"chart-tab\""));
+        assertTrue(index.contains("id=\"distribution-tab\""));
+        assertTrue(index.contains("id=\"replay-tab\""));
         assertTrue(index.contains("id=\"semantic-map-panel\""));
         assertTrue(index.contains("id=\"semantic-coverage-summary\""));
         assertTrue(index.contains("id=\"semantic-treemap\""));
@@ -911,11 +947,22 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(index.contains("id=\"mode-chip-live\""));
         assertTrue(index.contains("id=\"mode-replay-readiness\""));
         assertTrue(index.contains("id=\"mode-ops-latency\""));
+        assertTrue(index.contains("id=\"live-dashboard-tab\""));
+        assertTrue(index.contains("Live Dashboard"));
+        assertTrue(index.contains("id=\"asset-explorer-tab\""));
+        assertTrue(index.contains("id=\"distribution-tab\""));
+        assertTrue(index.contains("id=\"distribution-sample-payload\""));
+        assertTrue(index.contains("id=\"replay-tab\""));
+        assertTrue(index.contains("id=\"replay-status-panel\""));
+        assertTrue(index.contains("id=\"latency-throughput\""));
+        assertTrue(index.contains("id=\"demo-signal-strip\""));
+        assertTrue(index.contains("id=\"demo-signal-throughput\""));
         assertTrue(index.contains("value=\"live_credential_check\""));
         assertTrue(index.contains("value=\"live_catalog_sync_bounded\""));
         assertTrue(index.contains("value=\"s3_preflight_check\""));
         assertTrue(index.contains("id=\"demo-run-start\""));
-        assertTrue(index.contains("data-role-panel=\"operator\""));
+        assertTrue(index.contains("data-role-panel=\"live,operator\""));
+        assertTrue(index.contains("data-role-panel=\"replay,operator\""));
         assertTrue(app.contains("body.release"));
         assertTrue(app.contains("body.data_freshness"));
         assertTrue(app.contains("body.quote_streams"));
@@ -950,7 +997,12 @@ class DbPrimaryDemoScriptsTest {
         assertFalse(app.contains("loadSemanticMap();\n        loadCatalogSyncStatus();"));
         assertTrue(app.contains("/operator/catalog/sync"));
         assertTrue(app.contains("/operator/demo-orchestrator/run"));
+        assertTrue(app.contains("/api/demo/replay/status"));
         assertTrue(app.contains("renderProductModeSurface"));
+        assertTrue(app.contains("renderDistributionStatus"));
+        assertTrue(app.contains("renderDemoSignal"));
+        assertTrue(app.contains("loadReplayStatus"));
+        assertTrue(app.contains("CHART_AUTO_REFRESH_MS"));
         assertTrue(app.contains("replayStatusText"));
         assertTrue(app.contains("featureplant_projected"));
         assertTrue(app.contains("canonical_event_count"));
@@ -972,6 +1024,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(styles.contains("semantic-treemap"));
         assertTrue(styles.contains("role-hidden"));
         assertTrue(styles.contains("demo-orchestrator-grid"));
+        assertTrue(styles.contains("data-active-role=\"distribution\""));
+        assertTrue(styles.contains("data-active-role=\"replay\""));
         assertTrue(styles.contains("mode-chip-row"));
         assertTrue(styles.contains("mode-chip.active"));
         assertTrue(styles.contains("ticker-text"));

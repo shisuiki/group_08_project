@@ -31,25 +31,32 @@
                 Lookback
                 <select id="lookback-select">
                     <option value="900">15 min</option>
-                    <option value="3600" selected>1 h</option>
+                    <option value="3600">1 h</option>
                     <option value="21600">6 h</option>
-                    <option value="86400">24 h</option>
+                    <option value="86400" selected>24 h</option>
                 </select>
             </label>
             <button id="refresh-symbols" type="button">Reload</button>
             <button id="load-history" type="button">Load Chart</button>
         </div>
         <nav id="view-tabs" class="view-tabs" aria-label="dashboard roles" role="tablist">
-            <button id="overview-tab" type="button" data-role="overview" data-target="product-mode-panel" role="tab" aria-selected="false">Overview</button>
-            <button id="markets-tab" type="button" data-role="markets" data-target="market-panel" role="tab" aria-selected="true">Markets</button>
-            <button id="chart-tab" type="button" data-role="chart" data-target="chart-panel" role="tab" aria-selected="false">Chart</button>
-            <button id="semantic-tab" type="button" data-role="semantic" data-target="semantic-map-panel" role="tab" aria-selected="false">Semantic</button>
-            <button id="research-tab" type="button" data-role="research" data-target="research-features-panel" role="tab" aria-selected="false">Research</button>
-            <button id="operator-tab" type="button" data-role="operator" data-target="runtime-operator-panel" role="tab" aria-selected="false">Operations</button>
+            <button id="live-dashboard-tab" type="button" data-role="live" data-target="chart-panel" role="tab" aria-selected="true">Live Dashboard</button>
+            <button id="asset-explorer-tab" type="button" data-role="assets" data-target="market-panel" role="tab" aria-selected="false">Asset Explorer</button>
+            <button id="semantic-tab" type="button" data-role="semantic" data-target="semantic-map-panel" role="tab" aria-selected="false">Semantic Map</button>
+            <button id="distribution-tab" type="button" data-role="distribution" data-target="distribution-panel" role="tab" aria-selected="false">Distribution</button>
+            <button id="replay-tab" type="button" data-role="replay" data-target="replay-status-panel" role="tab" aria-selected="false">Replay</button>
+            <button id="operator-tab" type="button" data-role="operator" data-target="runtime-operator-panel" role="tab" aria-selected="false">Operator</button>
         </nav>
+        <div id="demo-signal-strip" class="demo-signal-strip" aria-live="polite">
+            <span class="signal-pill signal-live"><span class="signal-dot"></span><span id="demo-signal-live">live initializing</span></span>
+            <span class="signal-pill"><span>Latency</span><strong id="demo-signal-latency">-</strong></span>
+            <span class="signal-pill"><span>Throughput</span><strong id="demo-signal-throughput">-</strong></span>
+            <span class="signal-pill"><span>Distribution</span><strong id="demo-signal-distribution">-</strong></span>
+            <span class="signal-pill"><span>Replay</span><strong id="demo-signal-replay">-</strong></span>
+        </div>
     </header>
 
-    <main id="dashboard-shell" data-active-role="markets">
+    <main id="dashboard-shell" data-active-role="live">
         <section id="market-panel" class="panel" aria-label="market catalog">
             <div class="panel-heading">
                 <h2>Markets</h2>
@@ -60,7 +67,7 @@
                 <select id="market-capability-filter" aria-label="Market capability">
                     <option value="all">Eligible assets</option>
                     <option value="chart_ready">Chart ready</option>
-                    <option value="quote_available">Quote available</option>
+                    <option value="quote_available" selected>Quote available</option>
                     <option value="quote_stale">Quote stale</option>
                     <option value="metadata_only">Metadata/catalog only</option>
                     <option value="semantic_tagged">Semantic tagged</option>
@@ -111,7 +118,7 @@
         </section>
 
         <aside id="live-panel">
-            <section class="panel" data-role-panel="chart">
+            <section class="panel" data-role-panel="live,distribution">
                 <div class="panel-heading">
                     <h2>Current Quote</h2>
                     <span id="live-symbol" class="ticker-text">-</span>
@@ -124,7 +131,7 @@
                 </dl>
             </section>
 
-            <section id="trader-monitor-panel" class="panel" data-role-panel="chart">
+            <section id="trader-monitor-panel" class="panel" data-role-panel="live,distribution">
                 <div class="panel-heading">
                     <h2>Quote Monitor</h2>
                     <span id="trader-quote-mode">-</span>
@@ -140,7 +147,23 @@
                 </dl>
             </section>
 
-            <section id="product-market-panel" class="panel" data-role-panel="overview,markets,chart">
+            <section id="distribution-panel" class="panel" data-role-panel="distribution">
+                <div class="panel-heading">
+                    <h2>Distribution</h2>
+                    <span id="distribution-connection-status">-</span>
+                </div>
+                <dl>
+                    <dt>Protocols</dt><dd id="distribution-protocols">-</dd>
+                    <dt>Endpoints</dt><dd id="distribution-endpoints">-</dd>
+                    <dt>Updates</dt><dd id="distribution-update-count">-</dd>
+                    <dt>Rate</dt><dd id="distribution-update-rate">-</dd>
+                    <dt>Stream status</dt><dd id="distribution-stream-status">-</dd>
+                    <dt>Last event</dt><dd id="distribution-last-event">-</dd>
+                </dl>
+                <pre id="distribution-sample-payload" class="operator-plan-output"></pre>
+            </section>
+
+            <section id="product-market-panel" class="panel" data-role-panel="live,assets">
                 <div class="panel-heading">
                     <h2>Product Readiness</h2>
                     <span id="product-readiness-state">-</span>
@@ -153,7 +176,7 @@
                 </dl>
             </section>
 
-            <section id="product-mode-panel" class="panel" data-role-panel="overview">
+            <section id="product-mode-panel" class="panel" data-role-panel="live,replay">
                 <div class="panel-heading">
                     <h2>Product Mode</h2>
                     <span id="product-mode-state">-</span>
@@ -176,7 +199,7 @@
                 </dl>
             </section>
 
-            <section class="panel" data-role-panel="markets,chart">
+            <section class="panel" data-role-panel="live,assets">
                 <div class="panel-heading">
                     <h2>Selected Market</h2>
                     <span id="market-status">-</span>
@@ -189,7 +212,7 @@
                 </dl>
             </section>
 
-            <section id="research-features-panel" class="panel" data-role-panel="research">
+            <section id="research-features-panel" class="panel" data-role-panel="assets">
                 <div class="panel-heading">
                     <h2>Research Features</h2>
                     <span id="feature-count">0</span>
@@ -291,7 +314,7 @@
                 </dl>
             </section>
 
-            <section class="panel" data-role-panel="overview">
+            <section class="panel" data-role-panel="live">
                 <div class="panel-heading">
                     <h2>Runtime Health</h2>
                     <span id="adapter-health">-</span>
@@ -307,7 +330,7 @@
                 </dl>
             </section>
 
-            <section id="runtime-operator-panel" class="panel" data-role-panel="operator">
+            <section id="runtime-operator-panel" class="panel" data-role-panel="live,operator">
                 <div class="panel-heading">
                     <h2>Operations</h2>
                     <span id="runtime-source-mode">-</span>
@@ -332,7 +355,7 @@
                 </dl>
             </section>
 
-            <section id="latency-freshness-panel" class="panel" data-role-panel="operator">
+            <section id="latency-freshness-panel" class="panel" data-role-panel="live,operator">
                 <div class="panel-heading">
                     <h2>Latency/Freshness</h2>
                     <span id="freshness-status-class">-</span>
@@ -346,6 +369,9 @@
                     <dt>Store seq</dt><dd id="freshness-store-sequence">-</dd>
                     <dt>FeaturePlant lag</dt><dd id="featureplant-lag-events">-</dd>
                     <dt>Canonical max seq</dt><dd id="canonical-max-seq">-</dd>
+                    <dt>Throughput</dt><dd id="latency-throughput">-</dd>
+                    <dt>WS subscribed</dt><dd id="latency-ws-subscribed">-</dd>
+                    <dt>DB queue depth</dt><dd id="latency-db-queue-depth">-</dd>
                 </dl>
             </section>
 
@@ -435,9 +461,24 @@
                 <pre id="operator-env-plan" class="operator-plan-output"></pre>
             </section>
 
-            <section id="demo-orchestrator-panel" class="panel" data-role-panel="operator">
+            <section id="replay-status-panel" class="panel" data-role-panel="replay">
                 <div class="panel-heading">
-                    <h2>Demo Orchestrator / Runbook</h2>
+                    <h2>Replay Status</h2>
+                    <span id="replay-status-state">-</span>
+                </div>
+                <dl>
+                    <dt>Replay id</dt><dd id="replay-status-id">-</dd>
+                    <dt>Dataset</dt><dd id="replay-status-dataset">-</dd>
+                    <dt>Projection</dt><dd id="replay-status-projection">-</dd>
+                    <dt>Window</dt><dd id="replay-status-window">-</dd>
+                    <dt>Symbols</dt><dd id="replay-status-symbols">-</dd>
+                    <dt>Error</dt><dd id="replay-status-error">-</dd>
+                </dl>
+            </section>
+
+            <section id="demo-orchestrator-panel" class="panel" data-role-panel="replay,operator">
+                <div class="panel-heading">
+                    <h2>Replay Trigger / Runbook</h2>
                     <span id="demo-run-state">idle</span>
                 </div>
                 <dl>
