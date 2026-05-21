@@ -110,6 +110,7 @@
         semanticCoverageSummary: document.getElementById('semantic-coverage-summary'),
         semanticGroupSummary: document.getElementById('semantic-group-summary'),
         semanticTreemap: document.getElementById('semantic-treemap'),
+        semanticMarketDetail: document.getElementById('semantic-market-detail'),
         semanticDetailMarket: document.getElementById('semantic-detail-market'),
         semanticDetailTitle: document.getElementById('semantic-detail-title'),
         semanticDetailStatus: document.getElementById('semantic-detail-status'),
@@ -955,17 +956,15 @@
         const review = Number(summary.semantic_review_required_count || 0);
         const failed = Number(summary.semantic_failed_count || 0);
         const rateLimited = Number(summary.semantic_rate_limited_count || 0);
+        const coveragePct = total > 0 ? Math.round((generated / total) * 100) : 0;
         const items = [
-            ['Eligible assets', total],
-            ['Generated', generated],
-            ['Review', review],
-            ['Failed', failed],
-            ['Rate limited', rateLimited],
-            ['Missing', missing],
-            ['Eligible generated', generated]
+            ['Eligible generated', `${formatCompactNumber(generated)} / ${formatCompactNumber(total)} (${coveragePct}%)`],
+            ['Missing', formatCompactNumber(missing)],
+            ['Review', formatCompactNumber(review)],
+            ['Failed', formatCompactNumber(failed + rateLimited)]
         ];
         dom.semanticCoverageSummary.innerHTML = items.map(([label, value]) =>
-            `<div class="coverage-chip"><strong>${escapeHtml(formatCompactNumber(value || 0))}</strong>` +
+            `<div class="coverage-chip"><strong>${escapeHtml(String(value || '-'))}</strong>` +
             `<span>${escapeHtml(label)}</span></div>`
         ).join('');
     }
@@ -1234,11 +1233,10 @@
         const mode = dom.semanticRenderMode.value || 'groups';
         if (!semanticActiveGroupKey && mode === 'groups') {
             dom.semanticMapState.textContent =
-                `${groups.length} group(s) / ${leaves.length} rendered semantic market(s) grouped by ${groupBy}` +
+                `${groups.length} group(s) / ${leaves.length} rendered semantic market(s) / size by OI when available / color by recent quote activity / grouped by ${groupBy}` +
                 coverageSuffix;
             renderSemanticGroupTiles(groups);
-            const firstGroup = groups.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0))[0];
-            renderSemanticDetailFromGroup(firstGroup);
+            renderSemanticDetail(null);
             return;
         }
         const selectedGroups = activeGroup ? [activeGroup] : groups;
@@ -1248,7 +1246,7 @@
         const displayLeaves = semanticRenderableLeaves(selectedGroups, limit);
         const hiddenCount = Number(displayLeaves.find(leaf => leaf.is_other)?.hidden_count || 0);
         dom.semanticMapState.textContent =
-            `${displayLeaves.length} rendered / ${leaves.length} market(s)` +
+            `${displayLeaves.length} rendered / ${leaves.length} market(s) / size by OI when available / color by recent quote activity` +
             `${hiddenCount > 0 ? ` / ${hiddenCount} in Other` : ''}` +
             `${activeGroup ? ` / ${activeGroup.label || activeGroup.key}` : ` / grouped by ${groupBy}`}` +
             coverageSuffix;
@@ -1269,6 +1267,8 @@
             tile.style.height = `${rect.height}%`;
             tile.style.background = semanticTileColor(rect.leaf);
             tile.innerHTML = semanticTileMarkup(rect.leaf, rect.groupKey, sizeClass);
+            tile.addEventListener('mouseenter', () => renderSemanticDetailFromLeaf(rect.leaf));
+            tile.addEventListener('focus', () => renderSemanticDetailFromLeaf(rect.leaf));
             tile.addEventListener('click', () => {
                 if (rect.leaf.market_ticker) {
                     selectSemanticMarket(rect.leaf.market_ticker, rect.groupKey);
@@ -1281,7 +1281,7 @@
         dom.semanticTreemap.appendChild(fragment);
         const first = displayLeaves[0];
         if (first) {
-            renderSemanticDetailFromLeaf(first);
+            renderSemanticDetail(null);
         }
     }
 
@@ -1317,12 +1317,12 @@
             value: Math.max(1, Number(group.value || 0)),
             generated_count: Number(group.generated_count || 0),
             review_required_count: Number(group.review_required_count || 0),
-            average_confidence: group.average_confidence
+            average_confidence: group.average_confidence,
+            leaves: Array.isArray(group.leaves) ? group.leaves : []
         })).filter(group => group.count > 0);
-        const groupRects = sliceDice(
+        const groupRects = squarifiedTreemap(
             sourceGroups.map(group => ({ item: group, value: group.value })),
             { x: 0, y: 0, width: 100, height: 100 },
-            true
         );
         for (const groupRect of groupRects) {
             const group = groupRect.item;
@@ -1340,6 +1340,24 @@
                 `<strong>${escapeHtml(group.label)}</strong>` +
                 `<span>${group.count} market(s)</span>` +
                 `<small>${formatCompactNumber(group.value)} value / ${confidenceText(group.average_confidence)}</small>`;
+            const childLeaves = semanticRenderableLeaves([{ ...group, leaves: group.leaves || [] }], 18);
+            const childRects = layoutSemanticLeafTreemap(childLeaves).filter(rect => rect.leaf.market_ticker);
+            if (childRects.length > 0 && groupRect.width > 16 && groupRect.height > 16) {
+                const mini = document.createElement('div');
+                mini.className = 'semantic-group-mini-map';
+                for (const childRect of childRects.slice(0, 12)) {
+                    const child = document.createElement('span');
+                    child.style.left = `${childRect.x}%`;
+                    child.style.top = `${childRect.y}%`;
+                    child.style.width = `${childRect.width}%`;
+                    child.style.height = `${childRect.height}%`;
+                    child.style.background = semanticTileColor(childRect.leaf);
+                    mini.appendChild(child);
+                }
+                tile.appendChild(mini);
+            }
+            tile.addEventListener('mouseenter', () => renderSemanticDetailFromGroup(group));
+            tile.addEventListener('focus', () => renderSemanticDetailFromGroup(group));
             tile.addEventListener('click', () => selectSemanticGroup(group.key));
             dom.semanticTreemap.appendChild(tile);
         }
@@ -1385,10 +1403,9 @@
     }
 
     function layoutSemanticLeafTreemap(leaves) {
-        const rects = sliceDice(
+        const rects = squarifiedTreemap(
             leaves.map(leaf => ({ item: leaf, value: Math.max(1, Number(leaf.value || 0)) })),
             { x: 0, y: 0, width: 100, height: 100 },
-            true
         ).map(rect => ({
             groupKey: rect.item.group_key || 'unknown',
             leaf: rect.item,
@@ -1403,43 +1420,69 @@
     function semanticGroupTileColor(group) {
         const confidence = Math.max(0, Math.min(1, Number(group.average_confidence)));
         const confidenceValue = Number.isFinite(confidence) ? confidence : 0.5;
-        const hueOffset = semanticStableHueOffset(group.key || group.label || '');
-        return `hsl(${154 + Math.round(confidenceValue * 18) + hueOffset}, 42%, ${Math.round(28 + confidenceValue * 11)}%)`;
+        const hue = semanticStableHue({
+            sector: group.group_by === 'sector' ? group.key : '',
+            subsector: group.group_by === 'subsector' ? group.key : '',
+            event_type: group.group_by === 'event_type' ? group.key : '',
+            market_ticker: group.key || group.label || ''
+        });
+        return `hsl(${hue}, ${Math.round(30 + confidenceValue * 22)}%, ${Math.round(27 + confidenceValue * 13)}%)`;
     }
 
-    function sliceDice(items, rect, horizontal) {
+    function squarifiedTreemap(items, rect) {
         if (items.length === 0) {
             return [];
         }
-        const total = items.reduce((sum, item) => sum + Math.max(1, Number(item.value || 0)), 0);
-        let cursor = horizontal ? rect.x : rect.y;
-        const output = [];
-        for (let index = 0; index < items.length; index++) {
-            const item = items[index];
-            const remaining = horizontal
-                ? rect.x + rect.width - cursor
-                : rect.y + rect.height - cursor;
-            const size = index === items.length - 1
-                ? Math.max(0, remaining)
-                : (horizontal ? rect.width : rect.height) * (Math.max(1, Number(item.value || 0)) / total);
-            const next = horizontal
-                ? { item: item.item, x: cursor, y: rect.y, width: size, height: rect.height }
-                : { item: item.item, x: rect.x, y: cursor, width: rect.width, height: size };
-            output.push(next);
-            cursor += size;
-        }
-        return output;
+        const sorted = items
+            .map(item => ({
+                item: item.item,
+                value: Math.max(1, Number(item.value || 0))
+            }))
+            .sort((a, b) => b.value - a.value);
+        return binaryTreemap(sorted, rect);
     }
 
-    function insetRect(rect, padding) {
-        const xPadding = Math.min(padding, rect.width / 4);
-        const yPadding = Math.min(padding, rect.height / 4);
-        return {
-            x: rect.x + xPadding,
-            y: rect.y + yPadding,
-            width: Math.max(0, rect.width - xPadding * 2),
-            height: Math.max(0, rect.height - yPadding * 2)
-        };
+    function binaryTreemap(items, rect) {
+        if (items.length === 0 || rect.width <= 0 || rect.height <= 0) {
+            return [];
+        }
+        if (items.length === 1) {
+            return [{ item: items[0].item, x: rect.x, y: rect.y, width: rect.width, height: rect.height }];
+        }
+        const total = items.reduce((sum, item) => sum + item.value, 0);
+        let running = 0;
+        let split = 1;
+        for (let index = 0; index < items.length - 1; index++) {
+            const next = running + items[index].value;
+            if (Math.abs(total / 2 - next) <= Math.abs(total / 2 - running)) {
+                running = next;
+                split = index + 1;
+            } else if (index > 0) {
+                break;
+            }
+        }
+        const first = items.slice(0, split);
+        const second = items.slice(split);
+        const firstValue = first.reduce((sum, item) => sum + item.value, 0);
+        const ratio = Math.max(0.05, Math.min(0.95, firstValue / Math.max(1, total)));
+        if (rect.width >= rect.height) {
+            const firstWidth = rect.width * ratio;
+            return binaryTreemap(first, { x: rect.x, y: rect.y, width: firstWidth, height: rect.height })
+                .concat(binaryTreemap(second, {
+                    x: rect.x + firstWidth,
+                    y: rect.y,
+                    width: Math.max(0, rect.width - firstWidth),
+                    height: rect.height
+                }));
+        }
+        const firstHeight = rect.height * ratio;
+        return binaryTreemap(first, { x: rect.x, y: rect.y, width: rect.width, height: firstHeight })
+            .concat(binaryTreemap(second, {
+                x: rect.x,
+                y: rect.y + firstHeight,
+                width: rect.width,
+                height: Math.max(0, rect.height - firstHeight)
+            }));
     }
 
     async function selectSemanticMarket(marketTicker, groupKey) {
@@ -1534,7 +1577,7 @@
             tags: dom.semanticGroupBy.value === 'tag' ? group.key : '-',
             confidence: confidenceText(group.average_confidence),
             openInterest: formatCompactNumber(group.value || 0),
-            freshness: `${Number(group.count || 0)} market(s)`,
+            freshness: `${Number(group.count || 0)} market(s), sized by OI`,
             quote: '-'
         });
     }
@@ -1562,6 +1605,7 @@
     }
 
     function renderSemanticDetail(detail) {
+        dom.semanticMarketDetail.classList.toggle('visible', Boolean(detail));
         dom.semanticDetailMarket.textContent = detail?.market || '-';
         dom.semanticDetailTitle.textContent = detail?.title || '-';
         dom.semanticDetailStatus.textContent = detail?.status || '-';
@@ -1660,32 +1704,51 @@
         if (leaf.is_other) {
             return 'hsl(210, 20%, 30%)';
         }
-        const confidence = Math.max(0, Math.min(1, Number(leaf.metadata_confidence)));
-        const confidenceValue = Number.isFinite(confidence) ? confidence : 0.5;
-        const hueOffset = semanticStableHueOffset(leaf.market_ticker || leaf.label || '');
-        const lightness = Math.round(27 + confidenceValue * 12);
+        const activity = semanticRecentActivityScore(leaf);
+        const baseHue = semanticStableHue(leaf);
+        const lightness = Math.round(23 + activity * 22);
+        const saturation = Math.round(20 + activity * 48);
         const stale = leaf.quote && leaf.quote.freshness_status && leaf.quote.freshness_status !== 'available';
         if (status === 'failed') {
-            return `hsl(${4 + hueOffset}, 42%, ${Math.max(30, lightness)}%)`;
+            return `hsl(4, 42%, ${Math.max(30, lightness)}%)`;
         }
         if (status === 'review_required') {
-            return `hsl(${38 + hueOffset}, 53%, ${Math.max(32, lightness)}%)`;
+            return `hsl(38, 53%, ${Math.max(32, lightness)}%)`;
         }
         if (status === 'rate_limited') {
-            return `hsl(${82 + hueOffset}, 18%, ${Math.max(31, lightness)}%)`;
+            return `hsl(82, 22%, ${Math.max(31, lightness)}%)`;
         }
         if (stale) {
-            return `hsl(${63 + hueOffset}, 22%, ${Math.max(30, lightness)}%)`;
+            return `hsl(${baseHue}, ${Math.max(18, saturation - 18)}%, ${Math.max(25, lightness - 5)}%)`;
         }
-        return `hsl(${150 + Math.round(confidenceValue * 22) + hueOffset}, 49%, ${lightness}%)`;
+        return `hsl(${baseHue}, ${saturation}%, ${lightness}%)`;
     }
 
-    function semanticStableHueOffset(value) {
+    function semanticRecentActivityScore(leaf) {
+        const quote = leaf.quote || {};
+        const ageMs = Number(quote.latest_state_age_ms);
+        const openInterest = Number(leaf.open_interest ?? quote.open_interest ?? leaf.value);
+        const oiScore = Number.isFinite(openInterest) && openInterest > 0
+            ? Math.min(1, Math.log10(openInterest + 1) / 5)
+            : 0.12;
+        const ageScore = Number.isFinite(ageMs)
+            ? Math.max(0, Math.min(1, 1 - Math.log10(Math.max(1, ageMs)) / 6))
+            : 0.18;
+        return Math.max(0.08, Math.min(1, oiScore * 0.55 + ageScore * 0.45));
+    }
+
+    function semanticStableHue(leaf) {
+        const value = [
+            leaf.sector,
+            leaf.subsector,
+            leaf.event_type,
+            leaf.market_ticker || leaf.label || ''
+        ].filter(Boolean).join('|');
         let hash = 0;
         for (let index = 0; index < value.length; index++) {
             hash = (hash * 31 + value.charCodeAt(index)) % 997;
         }
-        return (hash % 15) - 7;
+        return 118 + (hash % 92);
     }
 
     function confidenceText(value) {
