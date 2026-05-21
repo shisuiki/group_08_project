@@ -30,52 +30,58 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                 count(*) filter (
                     where feature_name = 'feature.bbo'
                       and event_ts_ms is not null
-                      and "values" ? 'midpoint_micros'
+                      and jsonb_exists("values", 'midpoint_micros')
                 ) as bbo_chart_count,
                 count(*) filter (
                     where feature_name = 'feature.ticker_snapshot'
                       and event_ts_ms is not null
                       and (
-                          "values" ? 'price_micros'
-                          or ("values" ? 'yes_bid_micros' and "values" ? 'yes_ask_micros')
+                          jsonb_exists("values", 'price_micros')
+                          or (jsonb_exists("values", 'yes_bid_micros')
+                              and jsonb_exists("values", 'yes_ask_micros'))
                       )
                 ) as ticker_chart_count,
                 count(*) filter (
                     where feature_name = 'feature.trade_tape'
                       and event_ts_ms is not null
-                      and ("values" ? 'yes_price_micros' or "values" ? 'no_price_micros')
+                      and (jsonb_exists("values", 'yes_price_micros')
+                           or jsonb_exists("values", 'no_price_micros'))
                 ) as trade_chart_count,
                 count(*) filter (
                     where feature_name = 'feature.bbo'
                       and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000)
-                      and "values" ? 'midpoint_micros'
+                      and jsonb_exists("values", 'midpoint_micros')
                 ) + count(*) filter (
                     where feature_name = 'feature.ticker_snapshot'
                       and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000)
                       and (
-                          "values" ? 'price_micros'
-                          or ("values" ? 'yes_bid_micros' and "values" ? 'yes_ask_micros')
+                          jsonb_exists("values", 'price_micros')
+                          or (jsonb_exists("values", 'yes_bid_micros')
+                              and jsonb_exists("values", 'yes_ask_micros'))
                       )
                 ) + count(*) filter (
                     where feature_name = 'feature.trade_tape'
                       and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000)
-                      and ("values" ? 'yes_price_micros' or "values" ? 'no_price_micros')
+                      and (jsonb_exists("values", 'yes_price_micros')
+                           or jsonb_exists("values", 'no_price_micros'))
                 ) as bbo_1h_count,
                 count(*) filter (
                     where feature_name = 'feature.bbo'
                       and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000)
-                      and "values" ? 'midpoint_micros'
+                      and jsonb_exists("values", 'midpoint_micros')
                 ) + count(*) filter (
                     where feature_name = 'feature.ticker_snapshot'
                       and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000)
                       and (
-                          "values" ? 'price_micros'
-                          or ("values" ? 'yes_bid_micros' and "values" ? 'yes_ask_micros')
+                          jsonb_exists("values", 'price_micros')
+                          or (jsonb_exists("values", 'yes_bid_micros')
+                              and jsonb_exists("values", 'yes_ask_micros'))
                       )
                 ) + count(*) filter (
                     where feature_name = 'feature.trade_tape'
                       and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000)
-                      and ("values" ? 'yes_price_micros' or "values" ? 'no_price_micros')
+                      and (jsonb_exists("values", 'yes_price_micros')
+                           or jsonb_exists("values", 'no_price_micros'))
                 ) as bbo_24h_count
             from feature_outputs
             where market_ticker is not null

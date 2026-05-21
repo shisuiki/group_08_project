@@ -140,6 +140,30 @@ class JdbcMarketCapabilityReaderTest {
     }
 
     @Test
+    void generatedSqlUsesOnlyRealJdbcPlaceholders() {
+        MarketCapabilityReadRequest request = new MarketCapabilityReadRequest(
+            "rate",
+            "indexed",
+            "chart_ready",
+            50,
+            100,
+            "v1",
+            false
+        );
+        List<Object> summaryBindings = new ArrayList<>();
+        List<Object> pageBindings = new ArrayList<>();
+
+        String summarySql = JdbcMarketCapabilityReader.summarySql(request, summaryBindings);
+        String pageSql = JdbcMarketCapabilityReader.pageSql(request, pageBindings);
+
+        assertEquals(summaryBindings.size(), placeholderCount(summarySql));
+        assertEquals(pageBindings.size(), placeholderCount(pageSql));
+        assertTrue(summarySql.contains("jsonb_exists(\"values\", 'midpoint_micros')"));
+        assertTrue(pageSql.contains("jsonb_exists(\"values\", 'yes_bid_micros')"));
+        assertTrue(pageSql.contains("jsonb_exists(\"values\", 'yes_price_micros')"));
+    }
+
+    @Test
     void wrapsSqlFailureWithCapabilityContext() {
         RecordingJdbc jdbc = new RecordingJdbc(List.of(List.of(), List.of()));
         jdbc.failExecuteQuery = true;
@@ -167,6 +191,16 @@ class JdbcMarketCapabilityReaderTest {
         ), bindings).toLowerCase(Locale.ROOT);
 
         assertTrue(sql.contains(fragment), filter + " SQL missing " + fragment);
+    }
+
+    private static int placeholderCount(String sql) {
+        int count = 0;
+        for (int index = 0; index < sql.length(); index++) {
+            if (sql.charAt(index) == '?') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static Map<String, Object> row(Object... keyValues) {
