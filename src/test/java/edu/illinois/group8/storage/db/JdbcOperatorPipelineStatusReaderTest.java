@@ -43,6 +43,7 @@ class JdbcOperatorPipelineStatusReaderTest {
         assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, jdbc.parameters.get(2));
         assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, jdbc.parameters.get(3));
         assertEquals(JdbcOperatorPipelineStatusReader.RECENT_WINDOW_SECONDS, jdbc.parameters.get(4));
+        assertEquals(JdbcOperatorPipelineStatusReader.QUERY_TIMEOUT_SECONDS, jdbc.queryTimeoutSeconds);
         assertEquals("degraded", status.status());
         assertEquals("featureplant-prod", status.cursorName());
         assertEquals(8L, status.cursorCommitSeq());
@@ -116,6 +117,7 @@ class JdbcOperatorPipelineStatusReaderTest {
         private final Map<Integer, Object> parameters = new HashMap<>();
         private int rowIndex = -1;
         private String preparedSql;
+        private int queryTimeoutSeconds;
         private boolean failExecuteQuery;
 
         private RecordingJdbc(List<Map<String, Object>> rows) {
@@ -153,6 +155,10 @@ class JdbcOperatorPipelineStatusReaderTest {
             return switch (method.getName()) {
                 case "setString" -> {
                     parameters.put((Integer) args[0], args[1]);
+                    yield null;
+                }
+                case "setQueryTimeout" -> {
+                    queryTimeoutSeconds = (Integer) args[0];
                     yield null;
                 }
                 case "setLong" -> {

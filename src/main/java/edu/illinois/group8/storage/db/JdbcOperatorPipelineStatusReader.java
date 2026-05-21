@@ -8,6 +8,7 @@ import java.util.Objects;
 
 public final class JdbcOperatorPipelineStatusReader {
     static final long RECENT_WINDOW_SECONDS = 900L;
+    static final int QUERY_TIMEOUT_SECONDS = 2;
     static final String STATUS_SQL = """
         select
             coalesce((
@@ -65,6 +66,7 @@ public final class JdbcOperatorPipelineStatusReader {
         String normalizedCursorName = JdbcFeaturePlantCursorStore.normalizeCursorName(cursorName);
         try (Connection connection = connectionFactory.openConnection();
              PreparedStatement statement = connection.prepareStatement(STATUS_SQL)) {
+            statement.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
             statement.setString(1, normalizedCursorName);
             statement.setLong(2, RECENT_WINDOW_SECONDS);
             statement.setLong(3, RECENT_WINDOW_SECONDS);
