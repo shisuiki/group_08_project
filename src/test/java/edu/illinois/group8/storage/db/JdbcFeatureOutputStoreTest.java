@@ -9,6 +9,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Types;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -89,15 +90,17 @@ class JdbcFeatureOutputStoreTest {
         store.insertFeatureOutput(output);
 
         assertEquals(1, jdbc.openConnections);
-        assertEquals(1, jdbc.executeUpdateCalls);
-        assertEquals(JdbcFeatureOutputStore.INSERT_SQL, jdbc.preparedSql);
-        assertEquals("feature-event-1", jdbc.parameters.get(1));
-        assertEquals(null, jdbc.parameters.get(2));
-        assertEquals("feature.bbo", jdbc.parameters.get(3));
-        assertEquals(2, jdbc.parameters.get(4));
-        assertEquals(null, jdbc.parameters.get(5));
-        assertEquals(new SqlNull(Types.BIGINT), jdbc.parameters.get(6));
-        assertEquals("{\"midpoint_micros\":123}", jdbc.parameters.get(7));
+        assertEquals(0, jdbc.executeUpdateCalls);
+        assertEquals(1, jdbc.executeBatchCalls);
+        assertEquals(1, jdbc.commitCalls);
+        assertEquals(List.of(JdbcFeatureOutputStore.INSERT_SQL), jdbc.preparedSqls);
+        assertEquals("feature-event-1", jdbc.batchParameters.get(0).get(1));
+        assertEquals(null, jdbc.batchParameters.get(0).get(2));
+        assertEquals("feature.bbo", jdbc.batchParameters.get(0).get(3));
+        assertEquals(2, jdbc.batchParameters.get(0).get(4));
+        assertEquals(null, jdbc.batchParameters.get(0).get(5));
+        assertEquals(new SqlNull(Types.BIGINT), jdbc.batchParameters.get(0).get(6));
+        assertEquals("{\"midpoint_micros\":123}", jdbc.batchParameters.get(0).get(7));
     }
 
     @Test
@@ -116,9 +119,12 @@ class JdbcFeatureOutputStoreTest {
 
         store.insertFeatureOutput(output);
 
-        assertEquals("canonical-1", jdbc.parameters.get(2));
-        assertEquals("MARKET-1", jdbc.parameters.get(5));
-        assertEquals(123456L, jdbc.parameters.get(6));
+        assertEquals("canonical-1", jdbc.batchParameters.get(0).get(2));
+        assertEquals("MARKET-1", jdbc.batchParameters.get(0).get(5));
+        assertEquals(123456L, jdbc.batchParameters.get(0).get(6));
+        assertEquals(1, jdbc.executeQueryCalls);
+        assertTrue(jdbc.preparedSqls.get(1).contains("market_feature_stats"));
+        assertEquals("MARKET-1", jdbc.parameters.get(1));
     }
 
     @Test
@@ -138,7 +144,10 @@ class JdbcFeatureOutputStoreTest {
         assertEquals(1, jdbc.commitCalls);
         assertEquals(0, jdbc.rollbackCalls);
         assertEquals(List.of(false, true), jdbc.autoCommitSetValues);
-        assertEquals(JdbcFeatureOutputStore.INSERT_SQL, jdbc.preparedSql);
+        assertEquals(JdbcFeatureOutputStore.INSERT_SQL, jdbc.preparedSqls.get(0));
+        assertTrue(jdbc.preparedSqls.get(1).contains("market_feature_stats"));
+        assertEquals(1, jdbc.executeQueryCalls);
+        assertEquals("M1", jdbc.parameters.get(1));
         assertEquals(2, jdbc.batchParameters.size());
         assertEquals("feature-event-1", jdbc.batchParameters.get(0).get(1));
         assertEquals("feature-event-2", jdbc.batchParameters.get(1).get(1));
@@ -223,7 +232,8 @@ class JdbcFeatureOutputStoreTest {
         private int executeBatchCalls;
         private int commitCalls;
         private int rollbackCalls;
-        private String preparedSql;
+        private int executeQueryCalls;
+        private final List<String> preparedSqls = new ArrayList<>();
         private final Map<Integer, Object> parameters = new HashMap<>();
         private final List<Map<Integer, Object>> batchParameters = new ArrayList<>();
         private final List<Boolean> autoCommitSetValues = new ArrayList<>();
@@ -255,7 +265,7 @@ class JdbcFeatureOutputStoreTest {
                     yield null;
                 }
                 case "prepareStatement" -> {
-                    preparedSql = (String) args[0];
+                    preparedSqls.add((String) args[0]);
                     yield preparedStatement();
                 }
                 case "close" -> null;
@@ -299,9 +309,26 @@ class JdbcFeatureOutputStoreTest {
                     }
                     yield new int[addBatchCalls];
                 }
+                case "executeQuery" -> {
+                    executeQueryCalls++;
+                    yield resultSet();
+                }
                 case "close" -> null;
                 default -> defaultValue(method.getReturnType());
             };
+        }
+
+        private ResultSet resultSet() {
+            InvocationHandler handler = (proxy, method, args) -> switch (method.getName()) {
+                case "next" -> false;
+                case "close" -> null;
+                default -> defaultValue(method.getReturnType());
+            };
+            return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] {ResultSet.class},
+                handler
+            );
         }
 
         private static Object defaultValue(Class<?> returnType) {

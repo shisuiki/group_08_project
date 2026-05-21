@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -35,11 +36,7 @@ public final class JdbcFeatureOutputStore implements FeatureOutputStore {
     public void insertFeatureOutput(FeatureOutputDbEvent output) throws Exception {
         Objects.requireNonNull(output, "output");
 
-        try (Connection connection = connectionFactory.openConnection();
-             PreparedStatement statement = connection.prepareStatement(INSERT_SQL)) {
-            bindOutput(statement, output);
-            statement.executeUpdate();
-        }
+        insertFeatureOutputBatch(List.of(output));
     }
 
     @Override
@@ -49,18 +46,18 @@ public final class JdbcFeatureOutputStore implements FeatureOutputStore {
             return;
         }
 
+        List<FeatureOutputDbEvent> normalizedOutputs = new ArrayList<>(outputs.size());
+        for (FeatureOutputDbEvent output : outputs) {
+            normalizedOutputs.add(Objects.requireNonNull(output, "output"));
+        }
+
         try (Connection connection = connectionFactory.openConnection()) {
             boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             Exception failure = null;
             try {
-                try (PreparedStatement statement = connection.prepareStatement(INSERT_SQL)) {
-                    for (FeatureOutputDbEvent output : outputs) {
-                        bindOutput(statement, Objects.requireNonNull(output, "output"));
-                        statement.addBatch();
-                    }
-                    statement.executeBatch();
-                }
+                insertOutputs(connection, normalizedOutputs);
+                JdbcMarketFeatureStatsStore.refreshMarkets(connection, marketTickers(normalizedOutputs));
                 connection.commit();
             } catch (Exception e) {
                 failure = e;
@@ -77,6 +74,30 @@ public final class JdbcFeatureOutputStore implements FeatureOutputStore {
                 }
             }
         }
+    }
+
+    static void insertOutputs(Connection connection, List<FeatureOutputDbEvent> outputs) throws SQLException {
+        Objects.requireNonNull(connection, "connection");
+        Objects.requireNonNull(outputs, "outputs");
+        if (outputs.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(INSERT_SQL)) {
+            for (FeatureOutputDbEvent output : outputs) {
+                bindOutput(statement, Objects.requireNonNull(output, "output"));
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    static List<String> marketTickers(List<FeatureOutputDbEvent> outputs) {
+        Objects.requireNonNull(outputs, "outputs");
+        List<String> tickers = new ArrayList<>(outputs.size());
+        for (FeatureOutputDbEvent output : outputs) {
+            tickers.add(Objects.requireNonNull(output, "output").marketTicker());
+        }
+        return JdbcMarketFeatureStatsStore.normalizeTickers(tickers);
     }
 
     static void bindOutput(PreparedStatement statement, FeatureOutputDbEvent output) throws SQLException {

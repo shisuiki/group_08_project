@@ -922,7 +922,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("long-poll fallback"));
         assertTrue(app.contains("fallback polling"));
         assertTrue(app.contains("latest_event_ts_ms"));
-        assertTrue(app.contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(app.contains("const MARKET_CATALOG_LIMIT = 200;"));
+        assertTrue(app.contains("marketCatalogGeneration"));
+        assertTrue(app.contains("marketCatalogAbortController"));
+        assertTrue(app.contains("ensureActiveMarketCatalogRequest"));
+        assertTrue(app.contains("isStaleMarketCatalogError"));
         assertTrue(app.contains("/api/markets/capabilities?"));
         assertTrue(app.contains("'/markets?' + params.join('&')"));
         assertTrue(app.contains("market-search"));
@@ -935,6 +939,11 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(app.contains("markets.markets.length > 0"));
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/operator/semantic-metadata/run"));
+        assertTrue(app.contains("requestSemanticMapLoad"));
+        assertTrue(app.contains("semanticMapDirty"));
+        assertTrue(app.contains("marketEntries.some(entry => entry.symbol === marketTicker)"));
+        assertFalse(app.contains("ensureSymbolOption"));
+        assertFalse(app.contains("loadSemanticMap();\n        loadCatalogSyncStatus();"));
         assertTrue(app.contains("/operator/catalog/sync"));
         assertTrue(app.contains("/operator/demo-orchestrator/run"));
         assertTrue(app.contains("renderProductModeSurface"));

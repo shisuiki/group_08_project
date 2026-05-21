@@ -57,6 +57,7 @@ class JdbcFeatureOutputProjectionStoreTest {
         assertEquals(0, jdbc.rollbackCalls);
         assertEquals(List.of(
             JdbcFeatureOutputStore.INSERT_SQL,
+            JdbcMarketFeatureStatsStore.refreshMarketsSql(1),
             JdbcFeaturePlantCursorStore.UPSERT_SQL
         ), jdbc.preparedSqls);
         assertEquals(2, jdbc.batchParameters.size());
@@ -65,7 +66,8 @@ class JdbcFeatureOutputProjectionStoreTest {
         assertEquals("{\"x\":1}", jdbc.batchParameters.get(0).get(7));
         assertEquals("feature-2", jdbc.batchParameters.get(1).get(1));
         assertEquals(new SqlNull(Types.BIGINT), jdbc.batchParameters.get(1).get(6));
-        Map<Integer, Object> cursorParams = jdbc.statementParameters.get(1);
+        assertEquals("M", jdbc.statementParameters.get(1).get(1));
+        Map<Integer, Object> cursorParams = jdbc.statementParameters.get(2);
         assertEquals("featureplant-prod", cursorParams.get(1));
         assertEquals(8L, cursorParams.get(2));
     }
@@ -100,6 +102,7 @@ class JdbcFeatureOutputProjectionStoreTest {
 
         assertEquals(List.of(
             JdbcFeatureOutputStore.INSERT_SQL,
+            JdbcMarketFeatureStatsStore.refreshMarketsSql(1),
             JdbcLatestMarketStateStore.UPSERT_SQL,
             JdbcFeaturePlantCursorStore.UPSERT_SQL
         ), jdbc.preparedSqls);
@@ -108,10 +111,11 @@ class JdbcFeatureOutputProjectionStoreTest {
         assertEquals(1, jdbc.commitCalls);
         assertEquals(0, jdbc.rollbackCalls);
         assertEquals("feature-1", jdbc.batchParameters.get(0).get(1));
+        assertEquals("M", jdbc.statementParameters.get(1).get(1));
         assertEquals("M", jdbc.batchParameters.get(1).get(1));
         assertEquals(11L, jdbc.batchParameters.get(1).get(4));
         assertEquals("{\"x\":1}", jdbc.batchParameters.get(1).get(9));
-        Map<Integer, Object> cursorParams = jdbc.statementParameters.get(2);
+        Map<Integer, Object> cursorParams = jdbc.statementParameters.get(3);
         assertEquals("featureplant-prod", cursorParams.get(1));
         assertEquals(11L, cursorParams.get(2));
     }

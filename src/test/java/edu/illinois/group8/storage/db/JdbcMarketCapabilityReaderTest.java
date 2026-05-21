@@ -91,11 +91,15 @@ class JdbcMarketCapabilityReaderTest {
 
         String summarySql = jdbc.preparedSqls.get(0).toLowerCase(Locale.ROOT);
         String pageSql = jdbc.preparedSqls.get(1).toLowerCase(Locale.ROOT);
+        assertTrue(pageSql.contains("from market_feature_stats"));
         assertTrue(pageSql.contains("full join market_metadata"));
         assertTrue(pageSql.contains("left join latest_market_state"));
         assertTrue(pageSql.contains("left join market_semantic_metadata"));
-        assertTrue(pageSql.contains("feature_name = 'feature.ticker_snapshot'"));
-        assertTrue(pageSql.contains("feature_name = 'feature.trade_tape'"));
+        assertTrue(pageSql.contains("coalesce(mfs.ticker_chart_count, 0) > 0"));
+        assertTrue(pageSql.contains("coalesce(mfs.trade_chart_count, 0) > 0"));
+        assertTrue(pageSql.contains("mfs.last_chart_ts_ms"));
+        assertTrue(pageSql.contains("market_feature_stats mfs"));
+        assertEquals(-1, pageSql.indexOf("from feature_outputs"));
         assertTrue(pageSql.contains("best_chart_source"));
         assertTrue(pageSql.contains("and chartable"));
         assertTrue(summarySql.contains("stale_quote_count"));
@@ -207,9 +211,12 @@ class JdbcMarketCapabilityReaderTest {
 
         assertEquals(summaryBindings.size(), placeholderCount(summarySql));
         assertEquals(pageBindings.size(), placeholderCount(pageSql));
-        assertTrue(summarySql.contains("jsonb_exists(\"values\", 'midpoint_micros')"));
-        assertTrue(pageSql.contains("jsonb_exists(\"values\", 'yes_bid_micros')"));
-        assertTrue(pageSql.contains("jsonb_exists(\"values\", 'yes_price_micros')"));
+        assertTrue(summarySql.contains("market_feature_stats"));
+        assertTrue(pageSql.contains("coalesce(mfs.feature_count, 0)"));
+        assertTrue(pageSql.contains("coalesce(mfs.bbo_chart_count, 0) > 0"));
+        assertTrue(pageSql.contains("mfs.last_chart_ts_ms"));
+        assertEquals(-1, summarySql.toLowerCase(Locale.ROOT).indexOf("from feature_outputs"));
+        assertEquals(-1, pageSql.toLowerCase(Locale.ROOT).indexOf("from feature_outputs"));
     }
 
     @Test

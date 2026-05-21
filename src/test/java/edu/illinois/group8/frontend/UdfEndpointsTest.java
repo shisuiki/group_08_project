@@ -493,7 +493,11 @@ class UdfEndpointsTest {
         assertTrue(css.headers().firstValue("content-type").orElse("").contains("text/css"));
         assertTrue(chart.headers().firstValue("content-type").orElse("").contains("text/javascript"));
         assertTrue(js.body().contains("/quotes/updates?symbols="));
-        assertTrue(js.body().contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(js.body().contains("const MARKET_CATALOG_LIMIT = 200;"));
+        assertTrue(js.body().contains("marketCatalogGeneration"));
+        assertTrue(js.body().contains("marketCatalogAbortController"));
+        assertTrue(js.body().contains("ensureActiveMarketCatalogRequest"));
+        assertTrue(js.body().contains("isStaleMarketCatalogError"));
         assertTrue(js.body().contains("/api/markets/capabilities?"));
         assertTrue(js.body().contains("market-capability-filter"));
         assertTrue(js.body().contains("market-page-state"));
@@ -546,6 +550,11 @@ class UdfEndpointsTest {
         assertTrue(js.body().contains("/api/semantic-metadata/treemap?"));
         assertTrue(js.body().contains("/api/semantic-metadata/markets?"));
         assertTrue(js.body().contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
+        assertTrue(js.body().contains("requestSemanticMapLoad"));
+        assertTrue(js.body().contains("semanticMapDirty"));
+        assertTrue(js.body().contains("marketEntries.some(entry => entry.symbol === marketTicker)"));
+        assertFalse(js.body().contains("ensureSymbolOption"));
+        assertFalse(js.body().contains("loadSemanticMap();\n        loadCatalogSyncStatus();"));
         assertTrue(js.body().contains("layoutSemanticLeafTreemap"));
         assertTrue(js.body().contains("semanticRenderableLeaves"));
         assertTrue(js.body().contains("SEMANTIC_RENDER_LEAF_LIMIT"));

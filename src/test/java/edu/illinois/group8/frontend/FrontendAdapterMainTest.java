@@ -416,7 +416,11 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("window.location.origin"));
         assertTrue(app.contains("/quotes?symbols="));
         assertTrue(app.contains("nextSequence < quoteSequence"));
-        assertTrue(app.contains("MARKET_CATALOG_LIMIT"));
+        assertTrue(app.contains("const MARKET_CATALOG_LIMIT = 200;"));
+        assertTrue(app.contains("marketCatalogGeneration"));
+        assertTrue(app.contains("marketCatalogAbortController"));
+        assertTrue(app.contains("ensureActiveMarketCatalogRequest"));
+        assertTrue(app.contains("isStaleMarketCatalogError"));
         assertTrue(app.contains("/api/markets/capabilities?"));
         assertTrue(app.contains("'/markets?' + params.join('&')"));
         assertTrue(app.contains("market-search"));
@@ -439,6 +443,11 @@ class FrontendAdapterMainTest {
         assertTrue(app.contains("/api/semantic-metadata/treemap?"));
         assertTrue(app.contains("/api/semantic-metadata/markets?"));
         assertTrue(app.contains("SEMANTIC_MAP_DEFAULT_LIMIT"));
+        assertTrue(app.contains("requestSemanticMapLoad"));
+        assertTrue(app.contains("semanticMapDirty"));
+        assertTrue(app.contains("marketEntries.some(entry => entry.symbol === marketTicker)"));
+        assertFalse(app.contains("ensureSymbolOption"));
+        assertFalse(app.contains("loadSemanticMap();\n        loadCatalogSyncStatus();"));
         assertTrue(app.contains("layoutSemanticLeafTreemap"));
         assertTrue(app.contains("semanticRenderableLeaves"));
         assertTrue(app.contains("Classified subset"));

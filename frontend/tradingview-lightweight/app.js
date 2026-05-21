@@ -8,7 +8,7 @@
     const QUOTES_UPDATE_RETRY_MS = 500;
     const HEALTH_POLL_MS = 5000;
     const MARKET_SEARCH_DEBOUNCE_MS = 250;
-    const MARKET_CATALOG_LIMIT = 5000;
+    const MARKET_CATALOG_LIMIT = 200;
     const MARKET_QUOTE_PROBE_LIMIT = 200;
     const SEMANTIC_MAP_DEFAULT_LIMIT = 200;
     const SEMANTIC_MAP_MAX_LIMIT = 500;
@@ -295,10 +295,15 @@
     let marketCatalogOffset = 0;
     let marketCapabilitySummary = null;
     let marketSearchTimer = null;
+    let marketCatalogGeneration = 0;
+    let marketCatalogAbortController = null;
     let semanticSearchTimer = null;
     let semanticMapGeneration = 0;
+    let semanticMarketDetailGeneration = 0;
+    let semanticMapDirty = true;
     let lastSemanticMapBody = null;
     let semanticActiveGroupKey = '';
+    let activeRole = 'markets';
     let catalogSyncStatusTimer = null;
     let semanticRunStatusTimer = null;
     let demoRunStatusTimer = null;
@@ -382,10 +387,21 @@
     }
 
     async function loadSymbols() {
+        const generation = ++marketCatalogGeneration;
+        if (marketCatalogAbortController) {
+            marketCatalogAbortController.abort();
+        }
+        marketCatalogAbortController = new AbortController();
+        const requestContext = {
+            generation,
+            signal: marketCatalogAbortController.signal
+        };
         setStatus('Loading market catalog...');
         try {
             const previousSymbol = dom.symbolSelect.value;
-            marketEntries = await loadMarketEntries();
+            const loadedEntries = await loadMarketEntries(requestContext);
+            ensureActiveMarketCatalogRequest(requestContext);
+            marketEntries = loadedEntries;
             populateSymbolDropdown(marketEntries, previousSymbol);
             renderMarketCatalog(marketEntries);
             if (marketEntries.length === 0) {
@@ -404,12 +420,15 @@
             setStatus(`Loaded ${marketEntries.length} market(s)`, 'ok');
             onSelectedSymbolChanged();
         } catch (err) {
+            if (isStaleMarketCatalogError(err)) {
+                return;
+            }
             renderMarketCatalogError(err.message);
             setStatus(`Failed to load markets: ${err.message}`, 'error');
         }
     }
 
-    async function loadMarketEntries() {
+    async function loadMarketEntries(requestContext) {
         const query = dom.marketSearch ? dom.marketSearch.value.trim() : '';
         const status = dom.marketStatusFilter ? dom.marketStatusFilter.value.trim() : '';
         const capability = dom.marketCapabilityFilter ? dom.marketCapabilityFilter.value.trim() : 'all';
@@ -425,7 +444,11 @@
             capabilityParams.push(`capability=${encodeURIComponent(capability)}`);
         }
         try {
-            const body = await fetchJson('/api/markets/capabilities?' + capabilityParams.join('&'));
+            const body = await fetchJson(
+                '/api/markets/capabilities?' + capabilityParams.join('&'),
+                { signal: requestContext.signal }
+            );
+            ensureActiveMarketCatalogRequest(requestContext);
             if (body && Array.isArray(body.markets)) {
                 const entries = body.markets.map(mapCapabilityMarketRow).filter(row => row.symbol);
                 marketCatalogTotal = Number(body.total_count || body.summary?.total_assets || entries.length) || entries.length;
@@ -435,8 +458,12 @@
                 return sortMarketEntries(entries);
             }
         } catch (err) {
+            if (isStaleMarketCatalogError(err)) {
+                throw err;
+            }
             console.warn('Falling back after /api/markets/capabilities failed', err);
         }
+        ensureActiveMarketCatalogRequest(requestContext);
         marketCapabilitySummary = null;
         renderCapabilitySummary(null);
         const params = [`limit=${MARKET_CATALOG_LIMIT}`];
@@ -447,30 +474,45 @@
             params.push(`status=${encodeURIComponent(status)}`);
         }
         try {
-            const markets = await fetchJson('/markets?' + params.join('&'));
+            const markets = await fetchJson('/markets?' + params.join('&'), { signal: requestContext.signal });
+            ensureActiveMarketCatalogRequest(requestContext);
             if (markets && Array.isArray(markets.markets) && markets.markets.length > 0) {
                 const entries = markets.markets.map(mapCatalogMarketRow).filter(row => row.symbol);
                 marketCatalogTotal = Number(markets.total_count || markets.count || entries.length) || entries.length;
-                return prioritizeQuotedMarkets(await mergeLatestStateMarkets(entries, query, status));
+                return (
+                    await prioritizeQuotedMarkets(
+                        await mergeLatestStateMarkets(entries, query, status, requestContext),
+                        requestContext
+                    )
+                ).slice(0, MARKET_CATALOG_LIMIT);
             }
             if (filtered) {
-                const symbols = await fetchJson('/symbols');
+                const symbols = await fetchJson('/symbols', { signal: requestContext.signal });
+                ensureActiveMarketCatalogRequest(requestContext);
                 const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
                 const entries = rows
                     .map(mapLatestStateSymbolRow)
                     .filter(row => row.symbol && latestStateMatchesFilters(row, query, status));
-                return prioritizeQuotedMarkets(sortMarketEntries(entries));
+                marketCatalogTotal = entries.length;
+                return (
+                    await prioritizeQuotedMarkets(sortMarketEntries(entries), requestContext)
+                ).slice(marketCatalogOffset, marketCatalogOffset + MARKET_CATALOG_LIMIT);
             }
         } catch (err) {
+            if (isStaleMarketCatalogError(err)) {
+                throw err;
+            }
             if (filtered) {
                 throw err;
             }
             console.warn('Falling back to /symbols after /markets failed', err);
         }
-        const symbols = await fetchJson('/symbols');
+        const symbols = await fetchJson('/symbols', { signal: requestContext.signal });
+        ensureActiveMarketCatalogRequest(requestContext);
         const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
-        marketCatalogTotal = rows.length;
-        return sortMarketEntries(rows.map(mapLatestStateSymbolRow).filter(row => row.symbol));
+        const entries = sortMarketEntries(rows.map(mapLatestStateSymbolRow).filter(row => row.symbol));
+        marketCatalogTotal = entries.length;
+        return entries.slice(marketCatalogOffset, marketCatalogOffset + MARKET_CATALOG_LIMIT);
     }
 
     function mapCatalogMarketRow(row) {
@@ -554,9 +596,10 @@
         };
     }
 
-    async function mergeLatestStateMarkets(entries, query, status) {
+    async function mergeLatestStateMarkets(entries, query, status, requestContext) {
         try {
-            const symbols = await fetchJson('/symbols');
+            const symbols = await fetchJson('/symbols', { signal: requestContext.signal });
+            ensureActiveMarketCatalogRequest(requestContext);
             const rows = (symbols && Array.isArray(symbols.symbols)) ? symbols.symbols : [];
             if (rows.length === 0) {
                 return entries;
@@ -583,6 +626,9 @@
             }
             return sortMarketEntries(Array.from(merged.values()));
         } catch (err) {
+            if (isStaleMarketCatalogError(err)) {
+                throw err;
+            }
             console.warn('Failed to merge latest-state markets into catalog', err);
             return entries;
         }
@@ -604,7 +650,7 @@
         ].some(value => String(value || '').toLowerCase().includes(needle));
     }
 
-    async function prioritizeQuotedMarkets(entries) {
+    async function prioritizeQuotedMarkets(entries, requestContext) {
         if (entries.length === 0) {
             return entries;
         }
@@ -613,8 +659,10 @@
         try {
             const body = await fetchJsonFromBase(
                 base,
-                `/quotes?symbols=${encodeURIComponent(symbols.join(','))}`
+                `/quotes?symbols=${encodeURIComponent(symbols.join(','))}`,
+                { signal: requestContext.signal }
             );
+            ensureActiveMarketCatalogRequest(requestContext);
             const quotes = new Map((body.quotes || []).map(quote => [quote.symbol, quote]));
             for (const entry of entries) {
                 const quote = quotes.get(entry.symbol);
@@ -624,6 +672,9 @@
             }
             return sortMarketEntries(entries);
         } catch (err) {
+            if (isStaleMarketCatalogError(err)) {
+                throw err;
+            }
             console.warn('Failed to prioritize markets by latest quote', err);
             return sortMarketEntries(entries);
         }
@@ -868,6 +919,20 @@
         }, MARKET_SEARCH_DEBOUNCE_MS);
     }
 
+    function ensureActiveMarketCatalogRequest(requestContext) {
+        if (!requestContext
+            || requestContext.generation !== marketCatalogGeneration
+            || requestContext.signal?.aborted === true) {
+            const error = new Error('stale market catalog request');
+            error.marketCatalogStale = true;
+            throw error;
+        }
+    }
+
+    function isStaleMarketCatalogError(error) {
+        return error?.marketCatalogStale === true || error?.name === 'AbortError';
+    }
+
     async function loadMarketDetails(symbol) {
         const base = adapterBase();
         const cached = marketEntries.find(entry => entry.symbol === symbol);
@@ -995,6 +1060,7 @@
 
     async function loadSemanticMap() {
         const generation = ++semanticMapGeneration;
+        semanticMapDirty = false;
         const base = adapterBase();
         const params = semanticMapParams();
         dom.semanticMapState.textContent = 'Loading semantic metadata...';
@@ -1011,6 +1077,13 @@
                 return;
             }
             renderSemanticMapError(err.message);
+        }
+    }
+
+    function requestSemanticMapLoad() {
+        semanticMapDirty = true;
+        if (activeRole === 'semantic') {
+            loadSemanticMap();
         }
     }
 
@@ -1291,11 +1364,13 @@
         if (!marketTicker) {
             return;
         }
-        ensureSymbolOption(marketTicker);
-        dom.symbolSelect.value = marketTicker;
         renderSemanticDetail({ market: marketTicker, group: groupKey });
-        onSelectedSymbolChanged();
-        await loadSemanticMarketDetails(marketTicker, groupKey);
+        if (marketEntries.some(entry => entry.symbol === marketTicker)) {
+            dom.symbolSelect.value = marketTicker;
+            onSelectedSymbolChanged();
+        }
+        const detailGeneration = ++semanticMarketDetailGeneration;
+        await loadSemanticMarketDetails(marketTicker, groupKey, detailGeneration);
     }
 
     function selectSemanticGroup(groupKey) {
@@ -1312,20 +1387,11 @@
         if (lastSemanticMapBody) {
             renderSemanticMap(lastSemanticMapBody);
         } else {
-            loadSemanticMap();
+            requestSemanticMapLoad();
         }
     }
 
-    function ensureSymbolOption(symbol) {
-        if (!Array.from(dom.symbolSelect.options).some(option => option.value === symbol)) {
-            const opt = document.createElement('option');
-            opt.value = symbol;
-            opt.textContent = symbol;
-            dom.symbolSelect.appendChild(opt);
-        }
-    }
-
-    async function loadSemanticMarketDetails(marketTicker, groupKey) {
+    async function loadSemanticMarketDetails(marketTicker, groupKey, detailGeneration) {
         const base = adapterBase();
         const params = [
             `market_ticker=${encodeURIComponent(marketTicker)}`,
@@ -1337,7 +1403,7 @@
         }
         try {
             const body = await fetchJsonFromBase(base, `/api/semantic-metadata/markets?${params.join('&')}`);
-            if (marketTicker !== dom.symbolSelect.value || base !== adapterBase()) {
+            if (detailGeneration !== semanticMarketDetailGeneration || base !== adapterBase()) {
                 return;
             }
             const row = Array.isArray(body.markets) ? body.markets[0] : null;
@@ -1452,7 +1518,7 @@
         }
         semanticSearchTimer = setTimeout(() => {
             semanticSearchTimer = null;
-            loadSemanticMap();
+            requestSemanticMapLoad();
         }, SEMANTIC_SEARCH_DEBOUNCE_MS);
     }
 
@@ -2060,7 +2126,7 @@
             : '';
         if (completionKey && completionKey !== lastSemanticRunCompletion) {
             lastSemanticRunCompletion = completionKey;
-            loadSemanticMap();
+            requestSemanticMapLoad();
         }
     }
 
@@ -2693,7 +2759,7 @@
             await loadOperatorStatus();
             if ((dom.demoRunAction.value || '').includes('semantic')) {
                 await loadSemanticRunStatus();
-                await loadSemanticMap();
+                requestSemanticMapLoad();
             }
             if ((dom.demoRunAction.value || '').includes('catalog')) {
                 await loadCatalogSyncStatus();
@@ -2994,6 +3060,7 @@
     }
 
     function setActiveRole(role) {
+        activeRole = role || 'markets';
         if (dom.dashboardShell) {
             dom.dashboardShell.dataset.activeRole = role;
         }
@@ -3014,7 +3081,9 @@
             });
         }
         if (role === 'semantic') {
-            loadSemanticMap();
+            if (semanticMapDirty || !lastSemanticMapBody) {
+                loadSemanticMap();
+            }
         }
     }
 
@@ -3057,21 +3126,21 @@
     dom.researchExportCsv.addEventListener('click', exportResearchCsv);
     dom.semanticGroupBy.addEventListener('change', () => {
         semanticActiveGroupKey = '';
-        loadSemanticMap();
+        requestSemanticMapLoad();
     });
     dom.semanticRenderMode.addEventListener('change', () => {
         semanticActiveGroupKey = '';
         if (lastSemanticMapBody) {
             renderSemanticMap(lastSemanticMapBody);
         } else {
-            loadSemanticMap();
+            requestSemanticMapLoad();
         }
     });
-    dom.semanticStatusFilter.addEventListener('change', loadSemanticMap);
-    dom.semanticLimit.addEventListener('change', loadSemanticMap);
+    dom.semanticStatusFilter.addEventListener('change', requestSemanticMapLoad);
+    dom.semanticLimit.addEventListener('change', requestSemanticMapLoad);
     dom.semanticTagFilter.addEventListener('input', scheduleSemanticMapLoad);
     dom.semanticSearch.addEventListener('input', scheduleSemanticMapLoad);
-    dom.semanticRefresh.addEventListener('click', loadSemanticMap);
+    dom.semanticRefresh.addEventListener('click', requestSemanticMapLoad);
     dom.semanticDrillup.addEventListener('click', clearSemanticGroupDrilldown);
     dom.catalogSyncStart.addEventListener('click', startCatalogSync);
     dom.catalogSyncRefresh.addEventListener('click', loadCatalogSyncStatus);
@@ -3095,7 +3164,7 @@
         loadHealth();
         loadOpsTelemetry();
         loadOperatorStatus();
-        loadSemanticMap();
+        requestSemanticMapLoad();
         loadCatalogSyncStatus();
         loadSemanticRunStatus();
         loadDemoOrchestratorStatus();
@@ -3112,7 +3181,6 @@
         loadHealth();
         loadOpsTelemetry();
         loadOperatorStatus();
-        loadSemanticMap();
         loadCatalogSyncStatus();
         loadSemanticRunStatus();
         loadDemoOrchestratorStatus();

@@ -12,92 +12,18 @@ import java.util.Objects;
 public final class JdbcMarketCapabilityReader implements MarketCapabilityReader {
     static final long LIVE_QUOTE_STALE_AFTER_MS = 15_000L;
     private static final String TABLE_NAME =
-        "market_metadata + latest_market_state + feature_outputs + market_semantic_metadata";
+        "market_metadata + latest_market_state + market_feature_stats + market_semantic_metadata";
     private static final String CTE_SQL = """
-        with feature_symbols as (
-            select distinct market_ticker
-            from feature_outputs
-            where market_ticker is not null
-              and market_ticker <> ''
-        ),
-        feature_counts as (
+        with universe as (
             select
-                market_ticker,
-                count(*) as feature_count,
-                count(*) filter (where feature_name = 'feature.bbo') as bbo_sample_count,
-                count(*) filter (where feature_name = 'feature.trade_tape') as trade_sample_count,
-                count(*) filter (where feature_name = 'feature.ticker_snapshot') as ticker_sample_count,
-                count(*) filter (
-                    where feature_name = 'feature.bbo'
-                      and event_ts_ms is not null
-                      and jsonb_exists("values", 'midpoint_micros')
-                ) as bbo_chart_count,
-                count(*) filter (
-                    where feature_name = 'feature.ticker_snapshot'
-                      and event_ts_ms is not null
-                      and (
-                          jsonb_exists("values", 'price_micros')
-                          or (jsonb_exists("values", 'yes_bid_micros')
-                              and jsonb_exists("values", 'yes_ask_micros'))
-                      )
-                ) as ticker_chart_count,
-                count(*) filter (
-                    where feature_name = 'feature.trade_tape'
-                      and event_ts_ms is not null
-                      and (jsonb_exists("values", 'yes_price_micros')
-                           or jsonb_exists("values", 'no_price_micros'))
-                ) as trade_chart_count,
-                count(*) filter (
-                    where feature_name = 'feature.bbo'
-                      and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000)
-                      and jsonb_exists("values", 'midpoint_micros')
-                ) + count(*) filter (
-                    where feature_name = 'feature.ticker_snapshot'
-                      and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000)
-                      and (
-                          jsonb_exists("values", 'price_micros')
-                          or (jsonb_exists("values", 'yes_bid_micros')
-                              and jsonb_exists("values", 'yes_ask_micros'))
-                      )
-                ) + count(*) filter (
-                    where feature_name = 'feature.trade_tape'
-                      and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000)
-                      and (jsonb_exists("values", 'yes_price_micros')
-                           or jsonb_exists("values", 'no_price_micros'))
-                ) as bbo_1h_count,
-                count(*) filter (
-                    where feature_name = 'feature.bbo'
-                      and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000)
-                      and jsonb_exists("values", 'midpoint_micros')
-                ) + count(*) filter (
-                    where feature_name = 'feature.ticker_snapshot'
-                      and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000)
-                      and (
-                          jsonb_exists("values", 'price_micros')
-                          or (jsonb_exists("values", 'yes_bid_micros')
-                              and jsonb_exists("values", 'yes_ask_micros'))
-                      )
-                ) + count(*) filter (
-                    where feature_name = 'feature.trade_tape'
-                      and event_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000)
-                      and (jsonb_exists("values", 'yes_price_micros')
-                           or jsonb_exists("values", 'no_price_micros'))
-                ) as bbo_24h_count
-            from feature_outputs
-            where market_ticker is not null
-              and market_ticker <> ''
-            group by market_ticker
-        ),
-        universe as (
-            select
-                coalesce(mm.market_ticker, fs.market_ticker) as market_ticker,
+                coalesce(mm.market_ticker, mfs.market_ticker) as market_ticker,
                 mm.event_ticker,
                 mm.series_ticker,
                 coalesce(mm.status, 'indexed') as status,
                 case when mm.market_ticker is null then 'feature_outputs' else 'market_metadata' end as catalog_source
-            from feature_symbols fs
+            from market_feature_stats mfs
             full join market_metadata mm
-                on mm.market_ticker = fs.market_ticker
+                on mm.market_ticker = mfs.market_ticker
         ),
         enriched as (
             select
@@ -131,33 +57,45 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                         then 'live_quote'
                     else 'stale_quote'
                 end as quote_status,
-                coalesce(fc.feature_count, 0) as feature_count,
-                coalesce(fc.bbo_sample_count, 0) as bbo_sample_count,
-                coalesce(fc.trade_sample_count, 0) as trade_sample_count,
-                coalesce(fc.ticker_sample_count, 0) as ticker_sample_count,
-                (coalesce(fc.bbo_chart_count, 0) > 0) as has_bbo_history,
-                (coalesce(fc.bbo_chart_count, 0) > 0) as chartable_from_bbo,
-                (coalesce(fc.ticker_chart_count, 0) > 0) as chartable_from_ticker_snapshot,
-                (coalesce(fc.trade_chart_count, 0) > 0) as chartable_from_trade_tape,
+                coalesce(mfs.feature_count, 0) as feature_count,
+                coalesce(mfs.bbo_sample_count, 0) as bbo_sample_count,
+                coalesce(mfs.trade_sample_count, 0) as trade_sample_count,
+                coalesce(mfs.ticker_sample_count, 0) as ticker_sample_count,
+                (coalesce(mfs.bbo_chart_count, 0) > 0) as has_bbo_history,
+                (coalesce(mfs.bbo_chart_count, 0) > 0) as chartable_from_bbo,
+                (coalesce(mfs.ticker_chart_count, 0) > 0) as chartable_from_ticker_snapshot,
+                (coalesce(mfs.trade_chart_count, 0) > 0) as chartable_from_trade_tape,
                 case
-                    when coalesce(fc.bbo_chart_count, 0) > 0 then 'bbo'
-                    when coalesce(fc.ticker_chart_count, 0) > 0 then 'ticker_snapshot'
-                    when coalesce(fc.trade_chart_count, 0) > 0 then 'trade_tape'
+                    when coalesce(mfs.bbo_chart_count, 0) > 0 then 'bbo'
+                    when coalesce(mfs.ticker_chart_count, 0) > 0 then 'ticker_snapshot'
+                    when coalesce(mfs.trade_chart_count, 0) > 0 then 'trade_tape'
                     else null
                 end as best_chart_source,
-                (coalesce(fc.bbo_1h_count, 0) > 0) as chartable_1h,
-                (coalesce(fc.bbo_24h_count, 0) > 0) as chartable_24h,
+                coalesce(
+                    mfs.last_chart_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000),
+                    false
+                ) as chartable_1h,
+                coalesce(
+                    mfs.last_chart_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000),
+                    false
+                ) as chartable_24h,
                 (
-                    coalesce(fc.bbo_chart_count, 0) > 0
-                    or coalesce(fc.ticker_chart_count, 0) > 0
-                    or coalesce(fc.trade_chart_count, 0) > 0
+                    coalesce(mfs.bbo_chart_count, 0) > 0
+                    or coalesce(mfs.ticker_chart_count, 0) > 0
+                    or coalesce(mfs.trade_chart_count, 0) > 0
                 ) as chartable,
                 case
-                    when coalesce(fc.bbo_1h_count, 0) > 0 then 'chartable_1h'
-                    when coalesce(fc.bbo_24h_count, 0) > 0 then 'chartable_24h'
-                    when coalesce(fc.bbo_chart_count, 0) > 0
-                      or coalesce(fc.ticker_chart_count, 0) > 0
-                      or coalesce(fc.trade_chart_count, 0) > 0 then 'chartable_history'
+                    when coalesce(
+                        mfs.last_chart_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 3600000),
+                        false
+                    ) then 'chartable_1h'
+                    when coalesce(
+                        mfs.last_chart_ts_ms >= ((extract(epoch from now()) * 1000)::bigint - 86400000),
+                        false
+                    ) then 'chartable_24h'
+                    when coalesce(mfs.bbo_chart_count, 0) > 0
+                      or coalesce(mfs.ticker_chart_count, 0) > 0
+                      or coalesce(mfs.trade_chart_count, 0) > 0 then 'chartable_history'
                     when lms.last_event_ts_ms is not null and (
                         lms.midpoint_micros is not null
                         or lms.best_bid_micros is not null
@@ -166,9 +104,9 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
                     else 'not_chartable'
                 end as chart_status,
                 case
-                    when coalesce(fc.bbo_chart_count, 0) > 0 then 'bbo_history_available'
-                    when coalesce(fc.ticker_chart_count, 0) > 0 then 'ticker_snapshot_history_available'
-                    when coalesce(fc.trade_chart_count, 0) > 0 then 'trade_tape_history_available'
+                    when coalesce(mfs.bbo_chart_count, 0) > 0 then 'bbo_history_available'
+                    when coalesce(mfs.ticker_chart_count, 0) > 0 then 'ticker_snapshot_history_available'
+                    when coalesce(mfs.trade_chart_count, 0) > 0 then 'trade_tape_history_available'
                     when lms.last_event_ts_ms is not null and (
                         lms.midpoint_micros is not null
                         or lms.best_bid_micros is not null
@@ -184,8 +122,8 @@ public final class JdbcMarketCapabilityReader implements MarketCapabilityReader 
             from universe u
             left join latest_market_state lms
                 on lms.market_ticker = u.market_ticker
-            left join feature_counts fc
-                on fc.market_ticker = u.market_ticker
+            left join market_feature_stats mfs
+                on mfs.market_ticker = u.market_ticker
             left join market_semantic_metadata smm
                 on smm.market_ticker = u.market_ticker
                and smm.taxonomy_version = ?

@@ -53,7 +53,8 @@ public final class JdbcFeatureOutputProjectionStore implements FeatureOutputProj
             connection.setAutoCommit(false);
             Exception failure = null;
             try {
-                insertOutputs(connection, outputs);
+                JdbcFeatureOutputStore.insertOutputs(connection, outputs);
+                JdbcMarketFeatureStatsStore.refreshMarkets(connection, JdbcFeatureOutputStore.marketTickers(outputs));
                 if (!latestStates.isEmpty()) {
                     JdbcLatestMarketStateStore.upsertLatestMarketStates(connection, latestStates);
                 }
@@ -73,19 +74,6 @@ public final class JdbcFeatureOutputProjectionStore implements FeatureOutputProj
                     failure.addSuppressed(e);
                 }
             }
-        }
-    }
-
-    private static void insertOutputs(Connection connection, List<FeatureOutputDbEvent> outputs) throws SQLException {
-        if (outputs.isEmpty()) {
-            return;
-        }
-        try (PreparedStatement statement = connection.prepareStatement(JdbcFeatureOutputStore.INSERT_SQL)) {
-            for (FeatureOutputDbEvent output : outputs) {
-                JdbcFeatureOutputStore.bindOutput(statement, Objects.requireNonNull(output, "output"));
-                statement.addBatch();
-            }
-            statement.executeBatch();
         }
     }
 
