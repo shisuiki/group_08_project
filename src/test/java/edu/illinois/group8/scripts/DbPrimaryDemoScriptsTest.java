@@ -438,6 +438,8 @@ class DbPrimaryDemoScriptsTest {
         assertTrue(probe.contains("LATEST_NON_SMOKE_CANONICAL_AFTER_SQL"));
         assertTrue(probe.contains("FEATURE_OUTPUTS_FOR_SOURCE_EVENT_SQL"));
         assertTrue(probe.contains("LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL"));
+        assertTrue(probe.contains("fo.feature_name = 'feature.bbo'"));
+        assertTrue(probe.contains("ce.stream_name = 'derived.top_of_book'"));
         assertTrue(script.contains("if [ \"$cursor_before\" -gt \"$max_commit_before\" ]; then"));
         assertTrue(script.contains("check_pipeline_reliability_snapshot"));
         assertTrue(script.contains("if [ \"$seeded_count\" -ne 3 ] || [ \"$target_commit_seq\" -le \"$cursor_before\" ]; then"));

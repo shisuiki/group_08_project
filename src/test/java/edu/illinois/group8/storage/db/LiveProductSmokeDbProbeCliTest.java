@@ -227,6 +227,17 @@ class LiveProductSmokeDbProbeCliTest {
     }
 
     @Test
+    void latestLiveFeatureSqlTargetsFrontendVisibleBboReadModel() {
+        String sql = LiveProductSmokeDbProbe.LATEST_NON_SMOKE_FEATURE_OUTPUT_AFTER_SQL.toLowerCase(Locale.ROOT);
+
+        assertTrue(sql.contains("from feature_outputs"));
+        assertTrue(sql.contains("join canonical_events"));
+        assertTrue(sql.contains("fo.feature_name = 'feature.bbo'"));
+        assertTrue(sql.contains("ce.stream_name = 'derived.top_of_book'"));
+        assertTrue(sql.contains("not like 'live-product-smoke-%'"));
+    }
+
+    @Test
     void probePipelineReliabilitySnapshotSummarizesBoundedProgress() {
         RecordingJdbc jdbc = new RecordingJdbc()
             .withRows(

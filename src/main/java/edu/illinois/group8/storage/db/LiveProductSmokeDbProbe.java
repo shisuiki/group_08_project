@@ -74,6 +74,8 @@ public final class LiveProductSmokeDbProbe {
         where ce.canonical_commit_seq > ?
           and ce.event_id not like 'live-product-smoke-%'
           and fo.source_event_id not like 'live-product-smoke-%'
+          and fo.feature_name = 'feature.bbo'
+          and ce.stream_name = 'derived.top_of_book'
         order by ce.canonical_commit_seq desc, fo.created_at desc, fo.feature_event_id desc
         limit 1
         """;
