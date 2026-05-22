@@ -2344,7 +2344,10 @@
             return 'hsl(210, 20%, 30%)';
         }
         const pct = semanticPriceChangePct(leaf);
-        if (Number.isFinite(pct) && pct !== 0) {
+        if (Number.isFinite(pct)) {
+            if (pct === 0) {
+                return 'hsl(216, 10%, 30%)';
+            }
             const intensity = Math.min(1, Math.abs(pct) / 5);
             const saturation = Math.round(32 + intensity * 44);
             const lightness = Math.round(29 + intensity * 15);
@@ -2353,7 +2356,10 @@
                 : `hsl(0, ${saturation}%, ${lightness}%)`;
         }
         const changeMicros = Number(semanticPriceChange24hMicros(leaf));
-        if (!Number.isFinite(changeMicros) || changeMicros === 0) {
+        if (Number.isFinite(changeMicros) && changeMicros === 0) {
+            return 'hsl(216, 10%, 30%)';
+        }
+        if (!Number.isFinite(changeMicros)) {
             const midpoint = semanticCurrentMidpointMicros(leaf);
             const midpointTilt = Number.isFinite(midpoint) && midpoint > 0
                 ? (midpoint - 500_000) / 500_000
