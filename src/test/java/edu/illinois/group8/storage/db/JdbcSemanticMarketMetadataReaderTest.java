@@ -64,6 +64,10 @@ class JdbcSemanticMarketMetadataReaderTest {
         assertTrue(sql.contains("lms.last_canonical_commit_seq"));
         assertTrue(sql.contains("nullif(lms.open_interest, 0)"));
         assertTrue(sql.contains("open_interest_fp"));
+        assertTrue(sql.contains("catalog_current_midpoint_micros"));
+        assertTrue(sql.contains("catalog_reference_midpoint_micros"));
+        assertTrue(sql.contains("previous_price_dollars"));
+        assertTrue(sql.contains("coalesce(midpoint_micros, catalog_current_midpoint_micros)"));
         assertTrue(sql.contains("last_canonical_commit_seq desc nulls last"));
         assertTrue(sql.contains("limit ?"));
         assertFalse(sql.contains("raw_response"));

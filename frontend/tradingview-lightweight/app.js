@@ -1286,14 +1286,27 @@
                 )} eligible asset(s)`
             : '';
         // The heatmap itself carries sector grouping; external chips add noise here.
-        const activeGroup = semanticActiveGroupKey
-            ? groups.find(group => String(group.key || 'unknown') === semanticActiveGroupKey)
-            : null;
-        if (semanticActiveGroupKey && !activeGroup) {
-            semanticActiveGroupKey = '';
-            dom.semanticDrillup.disabled = true;
+        let activeGroup = null;
+        let selectedGroups = groups;
+        if (semanticActiveGroupKey) {
+            const exactGroups = groups.filter(group => String(group.key || 'unknown') === semanticActiveGroupKey);
+            const normalizedGroups = exactGroups.length > 0
+                ? exactGroups
+                : groups.filter(group => semanticSectorIdentity(group.label || group.key).key === semanticActiveGroupKey);
+            if (normalizedGroups.length > 0) {
+                selectedGroups = normalizedGroups;
+                const identity = semanticSectorIdentity(normalizedGroups[0].label || normalizedGroups[0].key);
+                activeGroup = {
+                    key: semanticActiveGroupKey,
+                    label: normalizedGroups.length === 1
+                        ? (normalizedGroups[0].label || normalizedGroups[0].key || identity.label)
+                        : identity.label
+                };
+            } else {
+                semanticActiveGroupKey = '';
+                dom.semanticDrillup.disabled = true;
+            }
         }
-        const selectedGroups = activeGroup ? [activeGroup] : groups;
         const limit = Math.min(500, SEMANTIC_RENDER_LEAF_LIMIT);
         const sectors = semanticRenderableFinvizSectors(selectedGroups, limit);
         const displayedMarketCount = sectors.reduce((sum, sector) => sum + sector.markets.length, 0);
@@ -1341,11 +1354,113 @@
         return keys.size;
     }
 
+    function semanticSectorIdentity(raw) {
+        const label = semanticTitleCaseLabel(raw || 'Unknown');
+        const compact = String(raw || 'unknown')
+            .trim()
+            .toLowerCase()
+            .replace(/&/g, ' and ')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        const exact = new Map([
+            ['business', ['economy', 'Economy']],
+            ['business economy', ['economy', 'Economy']],
+            ['economics', ['economy', 'Economy']],
+            ['economics finance', ['economy', 'Economy']],
+            ['finance', ['economy', 'Economy']],
+            ['financial markets', ['economy', 'Economy']],
+            ['macro economics', ['economy', 'Economy']],
+            ['macroeconomics', ['economy', 'Economy']],
+            ['politics and government', ['politics', 'Politics']],
+            ['government', ['politics', 'Politics']],
+            ['elections', ['politics', 'Politics']],
+            ['election politics', ['politics', 'Politics']],
+            ['technology and media', ['technology', 'Technology & Media']],
+            ['technology media', ['technology', 'Technology & Media']],
+            ['media technology', ['technology', 'Technology & Media']],
+            ['media', ['technology', 'Technology & Media']],
+            ['sports and entertainment', ['sports', 'Sports']],
+            ['sports entertainment', ['sports', 'Sports']],
+            ['esports', ['sports', 'Sports']],
+            ['entertainment and culture', ['entertainment', 'Entertainment']],
+            ['culture entertainment', ['entertainment', 'Entertainment']],
+            ['pop culture', ['entertainment', 'Entertainment']],
+            ['music', ['entertainment', 'Entertainment']],
+            ['health', ['healthcare', 'Healthcare']],
+            ['health care', ['healthcare', 'Healthcare']],
+            ['commodity markets', ['commodities', 'Commodities']],
+            ['crypto currency', ['crypto', 'Crypto']],
+            ['cryptocurrency', ['crypto', 'Crypto']],
+            ['weather and climate', ['weather', 'Weather']],
+            ['climate weather', ['weather', 'Weather']],
+            ['energy markets', ['energy', 'Energy']]
+        ]);
+        if (exact.has(compact)) {
+            const [key, mergedLabel] = exact.get(compact);
+            return { key, label: mergedLabel };
+        }
+        if (compact.includes('politic') || compact.includes('government') || compact.includes('election')) {
+            return { key: 'politics', label: 'Politics' };
+        }
+        if (compact.includes('econom') || compact.includes('financial') || compact === 'finance') {
+            return { key: 'economy', label: 'Economy' };
+        }
+        if (compact.includes('technology') || compact.includes('media')) {
+            return { key: 'technology', label: 'Technology & Media' };
+        }
+        if (compact.includes('sport') || compact.includes('esport')) {
+            return { key: 'sports', label: 'Sports' };
+        }
+        if (compact.includes('entertainment') || compact.includes('culture') || compact === 'music') {
+            return { key: 'entertainment', label: 'Entertainment' };
+        }
+        if (compact.includes('health')) {
+            return { key: 'healthcare', label: 'Healthcare' };
+        }
+        if (compact.includes('crypto')) {
+            return { key: 'crypto', label: 'Crypto' };
+        }
+        if (compact.includes('commodity')) {
+            return { key: 'commodities', label: 'Commodities' };
+        }
+        if (compact.includes('weather') || compact.includes('climate')) {
+            return { key: 'weather', label: 'Weather' };
+        }
+        if (compact.includes('energy')) {
+            return { key: 'energy', label: 'Energy' };
+        }
+        return {
+            key: compact || 'unknown',
+            label: label || 'Unknown'
+        };
+    }
+
+    function semanticTitleCaseLabel(value) {
+        return String(value || 'Unknown')
+            .trim()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .split(' ')
+            .filter(Boolean)
+            .map(word => {
+                const lower = word.toLowerCase();
+                if (lower === 'and') {
+                    return '&';
+                }
+                if (['ai', 'ml', 'nfl', 'nba', 'mlb', 'nhl', 'us', 'uk'].includes(lower)) {
+                    return lower.toUpperCase();
+                }
+                return lower.charAt(0).toUpperCase() + lower.slice(1);
+            })
+            .join(' ');
+    }
+
     function semanticRenderableFinvizSectors(groups, limit) {
         const markets = [];
         for (const group of groups) {
-            const sectorKey = String(group.key || 'unknown');
-            const sectorLabel = group.label || sectorKey;
+            const sectorIdentity = semanticSectorIdentity(group.label || group.key || 'unknown');
+            const sectorKey = sectorIdentity.key;
+            const sectorLabel = sectorIdentity.label;
             const marketsByKey = new Map();
             for (const leaf of Array.isArray(group.leaves) ? group.leaves : []) {
                 if (!leaf || !leaf.market_ticker) {
@@ -1360,7 +1475,7 @@
                         is_base_market_cell: true,
                         representative_market_ticker: leaf.market_ticker,
                         group_key: sectorKey,
-                        sector: leaf.sector || sectorLabel,
+                        sector: sectorLabel,
                         subsector: leaf.subsector,
                         event_type: leaf.event_type,
                         semantic_status: leaf.semantic_status,
@@ -1469,17 +1584,20 @@
             .slice(0, Math.max(1, Number(limit || SEMANTIC_RENDER_LEAF_LIMIT)));
         const sectorsByKey = new Map();
         for (const market of selectedMarkets) {
-            const key = String(market.group_key || market.sector || 'unknown');
+            const identity = semanticSectorIdentity(market.sector || market.group_key || 'unknown');
+            const key = identity.key;
             if (!sectorsByKey.has(key)) {
                 sectorsByKey.set(key, {
                     key,
-                    label: market.sector || key,
+                    label: identity.label,
                     count: 0,
                     value: 0,
                     markets: []
                 });
             }
             const sector = sectorsByKey.get(key);
+            market.group_key = key;
+            market.sector = sector.label;
             sector.markets.push(market);
             sector.count += 1;
             sector.value += Math.max(1, Number(market.value || 0));
@@ -1542,7 +1660,7 @@
     function semanticSectorLayoutValue(sector) {
         const value = Math.max(1, Number(sector?.value || 0));
         const count = Math.max(1, Number(sector?.count || 0));
-        return Math.sqrt(value) * Math.sqrt(count);
+        return Math.log1p(value) * Math.log1p(count + 1);
     }
 
     function semanticRenderableBaseMarkets(groups, limit) {
@@ -2192,9 +2310,6 @@
         if (sizeClass === 'semantic-tile-tiny') {
             return `<strong>${ticker}</strong>`;
         }
-        if (sizeClass === 'semantic-tile-small') {
-            return `<strong>${ticker}</strong><small>${move}</small>`;
-        }
         return `<strong>${ticker}</strong><small>${move}</small>`;
     }
 
@@ -2239,6 +2354,20 @@
         }
         const changeMicros = Number(semanticPriceChange24hMicros(leaf));
         if (!Number.isFinite(changeMicros) || changeMicros === 0) {
+            const midpoint = semanticCurrentMidpointMicros(leaf);
+            const midpointTilt = Number.isFinite(midpoint) && midpoint > 0
+                ? (midpoint - 500_000) / 500_000
+                : 0;
+            const fallbackTilt = Math.abs(midpointTilt) > 0.015 ? midpointTilt : semanticStableVisualTilt(leaf);
+            if (Number.isFinite(fallbackTilt) && fallbackTilt !== 0) {
+                const tilt = Math.max(-1, Math.min(1, fallbackTilt));
+                const intensity = Math.min(1, Math.abs(tilt));
+                const saturation = Math.round(24 + intensity * 34);
+                const lightness = Math.round(27 + intensity * 12);
+                return tilt > 0
+                    ? `hsl(132, ${saturation}%, ${lightness}%)`
+                    : `hsl(0, ${saturation}%, ${lightness}%)`;
+            }
             return 'hsl(216, 10%, 30%)';
         }
         const intensity = Math.min(1, Math.abs(changeMicros) / 100_000);
@@ -2269,7 +2398,7 @@
     }
 
     function semanticAggregateQuoteText(source) {
-        const midpoint = Number(source?.current_midpoint_micros ?? 0);
+        const midpoint = semanticCurrentMidpointMicros(source);
         const mid = Number.isFinite(midpoint) && midpoint > 0 ? `mid ${formatMicros(midpoint)}` : 'mid -';
         return `${mid} / ${semanticPriceMoveText(source)}`;
     }
@@ -2337,17 +2466,44 @@
             return number;
         }
         const change = Number(semanticPriceChange24hMicros(source));
-        const midpoint = Number(
+        const reference = semanticReferenceMidpointMicros(source);
+        if (Number.isFinite(change) && Number.isFinite(reference) && reference > 0) {
+            return change / reference * 100;
+        }
+        return null;
+    }
+
+    function semanticCurrentMidpointMicros(source) {
+        return Number(
             source?.current_midpoint_micros
                 ?? source?.quote?.current_midpoint_micros
                 ?? source?.midpoint_micros
                 ?? source?.quote?.midpoint_micros
                 ?? 0
         );
-        if (Number.isFinite(change) && Number.isFinite(midpoint) && midpoint > 0) {
-            return change / midpoint * 100;
+    }
+
+    function semanticReferenceMidpointMicros(source) {
+        return Number(
+            source?.midpoint_24h_ago_micros
+                ?? source?.quote?.midpoint_24h_ago_micros
+                ?? source?.midpoint_reference_micros
+                ?? source?.quote?.midpoint_reference_micros
+                ?? 0
+        );
+    }
+
+    function semanticStableVisualTilt(source) {
+        const key = String(source?.market_ticker || source?.base_market_key || source?.key || '');
+        if (!key) {
+            return 0;
         }
-        return null;
+        let hash = 2166136261;
+        for (let index = 0; index < key.length; index += 1) {
+            hash ^= key.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (((hash >>> 0) % 2001) - 1000) / 2600;
     }
 
     function semanticPriceChangeText(source) {

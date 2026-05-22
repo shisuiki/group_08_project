@@ -54,6 +54,34 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
                     else null
                 end
             ) as open_interest,
+            coalesce(
+                case
+                    when (mm.market_payload ->> 'yes_bid_dollars') ~ '^[0-9]+(\\.[0-9]+)?$'
+                      and (mm.market_payload ->> 'yes_ask_dollars') ~ '^[0-9]+(\\.[0-9]+)?$'
+                        then round((((mm.market_payload ->> 'yes_bid_dollars')::numeric
+                            + (mm.market_payload ->> 'yes_ask_dollars')::numeric) / 2) * 1000000)::bigint
+                    else null
+                end,
+                case
+                    when (mm.market_payload ->> 'last_price_dollars') ~ '^[0-9]+(\\.[0-9]+)?$'
+                        then round((mm.market_payload ->> 'last_price_dollars')::numeric * 1000000)::bigint
+                    else null
+                end
+            ) as catalog_current_midpoint_micros,
+            coalesce(
+                case
+                    when (mm.market_payload ->> 'previous_price_dollars') ~ '^[0-9]+(\\.[0-9]+)?$'
+                        then round((mm.market_payload ->> 'previous_price_dollars')::numeric * 1000000)::bigint
+                    else null
+                end,
+                case
+                    when (mm.market_payload ->> 'previous_yes_bid_dollars') ~ '^[0-9]+(\\.[0-9]+)?$'
+                      and (mm.market_payload ->> 'previous_yes_ask_dollars') ~ '^[0-9]+(\\.[0-9]+)?$'
+                        then round((((mm.market_payload ->> 'previous_yes_bid_dollars')::numeric
+                            + (mm.market_payload ->> 'previous_yes_ask_dollars')::numeric) / 2) * 1000000)::bigint
+                    else null
+                end
+            ) as catalog_reference_midpoint_micros,
             lms.updated_at as latest_state_updated_at,
             case when lms.updated_at is null
                 then null
@@ -130,11 +158,13 @@ public final class JdbcSemanticMarketMetadataReader implements SemanticMarketMet
             midpoint_micros,
             open_interest,
             sum(greatest(coalesce(open_interest, 0), 0)) over (partition by base_market_key) as aggregate_open_interest,
-            midpoint_micros as current_midpoint_micros,
-            midpoint_24h_ago_micros,
-            case when midpoint_micros is null or midpoint_24h_ago_micros is null
+            coalesce(midpoint_micros, catalog_current_midpoint_micros) as current_midpoint_micros,
+            coalesce(midpoint_24h_ago_micros, catalog_reference_midpoint_micros) as midpoint_24h_ago_micros,
+            case when coalesce(midpoint_micros, catalog_current_midpoint_micros) is null
+                  or coalesce(midpoint_24h_ago_micros, catalog_reference_midpoint_micros) is null
                 then null
-                else midpoint_micros - midpoint_24h_ago_micros
+                else coalesce(midpoint_micros, catalog_current_midpoint_micros)
+                    - coalesce(midpoint_24h_ago_micros, catalog_reference_midpoint_micros)
             end as price_change_24h_micros,
             latest_state_updated_at,
             latest_state_age_ms
